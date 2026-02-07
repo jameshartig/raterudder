@@ -1,98 +1,28 @@
 package server
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"testing/fstest"
-	"time"
 
 	"github.com/jameshartig/autoenergy/pkg/controller"
 	"github.com/jameshartig/autoenergy/pkg/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
-// Mock implementations
-type mockUtility struct {
-	price types.Price
-}
-
-func (m *mockUtility) GetCurrentPrice(ctx context.Context) (types.Price, error) {
-	return m.price, nil
-}
-func (m *mockUtility) LastConfirmedPrice(ctx context.Context) (types.Price, error) {
-	return m.price, nil
-}
-func (m *mockUtility) GetFuturePrices(ctx context.Context) ([]types.Price, error) {
-	return nil, nil
-}
-func (m *mockUtility) GetConfirmedPrices(ctx context.Context, start, end time.Time) ([]types.Price, error) {
-	return nil, nil
-}
-func (m *mockUtility) Validate() error { return nil }
-
-type mockESS struct{}
-
-func (m *mockESS) GetStatus(ctx context.Context) (types.SystemStatus, error) {
-	return types.SystemStatus{}, nil
-}
-func (m *mockESS) SetModes(ctx context.Context, bat types.BatteryMode, sol types.SolarMode) error {
-	return nil
-}
-func (m *mockESS) ApplySettings(ctx context.Context, settings types.Settings) error {
-	return nil
-}
-func (m *mockESS) SetPowerControl(ctx context.Context, cfg types.PowerControlConfig) error {
-	return nil
-}
-func (m *mockESS) GetEnergyHistory(ctx context.Context, start, end time.Time) ([]types.EnergyStats, error) {
-	return nil, nil
-}
-func (m *mockESS) Validate() error { return nil }
-
-type mockStorage struct {
-	settings types.Settings
-}
-
-func (m *mockStorage) GetSettings(ctx context.Context) (types.Settings, error) {
-	return m.settings, nil
-}
-func (m *mockStorage) SetSettings(ctx context.Context, settings types.Settings) error {
-	m.settings = settings
-	return nil
-}
-func (m *mockStorage) UpsertPrice(ctx context.Context, price types.Price) error    { return nil }
-func (m *mockStorage) InsertAction(ctx context.Context, action types.Action) error { return nil }
-func (m *mockStorage) GetPriceHistory(ctx context.Context, start, end time.Time) ([]types.Price, error) {
-	return nil, nil
-}
-func (m *mockStorage) GetActionHistory(ctx context.Context, start, end time.Time) ([]types.Action, error) {
-	return nil, nil
-}
-func (m *mockStorage) GetEnergyHistory(ctx context.Context, start, end time.Time) ([]types.EnergyStats, error) {
-	return nil, nil
-}
-func (m *mockStorage) UpsertEnergyHistory(ctx context.Context, stats types.EnergyStats) error {
-	return nil
-}
-func (m *mockStorage) GetLatestEnergyHistoryTime(ctx context.Context) (time.Time, error) {
-	return time.Time{}, nil
-}
-func (m *mockStorage) GetLatestPriceHistoryTime(ctx context.Context) (time.Time, error) {
-	return time.Time{}, nil
-}
-func (m *mockStorage) Close() error { return nil }
+// Mock definitions moved to mock_test.go
 
 func TestSPAHandler(t *testing.T) {
 	// Setup basics for server
 	mockU := &mockUtility{}
-	mockS := &mockStorage{
-		settings: types.Settings{
-			DryRun:        true,
-			MinBatterySOC: 5.0,
-		},
-	}
+	mockS := &mockStorage{}
+
+	mockS.On("GetSettings", mock.Anything).Return(types.Settings{
+		DryRun:        true,
+		MinBatterySOC: 5.0,
+	}, types.CurrentSettingsVersion, nil)
 
 	// Create a map-based filesystem for testing
 	testFS := fstest.MapFS{

@@ -103,10 +103,10 @@ const Settings = ({ isAdmin }: { isAdmin: boolean }) => {
                         value={settings.alwaysChargeUnderDollarsPerKWH}
                         onChange={(e) => handleChange('alwaysChargeUnderDollarsPerKWH', parseFloat(e.target.value))}
                     />
-                    <span className="help-text">Always charge the battery if the price is below this threshold, regardless of forecast.</span>
+                    <span className="help-text">Always charge the battery if the list price (before fees) is below this threshold, regardless of forecast.</span>
                 </div>
                 <div className="form-group">
-                    <label htmlFor="additionalFees">Additional Fees ($/kWh)</label>
+                    <label htmlFor="additionalFees">Grid Import Additional Fees ($/kWh)</label>
                     <input
                         id="additionalFees"
                         type="number"
@@ -114,7 +114,7 @@ const Settings = ({ isAdmin }: { isAdmin: boolean }) => {
                         value={settings.additionalFeesDollarsPerKWH}
                         onChange={(e) => handleChange('additionalFeesDollarsPerKWH', parseFloat(e.target.value))}
                     />
-                    <span className="help-text">Fees added to the base price per kWh (e.g. delivery charges).</span>
+                    <span className="help-text">Fees added to the grid import price per kWh (e.g. delivery charges).</span>
                 </div>
                 <div className="form-group">
                     <label htmlFor="minArbitrage">Min Arbitrage Difference ($/kWh)</label>
@@ -126,6 +126,18 @@ const Settings = ({ isAdmin }: { isAdmin: boolean }) => {
                         onChange={(e) => handleChange('minArbitrageDifferenceDollarsPerKWH', parseFloat(e.target.value))}
                     />
                     <span className="help-text">Minimum profit required to trigger charging for arbitrage.</span>
+                </div>
+
+                <div className="form-group">
+                    <label htmlFor="minDeficit">Min Deficit Charge Diff ($/kWh)</label>
+                    <input
+                        id="minDeficit"
+                        type="number"
+                        step="0.01"
+                        value={settings.minDeficitPriceDifferenceDollarsPerKWH}
+                        onChange={(e) => handleChange('minDeficitPriceDifferenceDollarsPerKWH', parseFloat(e.target.value))}
+                    />
+                    <span className="help-text">Minimum price difference between now and later to justify charging now when there's a predicted battery deficit in the future.</span>
                 </div>
 
                 <h3>Battery Settings</h3>

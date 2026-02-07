@@ -37,10 +37,10 @@ func (c *Controller) Decide(
 ) (Decision, error) {
 	slog.DebugContext(ctx, "controller decide started",
 		slog.Float64("soc", currentStatus.BatterySOC),
-		slog.Float64("battery_kw", currentStatus.BatteryKW),
-		slog.Float64("solar_kw", currentStatus.SolarKW),
-		slog.Float64("load_kw", currentStatus.HomeKW),
-		slog.Float64("current_price", currentPrice.DollarsPerKWH),
+		slog.Float64("batteryKW", currentStatus.BatteryKW),
+		slog.Float64("solarKW", currentStatus.SolarKW),
+		slog.Float64("homeKW", currentStatus.HomeKW),
+		slog.Float64("currentPrice", currentPrice.DollarsPerKWH),
 	)
 
 	now := time.Now()
@@ -107,12 +107,22 @@ func (c *Controller) Decide(
 				slog.Float64("solarKW", currentStatus.SolarKW),
 				slog.Float64("homeKW", currentStatus.HomeKW),
 				slog.Bool("isChargingFromGrid", isChargingFromGrid),
+				slog.Float64("batterySOC", currentStatus.BatterySOC),
+				slog.Bool("batteryAboveMinSOC", currentStatus.BatteryAboveMinSOC),
+				slog.Bool("elevatedMinBatterySOC", currentStatus.ElevatedMinBatterySOC),
 			)
 
 			if currentStatus.BatteryKW > 0 {
-				// discharging, keep standby
+				// we're using the battery but it might be because we're greater than
+				// the elevated reserve SOC and maybe solar was charging us up
+				if currentStatus.BatteryAboveMinSOC && currentStatus.ElevatedMinBatterySOC {
+					// we're already above reserve SOC and we've elevated the reserve SOC
+					// probably because of a previous standby request
+					finalBatMode = types.BatteryModeNoChange
+				}
+				// discharging, switch to standby
 			} else if isChargingFromGrid {
-				// charging from grid, keep standby
+				// charging from grid, switch to standby
 			} else if currentStatus.BatteryKW < 0 {
 				// charging from solar (not grid), ignore
 				finalBatMode = types.BatteryModeNoChange
@@ -273,7 +283,7 @@ func (c *Controller) Decide(
 	// track simulated energy
 	simEnergy := availableKWH
 	hitCapacity := simEnergy >= capacityKWH
-	hitDeficit := false
+	var hitDeficitAt time.Time
 	minEnergy := availableKWH
 	maxEnergy := availableKWH
 
@@ -330,7 +340,7 @@ func (c *Controller) Decide(
 
 		// check if we are below the minimum SOC and when we need to charge
 		if simEnergy < minKWH {
-			if !hitDeficit {
+			if hitDeficitAt.IsZero() {
 				slog.DebugContext(
 					ctx,
 					"simulated energy below minimum SOC",
@@ -339,7 +349,7 @@ func (c *Controller) Decide(
 					slog.Int("simHour", slot.hour),
 				)
 			}
-			hitDeficit = true
+			hitDeficitAt = slot.ts
 			deficitAmount := minKWH - simEnergy
 
 			// only consider charging if GridCharging is enabled
@@ -359,13 +369,14 @@ func (c *Controller) Decide(
 
 				// if we have determined we'll run out of energy and it's cheaper to
 				// charge now than later, charge now
-				if chargeNowCost <= cheapestChargeCost {
+				if chargeNowCost+settings.MinDeficitPriceDifferenceDollarsPerKWH <= cheapestChargeCost {
 					shouldCharge = true
-					chargeReason = fmt.Sprintf("Projected Deficit of %.2fkWh at %s. ChargeNow (%.3f) <= BestAlt (%.3f).", deficitAmount, slot.ts.Format(time.Kitchen), chargeNowCost, cheapestChargeCost)
+					chargeReason = fmt.Sprintf("Projected Deficit at %s. Charge Now ($%.3f) <= Later ($%.3f) - Delta ($%.3f).", slot.ts.Format(time.Kitchen), chargeNowCost, cheapestChargeCost, settings.MinDeficitPriceDifferenceDollarsPerKWH)
 					slog.DebugContext(
 						ctx,
 						"deficit predicted, charging now",
 						slog.Float64("deficit", deficitAmount),
+						slog.Time("deficitAt", hitDeficitAt),
 						slog.Float64("chargeCost", chargeNowCost),
 						slog.Float64("cheapestFutureCost", cheapestChargeCost),
 					)
@@ -375,6 +386,7 @@ func (c *Controller) Decide(
 						ctx,
 						"deficit predicted, charging later",
 						slog.Float64("deficit", deficitAmount),
+						slog.Time("deficitAt", hitDeficitAt),
 						slog.Float64("chargeCost", chargeNowCost),
 						slog.Float64("cheapestFutureCost", cheapestChargeCost),
 						slog.Int("chargeDurationHours", chargeDurationHours),
@@ -438,12 +450,12 @@ func (c *Controller) Decide(
 	// If we have a deficit, but we are at the Highest Price, Use it (Load).
 	// If we have a deficit, and cheaper now than later, Standby (Save for later).
 
-	if hitDeficit {
+	if !hitDeficitAt.IsZero() {
 		// We are going to run out. Should we save it?
 		// Check if there is a significantly more expensive time later.
 		// If current price is lower than maxFuturePrice, we should probably save it.
 		if currentPrice.DollarsPerKWH < maxFuturePrice {
-			standbyReason := fmt.Sprintf("Deficit predicted and higher prices later (%.3f < %.3f).", currentPrice.DollarsPerKWH, maxFuturePrice)
+			standbyReason := fmt.Sprintf("Deficit predicted at %s and higher prices later ($%.3f < $%.3f).", hitDeficitAt.Format(time.Kitchen), currentPrice.DollarsPerKWH, maxFuturePrice)
 			slog.DebugContext(
 				ctx,
 				"deficit predicted, saving for peak",

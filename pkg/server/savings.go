@@ -8,19 +8,30 @@ import (
 	"time"
 )
 
+type hourlySavingsStatsDebugging struct {
+	Price         float64 `json:"price"`
+	BatteryToHome float64 `json:"batteryToHome"`
+	Avoided       float64 `json:"avoided"`
+	GridToBattery float64 `json:"gridToBattery"`
+	ChargingCost  float64 `json:"chargingCost"`
+	SolarToHome   float64 `json:"solarToHome"`
+	SolarSavings  float64 `json:"solarSavings"`
+}
+
 type SavingsStats struct {
-	Timestamp      time.Time `json:"timestamp"`
-	Cost           float64   `json:"cost"`
-	Credit         float64   `json:"credit"`
-	BatterySavings float64   `json:"batterySavings"` // Estimated Battery Savings = Avoided - Charging
-	SolarSavings   float64   `json:"solarSavings"`   // Estimated Solar Savings = SolarToHome * Price
-	AvoidedCost    float64   `json:"avoidedCost"`    // Cost we would have paid w/o battery (BatteryToHome * Price)
-	ChargingCost   float64   `json:"chargingCost"`   // Cost to charge the battery from grid
-	SolarGenerated float64   `json:"solarGenerated"` // Total solar generated
-	GridImported   float64   `json:"gridImported"`   // Total grid imported
-	GridExported   float64   `json:"gridExported"`   // Total grid exported
-	HomeUsed       float64   `json:"homeUsed"`       // Total home usage
-	BatteryUsed    float64   `json:"batteryUsed"`    // Total battery discharged
+	Timestamp       time.Time                     `json:"timestamp"`
+	Cost            float64                       `json:"cost"`
+	Credit          float64                       `json:"credit"`
+	BatterySavings  float64                       `json:"batterySavings"` // Estimated Battery Savings = Avoided - Charging
+	SolarSavings    float64                       `json:"solarSavings"`   // Estimated Solar Savings = SolarToHome * Price
+	AvoidedCost     float64                       `json:"avoidedCost"`    // Cost we would have paid w/o battery (BatteryToHome * Price)
+	ChargingCost    float64                       `json:"chargingCost"`   // Cost to charge the battery from grid
+	SolarGenerated  float64                       `json:"solarGenerated"` // Total solar generated
+	GridImported    float64                       `json:"gridImported"`   // Total grid imported
+	GridExported    float64                       `json:"gridExported"`   // Total grid exported
+	HomeUsed        float64                       `json:"homeUsed"`       // Total home usage
+	BatteryUsed     float64                       `json:"batteryUsed"`    // Total battery discharged
+	HourlyDebugging []hourlySavingsStatsDebugging `json:"hourlyDebugging"`
 }
 
 func (s *Server) handleHistorySavings(w http.ResponseWriter, r *http.Request) {
@@ -31,10 +42,17 @@ func (s *Server) handleHistorySavings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	settings, err := s.getSettingsWithMigration(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to get settings", slog.Any("error", err))
+		http.Error(w, "failed to get settings", http.StatusInternalServerError)
+		return
+	}
+
 	// Fetch prices (these are hourly)
 	prices, err := s.storage.GetPriceHistory(ctx, start, end)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to get prices", "error", err)
+		slog.ErrorContext(ctx, "failed to get prices", slog.Any("error", err))
 		http.Error(w, "failed to get prices", http.StatusInternalServerError)
 		return
 	}
@@ -42,7 +60,7 @@ func (s *Server) handleHistorySavings(w http.ResponseWriter, r *http.Request) {
 	// Fetch energy stats (these are hourly)
 	energyStats, err := s.storage.GetEnergyHistory(ctx, start, end)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to get energy history", "error", err)
+		slog.ErrorContext(ctx, "failed to get energy history", slog.Any("error", err))
 		http.Error(w, "failed to get energy history", http.StatusInternalServerError)
 		return
 	}
@@ -56,18 +74,11 @@ func (s *Server) handleHistorySavings(w http.ResponseWriter, r *http.Request) {
 	var totalSavings SavingsStats
 	totalSavings.Timestamp = start
 	hourlyPrices := make(map[time.Time]float64)
-	hourlyPriceCounts := make(map[time.Time]int)
 
+	// TODO: fix this so that we look at the actual time ranges
 	for _, p := range prices {
 		tsHour := p.TSStart.Truncate(time.Hour)
-		hourlyPrices[tsHour] += p.DollarsPerKWH
-		hourlyPriceCounts[tsHour]++
-	}
-
-	for ts, total := range hourlyPrices {
-		if count := hourlyPriceCounts[ts]; count > 0 {
-			hourlyPrices[ts] = total / float64(count)
-		}
+		hourlyPrices[tsHour] = p.DollarsPerKWH
 	}
 
 	for _, stat := range energyStats {
@@ -75,6 +86,8 @@ func (s *Server) handleHistorySavings(w http.ResponseWriter, r *http.Request) {
 
 		// this will be 0 if we don't have price data for this hour
 		price := hourlyPrices[ts]
+		gridImportPrice := price + settings.AdditionalFeesDollarsPerKWH
+		gridExportPrice := price
 
 		// Accumulate Energy Amounts even if price is missing
 		totalSavings.HomeUsed += stat.HomeKWH
@@ -84,27 +97,39 @@ func (s *Server) handleHistorySavings(w http.ResponseWriter, r *http.Request) {
 		totalSavings.BatteryUsed += stat.BatteryUsedKWH
 
 		// Cost and Credit
-		cost := stat.GridImportKWH * price
-		credit := stat.GridExportKWH * price
+		cost := stat.GridImportKWH * gridImportPrice
+		credit := stat.GridExportKWH * gridExportPrice
 		totalSavings.Cost += cost
 		totalSavings.Credit += credit
 
 		// Determine how much battery was used to power the home and what cost we
 		// avoided by using the battery instead of the grid.
 		batteryToHome := stat.BatteryToHomeKWH
-		avoided := batteryToHome * price
+		avoided := batteryToHome * gridImportPrice
 		totalSavings.AvoidedCost += avoided
 
 		// Determine how much battery was charged from the grid and what cost we
 		// paid to charge the battery.
 		gridToBattery := math.Max(0, stat.BatteryChargedKWH-stat.SolarToBatteryKWH)
-		chargingCost := gridToBattery * price
+		chargingCost := gridToBattery * gridImportPrice
 		totalSavings.ChargingCost += chargingCost
 
 		// Solar Savings: Solar powering the home.
+		// you might think to include solar to battery as solar savings but it gets
+		// counted as battery savings later when the battery is discharged.
 		solarToHome := stat.SolarToHomeKWH
-		solarSavings := solarToHome * price
+		solarSavings := solarToHome * gridImportPrice
 		totalSavings.SolarSavings += solarSavings
+
+		totalSavings.HourlyDebugging = append(totalSavings.HourlyDebugging, hourlySavingsStatsDebugging{
+			Price:         price,
+			BatteryToHome: batteryToHome,
+			Avoided:       avoided,
+			GridToBattery: gridToBattery,
+			ChargingCost:  chargingCost,
+			SolarToHome:   solarToHome,
+			SolarSavings:  solarSavings,
+		})
 	}
 
 	totalSavings.BatterySavings = totalSavings.AvoidedCost - totalSavings.ChargingCost

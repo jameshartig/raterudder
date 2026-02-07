@@ -88,7 +88,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 1. Get Settings
-	settings, err := s.storage.GetSettings(ctx)
+	settings, err := s.getSettingsWithMigration(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to get settings", slog.Any("error", err))
 		http.Error(w, "failed to get settings", http.StatusInternalServerError)
@@ -266,12 +266,15 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		action.Timestamp = time.Now()
 	}
 
-	slog.DebugContext(
+	slog.InfoContext(
 		ctx,
 		"update: decision made",
-		slog.Int("battery_mode", int(action.BatteryMode)),
-		slog.Int("solar_mode", int(action.SolarMode)),
+		slog.Int("batteryMode", int(action.BatteryMode)),
+		slog.Int("solarMode", int(action.SolarMode)),
 		slog.String("explanation", decision.Explanation),
+		slog.String("description", action.Description),
+		slog.Float64("price", currentPrice.DollarsPerKWH),
+		slog.Float64("batterySOC", status.BatterySOC),
 	)
 
 	// 8. Execute Action

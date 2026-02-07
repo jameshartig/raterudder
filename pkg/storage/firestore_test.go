@@ -41,10 +41,12 @@ func TestFirestoreProvider(t *testing.T) {
 			AlwaysChargeUnderDollarsPerKWH: 1.2,
 			MinBatterySOC:                  5.5,
 		}
-		require.NoError(t, f.SetSettings(ctx, settings))
+		// Pass version 1
+		require.NoError(t, f.SetSettings(ctx, settings, 1))
 
-		gotSettings, err := f.GetSettings(ctx)
+		gotSettings, version, err := f.GetSettings(ctx)
 		require.NoError(t, err)
+		assert.Equal(t, 1, version)
 		assert.Equal(t, settings.AlwaysChargeUnderDollarsPerKWH, gotSettings.AlwaysChargeUnderDollarsPerKWH)
 		assert.Equal(t, settings.MinBatterySOC, gotSettings.MinBatterySOC)
 		assert.Equal(t, settings.DryRun, gotSettings.DryRun)

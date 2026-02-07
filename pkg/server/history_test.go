@@ -12,6 +12,7 @@ import (
 	"github.com/jameshartig/autoenergy/pkg/controller"
 	"github.com/jameshartig/autoenergy/pkg/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,12 +41,14 @@ func (m *historyMockStorage) GetPriceHistory(ctx context.Context, start, end tim
 
 func TestHistory(t *testing.T) {
 	mockU := &mockUtility{}
-	// mockStorage is defined in server_test.go. We can embed it to satisfy the interface.
+	// mockStorage is defined in mock_test.go. We can embed it to satisfy the interface.
 	// But we need to use historyMockStorage to override methods.
+	mockSBase := &mockStorage{}
+	// We need to set expectations on the base mock if it's called
+	mockSBase.On("GetSettings", mock.Anything).Return(types.Settings{}, types.CurrentSettingsVersion, nil)
+
 	mockS := &historyMockStorage{
-		mockStorage: &mockStorage{
-			settings: types.Settings{},
-		},
+		mockStorage: mockSBase,
 	}
 
 	srv := &Server{

@@ -7,6 +7,7 @@ type Price struct {
 	TSStart       time.Time `json:"tsStart"`
 	TSEnd         time.Time `json:"tsEnd"`
 	DollarsPerKWH float64   `json:"dollarsPerKWH"`
+	SampleCount   int       `json:"-"`
 }
 
 // ActionType represents the type of action taken by the system.
@@ -66,6 +67,7 @@ type SystemStatus struct {
 	CanExportBattery      bool      `json:"canExportBattery"`      // True if battery exporting is enabled
 	CanImportBattery      bool      `json:"canImportBattery"`      // True if battery importing is enabled
 	ElevatedMinBatterySOC bool      `json:"elevatedMinBatterySOC"` // True if the minimum SOC is elevated to force standby
+	BatteryAboveMinSOC    bool      `json:"batteryAboveMinSOC"`    // True if the battery SOC is above the minimum SOC
 	EmergencyMode         bool      `json:"emergencyMode"`
 }
 

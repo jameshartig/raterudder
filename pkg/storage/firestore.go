@@ -79,43 +79,52 @@ func (f *FirestoreProvider) Close() error {
 }
 
 // GetSettings retrieves the dynamic configuration from the "config/settings" document.
-func (f *FirestoreProvider) GetSettings(ctx context.Context) (types.Settings, error) {
+func (f *FirestoreProvider) GetSettings(ctx context.Context) (types.Settings, int, error) {
 	doc, err := f.client.Collection("config").Doc("settings").Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			// Return default settings if not found
-			return types.Settings{}, nil
+			return types.Settings{}, 0, nil
 		}
-		return types.Settings{}, fmt.Errorf("failed to fetch settings doc: %w", err)
+		return types.Settings{}, 0, fmt.Errorf("failed to fetch settings doc: %w", err)
+	}
+
+	// Read version if available (default 0)
+	var version int
+	if v, err := doc.DataAt("version"); err == nil {
+		if vInt, ok := v.(int64); ok {
+			version = int(vInt)
+		}
 	}
 
 	val, err := doc.DataAt("json")
 	if err != nil {
-		return types.Settings{}, fmt.Errorf("settings document missing 'json' field: %w", err)
+		return types.Settings{}, 0, fmt.Errorf("settings document missing 'json' field: %w", err)
 	}
 
 	jsonStr, ok := val.(string)
 	if !ok {
-		return types.Settings{}, fmt.Errorf("settings 'json' field is not a string")
+		return types.Settings{}, 0, fmt.Errorf("settings 'json' field is not a string")
 	}
 
 	var s types.Settings
 	if err := json.Unmarshal([]byte(jsonStr), &s); err != nil {
-		return types.Settings{}, fmt.Errorf("failed to unmarshal settings json: %w", err)
+		return types.Settings{}, 0, fmt.Errorf("failed to unmarshal settings json: %w", err)
 	}
-	return s, nil
+	return s, version, nil
 }
 
 // SetSettings saves the dynamic configuration to the "config/settings" document.
 // It stores the settings as a JSON string for portability.
-func (f *FirestoreProvider) SetSettings(ctx context.Context, settings types.Settings) error {
+func (f *FirestoreProvider) SetSettings(ctx context.Context, settings types.Settings, version int) error {
 	jsonBytes, err := json.Marshal(settings)
 	if err != nil {
 		return fmt.Errorf("failed to marshal settings: %w", err)
 	}
 
 	_, err = f.client.Collection("config").Doc("settings").Set(ctx, map[string]interface{}{
-		"json": string(jsonBytes),
+		"json":    string(jsonBytes),
+		"version": version,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to save settings: %w", err)

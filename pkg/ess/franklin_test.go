@@ -164,6 +164,7 @@ func TestFranklin(t *testing.T) {
 		assert.True(t, status.CanExportBattery, "CanExportBattery should be true")
 		assert.True(t, status.CanImportBattery, "CanImportBattery should be true")
 		assert.True(t, status.ElevatedMinBatterySOC, "ElevatedMinBatterySOC should be true")
+		assert.True(t, status.BatteryAboveMinSOC, "BatteryAboveMinSOC should be true")
 	})
 
 	t.Run("SetModes", func(t *testing.T) {

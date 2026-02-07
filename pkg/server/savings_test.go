@@ -8,29 +8,32 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jameshartig/autoenergy/pkg/storage"
 	"github.com/jameshartig/autoenergy/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
 
 type mockSavingsStorage struct {
-	storage.Provider
-	mock.Mock
+	*mockStorage
+	prices []types.Price
+	stats  []types.EnergyStats
 }
 
 func (m *mockSavingsStorage) GetPriceHistory(ctx context.Context, start, end time.Time) ([]types.Price, error) {
-	args := m.Called(ctx, start, end)
-	return args.Get(0).([]types.Price), args.Error(1)
+	return m.prices, nil
 }
 
 func (m *mockSavingsStorage) GetEnergyHistory(ctx context.Context, start, end time.Time) ([]types.EnergyStats, error) {
-	args := m.Called(ctx, start, end)
-	return args.Get(0).([]types.EnergyStats), args.Error(1)
+	return m.stats, nil
 }
 
 func TestHandleHistorySavings(t *testing.T) {
-	mockStore := new(mockSavingsStorage)
+	mockStoreBase := &mockStorage{}
+	mockStoreBase.On("GetSettings", mock.Anything).Return(types.Settings{}, types.CurrentSettingsVersion, nil)
+
+	mockStore := &mockSavingsStorage{
+		mockStorage: mockStoreBase,
+	}
 	s := &Server{storage: mockStore}
 
 	// Create test data
@@ -70,7 +73,7 @@ func TestHandleHistorySavings(t *testing.T) {
 			TSHourStart:       start.Add(2 * time.Hour),
 			GridImportKWH:     10,
 			BatteryChargedKWH: 10,
-			// SolarToBattery is 0, so all 10 is from Grid
+			// SolarToBattery is 0, so all 10 from Grid
 		},
 		// Hour 4: Battery Export to Grid
 		{
@@ -88,8 +91,8 @@ func TestHandleHistorySavings(t *testing.T) {
 		},
 	}
 
-	mockStore.On("GetPriceHistory", mock.Anything, mock.Anything, mock.Anything).Return(prices, nil)
-	mockStore.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return(stats, nil)
+	mockStore.prices = prices
+	mockStore.stats = stats
 
 	req, _ := http.NewRequest("GET", "/api/history/savings?start="+start.Format(time.RFC3339)+"&end="+end.Format(time.RFC3339), nil)
 	rr := httptest.NewRecorder()

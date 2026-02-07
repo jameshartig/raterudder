@@ -12,24 +12,40 @@ import (
 	"github.com/jameshartig/autoenergy/pkg/controller"
 	"github.com/jameshartig/autoenergy/pkg/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"google.golang.org/api/idtoken"
 )
 
 func TestHandleUpdate(t *testing.T) {
 	// Scenario: High price -> Should Discharge
-	mockU := &mockUtility{
-		price: types.Price{DollarsPerKWH: 0.15, TSStart: time.Now()},
-	}
-	mockS := &mockStorage{
-		settings: types.Settings{
-			DryRun:        true,
-			MinBatterySOC: 5.0, // Assuming this is correct replacement for ChargeThreshold depending on old field meaning
-		},
-	}
+	mockU := &mockUtility{}
+	mockU.On("GetCurrentPrice", mock.Anything).Return(types.Price{DollarsPerKWH: 0.15, TSStart: time.Now()}, nil)
+	mockU.On("GetFuturePrices", mock.Anything).Return([]types.Price{}, nil)
+	mockU.On("GetConfirmedPrices", mock.Anything, mock.Anything, mock.Anything).Return([]types.Price{}, nil)
+
+	mockS := &mockStorage{}
+	mockS.On("GetSettings", mock.Anything).Return(types.Settings{
+		DryRun:        true,
+		MinBatterySOC: 5.0,
+	}, types.CurrentSettingsVersion, nil)
+	mockS.On("GetLatestEnergyHistoryTime", mock.Anything).Return(time.Time{}, nil)
+	mockS.On("GetLatestPriceHistoryTime", mock.Anything).Return(time.Time{}, nil)
+	mockS.On("UpsertEnergyHistory", mock.Anything, mock.Anything).Return(nil)
+	mockS.On("UpsertPrice", mock.Anything, mock.Anything).Return(nil)
+	mockS.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
+	mockS.On("InsertAction", mock.Anything, mock.Anything).Return(nil)
+
+	mockES := &mockESS{}
+	mockES.On("ApplySettings", mock.Anything, mock.Anything).Return(nil)
+	// Add GetEnergyHistory expectation
+	mockES.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
+	mockES.On("GetStatus", mock.Anything).Return(types.SystemStatus{BatterySOC: 80}, nil)
+	// We might need strict matching for SetModes later, but for now:
+	mockES.On("SetModes", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	srv := &Server{
 		utilityProvider: mockU,
-		essSystem:       &mockESS{},
+		essSystem:       mockES,
 		storage:         mockS,
 		listenAddr:      ":8080",
 		controller:      controller.NewController(),
@@ -45,16 +61,33 @@ func TestHandleUpdate(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	t.Run("Handle Update - Auth", func(t *testing.T) {
-		mockU := &mockUtility{
-			price: types.Price{DollarsPerKWH: 0.10, TSStart: time.Now()},
-		}
-		mockS := &mockStorage{settings: types.Settings{DryRun: true}}
+		mockU := &mockUtility{}
+		mockU.On("GetCurrentPrice", mock.Anything).Return(types.Price{DollarsPerKWH: 0.10, TSStart: time.Now()}, nil)
+		mockU.On("GetFuturePrices", mock.Anything).Return([]types.Price{}, nil)
+		mockU.On("GetConfirmedPrices", mock.Anything, mock.Anything, mock.Anything).Return([]types.Price{}, nil)
+
+		mockS := &mockStorage{}
+		mockS.On("GetSettings", mock.Anything).Return(types.Settings{DryRun: true}, types.CurrentSettingsVersion, nil)
+		mockS.On("GetLatestEnergyHistoryTime", mock.Anything).Return(time.Time{}, nil)
+		mockS.On("GetLatestPriceHistoryTime", mock.Anything).Return(time.Time{}, nil)
+		mockS.On("UpsertEnergyHistory", mock.Anything, mock.Anything).Return(nil)
+		mockS.On("UpsertPrice", mock.Anything, mock.Anything).Return(nil)
+		mockS.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
+		// InsertAction might not be called if validation fails, so we can't strict expect it or we use .Maybe()
+		// But in this test suite we are testing auth failures mostly, so handleUpdate might not reach InsertAction.
+		// However, for the success cases it will.
+		mockS.On("InsertAction", mock.Anything, mock.Anything).Return(nil).Maybe()
 
 		// Helper to create server with auth config
 		newAuthServer := func(audience, email string, adminEmails []string, validator TokenValidator) *Server {
+			mockES := &mockESS{}
+			mockES.On("ApplySettings", mock.Anything, mock.Anything).Return(nil)
+			mockES.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
+			mockES.On("GetStatus", mock.Anything).Return(types.SystemStatus{BatterySOC: 50}, nil)
+			mockES.On("SetModes", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			return &Server{
 				utilityProvider:        mockU,
-				essSystem:              &mockESS{},
+				essSystem:              mockES,
 				storage:                mockS,
 				controller:             controller.NewController(),
 				updateSpecificAudience: audience,
@@ -161,25 +194,27 @@ func TestHandleUpdate(t *testing.T) {
 	})
 
 	t.Run("Paused Updates", func(t *testing.T) {
-		mockS := &mockStorage{
-			settings: types.Settings{
-				Pause: true,
-			},
-		}
+		mockS := &mockStorage{}
+		mockS.On("GetSettings", mock.Anything).Return(types.Settings{
+			Pause: true,
+		}, types.CurrentSettingsVersion, nil)
+		mockS.On("GetLatestEnergyHistoryTime", mock.Anything).Return(time.Time{}, nil)
+		mockS.On("GetLatestPriceHistoryTime", mock.Anything).Return(time.Time{}, nil)
+		mockS.On("UpsertEnergyHistory", mock.Anything, mock.Anything).Return(nil)
+		mockS.On("UpsertPrice", mock.Anything, mock.Anything).Return(nil)
 
-		essRec := &RecordingMockESS{}
-		essRec.GetStatusFunc = func(ctx context.Context) (types.SystemStatus, error) {
-			t.Fatal("GetStatus should not be called when paused")
-			return types.SystemStatus{}, nil
-		}
-		essRec.SetModesFunc = func(ctx context.Context, bat types.BatteryMode, sol types.SolarMode) error {
-			t.Fatal("SetModes should not be called when paused")
-			return nil
-		}
+		mockES := &mockESS{}
+		mockES.On("ApplySettings", mock.Anything, mock.Anything).Return(nil)
+		mockES.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
+
+		mockU := &mockUtility{}
+		mockU.On("GetCurrentPrice", mock.Anything).Return(types.Price{DollarsPerKWH: 0.10, TSStart: time.Now()}, nil)
+		mockU.On("GetFuturePrices", mock.Anything).Return([]types.Price{}, nil)
+		mockU.On("GetConfirmedPrices", mock.Anything, mock.Anything, mock.Anything).Return([]types.Price{}, nil)
 
 		srv := &Server{
-			utilityProvider: &mockUtility{},
-			essSystem:       essRec,
+			utilityProvider: mockU,
+			essSystem:       mockES,
 			storage:         mockS,
 			listenAddr:      ":8080",
 			controller:      controller.NewController(),
@@ -196,6 +231,9 @@ func TestHandleUpdate(t *testing.T) {
 		var resp map[string]interface{}
 		_ = json.NewDecoder(w.Body).Decode(&resp)
 		assert.Equal(t, "paused", resp["status"])
+
+		mockES.AssertNotCalled(t, "GetStatus")
+		mockES.AssertNotCalled(t, "SetModes")
 	})
 }
 

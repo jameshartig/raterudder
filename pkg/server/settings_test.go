@@ -8,18 +8,20 @@ import (
 	"testing"
 
 	"github.com/jameshartig/autoenergy/pkg/controller"
+
 	"github.com/jameshartig/autoenergy/pkg/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 func TestSettings(t *testing.T) {
 	mockU := &mockUtility{}
-	mockS := &mockStorage{
-		settings: types.Settings{
-			DryRun:        false,
-			MinBatterySOC: 10.0,
-		},
-	}
+	mockS := &mockStorage{}
+	// Default setup for most tests
+	mockS.On("GetSettings", mock.Anything).Return(types.Settings{
+		DryRun:        false,
+		MinBatterySOC: 10.0,
+	}, types.CurrentSettingsVersion, nil)
 
 	// Helper to create server with auth config
 	newAuthServer := func(audience string, emails []string, validator TokenValidator) *Server {
@@ -109,12 +111,16 @@ func TestSettings(t *testing.T) {
 		req = withEmail(req, "admin@example.com")
 		w := httptest.NewRecorder()
 
+		// Expect SetSettings with version
+		mockS.On("SetSettings", mock.Anything, mock.MatchedBy(func(s types.Settings) bool {
+			return s.MinBatterySOC == 80.0 && s.DryRun == true
+		}), types.CurrentSettingsVersion).Return(nil)
+
 		srv.handleUpdateSettings(w, req)
 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 
 		// Verify storage updated
-		assert.Equal(t, 80.0, mockS.settings.MinBatterySOC)
-		assert.True(t, mockS.settings.DryRun)
+		mockS.AssertExpectations(t)
 	})
 
 	t.Run("Auth Status - Is Admin", func(t *testing.T) {

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -8,14 +9,42 @@ import (
 	"github.com/jameshartig/autoenergy/pkg/types"
 )
 
+func (s *Server) getSettingsWithMigration(ctx context.Context) (types.Settings, error) {
+	settings, version, err := s.storage.GetSettings(ctx)
+	if err != nil {
+		return types.Settings{}, err
+	}
+
+	// Check for migration
+	if version < types.CurrentSettingsVersion {
+		slog.InfoContext(ctx, "migrating settings", slog.Int("oldVersion", version), slog.Int("newVersion", types.CurrentSettingsVersion))
+		newSettings, changed, err := types.MigrateSettings(settings, version)
+		if err != nil {
+			// Log error but return settings as is (best effort)
+			slog.ErrorContext(ctx, "failed to migrate settings", slog.Int("currentVersion", version), slog.Any("error", err))
+			return settings, nil
+		} else if changed {
+			if err := s.storage.SetSettings(ctx, newSettings, types.CurrentSettingsVersion); err != nil {
+				slog.ErrorContext(ctx, "failed to save migrated settings", slog.Any("error", err))
+				// Return migrated settings even if save failed, so current request works with new defaults
+			} else {
+				slog.InfoContext(ctx, "saved migrated settings", slog.Int("oldVersion", version), slog.Int("newVersion", types.CurrentSettingsVersion))
+			}
+			return newSettings, nil
+		}
+	}
+	return settings, nil
+}
+
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	settings, err := s.storage.GetSettings(ctx)
+	settings, err := s.getSettingsWithMigration(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to get settings", slog.Any("error", err))
 		http.Error(w, "failed to get settings", http.StatusInternalServerError)
 		return
 	}
+
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(settings); err != nil {
 		slog.ErrorContext(ctx, "failed to encode settings", slog.Any("error", err))
@@ -62,8 +91,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Basic validation
-	if newSettings.AlwaysChargeUnderDollarsPerKWH < 0 ||
-		newSettings.AdditionalFeesDollarsPerKWH < 0 ||
+	if newSettings.AdditionalFeesDollarsPerKWH < 0 ||
 		newSettings.MinArbitrageDifferenceDollarsPerKWH < 0 ||
 		newSettings.MinBatterySOC < 0 || newSettings.MinBatterySOC > 100 ||
 		newSettings.IgnoreHourUsageOverMultiple < 1 {
@@ -71,7 +99,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.storage.SetSettings(ctx, newSettings); err != nil {
+	if err := s.storage.SetSettings(ctx, newSettings, types.CurrentSettingsVersion); err != nil {
 		slog.ErrorContext(ctx, "failed to save settings", slog.Any("error", err))
 		http.Error(w, "failed to save settings", http.StatusInternalServerError)
 		return

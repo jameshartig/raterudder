@@ -10,8 +10,8 @@ import (
 // Provider defines the interface for persisting data and retrieving settings.
 type Provider interface {
 	// Settings
-	GetSettings(ctx context.Context) (types.Settings, error)
-	SetSettings(ctx context.Context, settings types.Settings) error
+	GetSettings(ctx context.Context) (types.Settings, int, error)
+	SetSettings(ctx context.Context, settings types.Settings, version int) error
 
 	// Data Persistence
 	// UpsertPrice adds or updates a price record.

@@ -71,6 +71,7 @@ export interface Settings {
     alwaysChargeUnderDollarsPerKWH: number;
     additionalFeesDollarsPerKWH: number;
     minArbitrageDifferenceDollarsPerKWH: number;
+    minDeficitPriceDifferenceDollarsPerKWH: number;
     minBatterySOC: number;
     ignoreHourUsageOverMultiple: number;
     gridChargeBatteries: boolean;

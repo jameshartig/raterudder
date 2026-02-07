@@ -144,6 +144,35 @@ func TestDecide(t *testing.T) {
 		assert.Contains(t, decision.Action.Description, "Projected Deficit")
 	})
 
+	t.Run("Deficit detected -> Charge Later due to MinDeficitPriceDifference", func(t *testing.T) {
+		currentPrice := types.Price{TSStart: now, DollarsPerKWH: 0.10}
+		// Future is expensive, but difference is small
+		futurePrices := []types.Price{}
+		for i := 1; i <= 24; i++ {
+			futurePrices = append(futurePrices, types.Price{
+				TSStart:       now.Add(time.Duration(i) * time.Hour),
+				DollarsPerKWH: 0.12,
+			})
+		}
+
+		lowBattStatus := baseStatus
+		lowBattStatus.BatterySOC = 20.0
+		// pretend we're charging from the grid now
+		lowBattStatus.GridKW = 2.0
+		lowBattStatus.BatteryKW = -1.0
+
+		settings := baseSettings
+		settings.MinDeficitPriceDifferenceDollarsPerKWH = 0.05 // Require 5 cents diff
+		settings.MinArbitrageDifferenceDollarsPerKWH = 0.10    // High arbitrage threshold to avoid interference
+
+		decision, err := c.Decide(ctx, lowBattStatus, currentPrice, futurePrices, history, settings)
+		require.NoError(t, err)
+
+		// Should not charge now, so it should be Standby
+		assert.Equal(t, types.BatteryModeStandby, decision.Action.BatteryMode)
+		assert.Contains(t, decision.Action.Description, "Deficit predicted")
+	})
+
 	t.Run("Arbitrage Opportunity -> Charge", func(t *testing.T) {
 		currentPrice := types.Price{TSStart: now, DollarsPerKWH: 0.10}
 		futurePrices := []types.Price{

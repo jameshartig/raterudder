@@ -377,6 +377,7 @@ func (f *Franklin) GetStatus(ctx context.Context) (types.SystemStatus, error) {
 		CanExportBattery:      pc.GridFeedMaxFlag == GridFeedMaxFlagBatteryAndSolar,
 		CanImportBattery:      pc.GridMaxFlag == GridMaxFlagChargeFromGrid,
 		ElevatedMinBatterySOC: modes.currentMode.ReserveSOC > 0 && modes.currentMode.ReserveSOC > f.settings.MinBatterySOC,
+		BatteryAboveMinSOC:    rd.RuntimeData.SOC >= modes.currentMode.ReserveSOC,
 
 		// TODO: get this from hes-gateway/common/getPowerCapConfigList
 		MaxBatteryChargeKW:    8 * float64(len(rd.RuntimeData.EachSOC)),
@@ -412,7 +413,13 @@ func (f *Franklin) getPowerControl(ctx context.Context) (getPowerControlSettingR
 
 // SetPowerControl sets the power control configuration for the franklin system
 func (f *Franklin) SetPowerControl(ctx context.Context, cfg types.PowerControlConfig) error {
-	slog.DebugContext(ctx, "SetPowerControl called", "config", cfg)
+	slog.DebugContext(
+		ctx,
+		"SetPowerControl called",
+		slog.Bool("gridChargeEnabled", cfg.GridChargeEnabled),
+		slog.Bool("gridExportEnabled", cfg.GridExportEnabled),
+		slog.Float64("gridExportMax", cfg.GridExportMax),
+	)
 	if err := f.login(ctx); err != nil {
 		return err
 	}
@@ -477,9 +484,9 @@ func (f *Franklin) setPowerControl(ctx context.Context, pc getPowerControlSettin
 	}
 	data["gridFeedMaxFlag"] = pc.GridFeedMaxFlag
 
-	slog.DebugContext(
+	slog.InfoContext(
 		ctx,
-		"setting power control",
+		"setting franklin power control",
 		slog.Float64("gridMax", pc.GridMax),
 		slog.Int("gridMaxFlag", int(pc.GridMaxFlag)),
 		slog.Float64("gridFeedMax", pc.GridFeedMax),
@@ -759,9 +766,9 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 			}
 		} else {
 			if alreadySC {
-				slog.DebugContext(
+				slog.InfoContext(
 					ctx,
-					"updating soc",
+					"updating franklin soc",
 					slog.String("soc", data.Get("soc")),
 					slog.String("workMode", data.Get("workMode")),
 				)
@@ -780,9 +787,9 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 					return err
 				}
 			} else {
-				slog.DebugContext(
+				slog.InfoContext(
 					ctx,
-					"updating tou mode",
+					"updating franklin tou mode",
 					slog.String("soc", data.Get("soc")),
 					slog.String("workMode", data.Get("workMode")),
 				)
