@@ -1,3 +1,16 @@
+export interface SystemAlarm {
+    name: string;
+    description: string;
+    time: string;
+    code: string;
+}
+
+export interface SystemStatus {
+    alarms?: SystemAlarm[];
+    // Add other fields from backend if useful, but alarms is what we need now
+    [key: string]: any;
+}
+
 export interface Action {
     timestamp: string;
     batteryMode: number;
@@ -8,8 +21,9 @@ export interface Action {
         tsEnd: string;
         dollarsPerKWH: number;
     };
-    systemStatus?: any;
+    systemStatus?: SystemStatus;
     dryRun?: boolean;
+    fault?: boolean;
 }
 
 export const BatteryMode = {
@@ -76,6 +90,8 @@ export interface Settings {
     ignoreHourUsageOverMultiple: number;
     gridChargeBatteries: boolean;
     gridExportSolar: boolean;
+    solarTrendRatioMax: number;
+    solarBellCurveMultiplier: number;
 }
 
 export const fetchSettings = async (): Promise<Settings> => {
@@ -136,3 +152,26 @@ export const logout = async (): Promise<void> => {
         throw new Error('Logout failed');
     }
 };
+
+export interface ModelingHour {
+    ts: string;
+    hour: number;
+    netLoadSolarKWH: number;
+    gridChargeDollarsPerKWH: number;
+    solarOppDollarsPerKWH: number;
+    avgHomeLoadKWH: number;
+    predictedSolarKWH: number;
+    batteryKWH: number;
+    batteryCapacityKWH: number;
+    batteryReserveKWH: number;
+    todaySolarTrend: number;
+}
+
+export const fetchModeling = async (): Promise<ModelingHour[]> => {
+    const response = await fetch('/api/modeling');
+    if (!response.ok) {
+        throw new Error('Failed to fetch modeling data');
+    }
+    return response.json();
+};
+

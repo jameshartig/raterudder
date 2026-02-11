@@ -114,58 +114,104 @@ const ActionList: React.FC = () => {
     const netSavings = savings ? savings.batterySavings + savings.solarSavings : 0;
 
     const groupedActions = useMemo(() => {
-        const result: (Action | { isSummary: true; startTime: string; avgPrice: number; min: number; max: number; count: number })[] = [];
-        let currentSummary: { startTime: string; count: number; total: number; min: number; max: number } | null = null;
+        type SummaryType = 'no_change' | 'fault';
+
+        interface ActionSummary {
+            isSummary: true;
+            type: SummaryType;
+            startTime: string;
+            avgPrice: number;
+            min: number;
+            max: number;
+            count: number;
+            alarms: Set<string>;
+        }
+
+        interface ActionSummaryAccumulator extends Omit<ActionSummary, 'avgPrice'> {
+            total: number;
+        }
+
+        const accumulator: (Action | ActionSummaryAccumulator)[] = [];
+        let currentSummary: ActionSummaryAccumulator | null = null;
 
         for (const action of actions) {
-            const isNoChange = action.batteryMode === BatteryMode.NoChange && action.solarMode === SolarMode.NoChange;
+            const isFault = !!action.fault;
+            const isNoChange = !isFault && action.batteryMode === BatteryMode.NoChange && action.solarMode === SolarMode.NoChange;
 
-            if (isNoChange) {
-                const price = action.currentPrice ? action.currentPrice.dollarsPerKWH : 0;
-                if (!currentSummary) {
-                    currentSummary = {
-                        startTime: action.timestamp,
-                        count: 1,
-                        total: price,
-                        min: price,
-                        max: price
-                    };
-                } else {
+            const price = action.currentPrice ? action.currentPrice.dollarsPerKWH : 0;
+
+            if (isFault) {
+                if (currentSummary && currentSummary.type === 'fault') {
                     currentSummary.count++;
                     currentSummary.total += price;
                     currentSummary.min = Math.min(currentSummary.min, price);
                     currentSummary.max = Math.max(currentSummary.max, price);
+                } else {
+                    if (currentSummary) {
+                        accumulator.push(currentSummary);
+                    }
+                    currentSummary = {
+                        isSummary: true,
+                        type: 'fault',
+                        startTime: action.timestamp,
+                        count: 1,
+                        total: price,
+                        min: price,
+                        max: price,
+                        alarms: new Set<string>()
+                    };
+                }
+
+                if (action.systemStatus && action.systemStatus.alarms) {
+                    action.systemStatus.alarms.forEach(alarm => {
+                       if (currentSummary) currentSummary.alarms.add(alarm.name);
+                    });
+                }
+            } else if (isNoChange) {
+                if (currentSummary && currentSummary.type === 'no_change') {
+                    currentSummary.count++;
+                    currentSummary.total += price;
+                    currentSummary.min = Math.min(currentSummary.min, price);
+                    currentSummary.max = Math.max(currentSummary.max, price);
+                } else {
+                    if (currentSummary) {
+                        accumulator.push(currentSummary);
+                    }
+                    currentSummary = {
+                        isSummary: true,
+                        type: 'no_change',
+                        startTime: action.timestamp,
+                        count: 1,
+                        total: price,
+                        min: price,
+                        max: price,
+                        alarms: new Set<string>()
+                    };
                 }
             } else {
                 if (currentSummary) {
-                    const summary = currentSummary;
-                    result.push({
-                        isSummary: true,
-                        startTime: summary.startTime,
-                        count: summary.count,
-                        avgPrice: summary.total / summary.count,
-                        min: summary.min,
-                        max: summary.max
-                    });
+                    accumulator.push(currentSummary);
                     currentSummary = null;
                 }
-                result.push(action);
+                accumulator.push(action);
             }
         }
 
         if (currentSummary) {
-            const summary = currentSummary;
-            result.push({
-                isSummary: true,
-                startTime: summary.startTime,
-                count: summary.count,
-                avgPrice: summary.total / summary.count,
-                min: summary.min,
-                max: summary.max
-            });
+            accumulator.push(currentSummary);
         }
 
-        return result;
+        return accumulator.map(item => {
+            if ('isSummary' in item) {
+                const summary = item as ActionSummaryAccumulator;
+                const { total, ...rest } = summary;
+                return {
+                    ...rest,
+                    avgPrice: total / summary.count
+                } as ActionSummary;
+            }
+            return item;
+        });
     }, [actions]);
 
     return (
@@ -241,13 +287,20 @@ const ActionList: React.FC = () => {
                             if ('isSummary' in item) {
                                 const summary = item as any;
                                 const showRange = summary.min !== summary.max;
+                                const isFault = summary.type === 'fault';
+                                const title = isFault ? 'System Fault' : 'No Change';
+                                const alarms = isFault ? Array.from(summary.alarms).join(', ') : '';
+
                                 return (
-                                    <li key={index} className="action-item summary-item">
+                                    <li key={index} className={`action-item summary-item ${isFault ? 'fault-item' : ''}`}>
                                         <div className="action-time">
                                             {new Date(summary.startTime).toLocaleTimeString()}
                                         </div>
                                         <div className="action-details">
-                                            <h3>No Change {summary.count > 1 && <span>({summary.count}x)</span>}</h3>
+                                            <h3>{title} {summary.count > 1 && <span>({summary.count}x)</span>}</h3>
+                                            {isFault && alarms && (
+                                                <p className="fault-alarms">Alarms: {alarms}</p>
+                                            )}
                                             <div className="action-footer">
                                                 <span className="price-label">Avg Price:</span> ${summary.avgPrice.toFixed(3)}/kWh
                                                 {showRange && <span className="price-range"> (Range: ${summary.min.toFixed(3)} - ${summary.max.toFixed(3)})</span>}

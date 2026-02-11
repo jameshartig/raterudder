@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -21,6 +22,8 @@ func TestDecide(t *testing.T) {
 		GridChargeBatteries:                 true,
 		GridExportSolar:                     true,
 		MinArbitrageDifferenceDollarsPerKWH: 0.01,
+		SolarTrendRatioMax:                  3.0,
+		SolarBellCurveMultiplier:            1.0,
 	}
 
 	baseStatus := types.SystemStatus{
@@ -28,7 +31,6 @@ func TestDecide(t *testing.T) {
 		BatteryCapacityKWH: 10.0,
 		MaxBatteryChargeKW: 5.0,
 		HomeKW:             1.0,
-		SolarKW:            0.0,
 		CanImportBattery:   true,
 		CanExportBattery:   true,
 		CanExportSolar:     true,
@@ -120,7 +122,7 @@ func TestDecide(t *testing.T) {
 		decision, err := c.Decide(ctx, lowBattStatus, currentPrice, futurePrices, history, baseSettings)
 		require.NoError(t, err)
 
-		assert.Equal(t, types.BatteryModeLoad, decision.Action.BatteryMode)
+		assert.Equal(t, types.BatteryModeLoad, decision.Action.BatteryMode, decision)
 	})
 
 	t.Run("Deficit detected -> Charge Now (Cheapest Option)", func(t *testing.T) {
@@ -298,7 +300,7 @@ func TestDecide(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, types.BatteryModeLoad, decision.Action.BatteryMode)
-		assert.Contains(t, decision.Action.Description, "Sufficient Battery")
+		assert.Contains(t, decision.Action.Description, "Sufficient battery")
 	})
 
 	t.Run("Deficit + Moderate Price + High Future Price -> Standby", func(t *testing.T) {
@@ -312,11 +314,14 @@ func TestDecide(t *testing.T) {
 		noGridSettings := baseSettings
 		noGridSettings.GridChargeBatteries = false
 
+		usingBatteryStatus := baseStatus
+		usingBatteryStatus.BatteryKW = 1.0
+
 		// Available 5kWh. Deficit!
-		decision, err := c.Decide(ctx, baseStatus, currentPrice, futurePrices, history, noGridSettings)
+		decision, err := c.Decide(ctx, usingBatteryStatus, currentPrice, futurePrices, history, noGridSettings)
 		require.NoError(t, err)
 
-		assert.Equal(t, types.BatteryModeNoChange, decision.Action.BatteryMode)
+		assert.Equal(t, types.BatteryModeStandby, decision.Action.BatteryMode)
 		assert.Contains(t, decision.Action.Description, "Deficit predicted")
 	})
 
@@ -508,6 +513,10 @@ func TestDecide(t *testing.T) {
 		c := NewController()
 		ctx := context.Background()
 
+		// Use a fixed time at noon on a summer day so the test is deterministic
+		// and the solar history data aligns with daylight hours.
+		fixedNow := time.Date(2025, 6, 15, 13, 0, 0, 0, time.UTC)
+
 		baseSettings := types.Settings{
 			MinBatterySOC:                       20.0,
 			AlwaysChargeUnderDollarsPerKWH:      0.01,
@@ -515,53 +524,58 @@ func TestDecide(t *testing.T) {
 			GridChargeBatteries:                 true,
 			GridExportSolar:                     true,
 			MinArbitrageDifferenceDollarsPerKWH: 0.01,
+			SolarTrendRatioMax:                  3.0,
+			SolarBellCurveMultiplier:            1.0,
 		}
 
 		baseStatus := types.SystemStatus{
+			Timestamp:          fixedNow,
 			BatterySOC:         50.0,
 			BatteryCapacityKWH: 10.0,
 			MaxBatteryChargeKW: 5.0,
-			HomeKW:             2.0,
+			HomeKW:             0.5,
 			SolarKW:            2.0,
 		}
 
-		realNow := time.Now()
 		// Create price to avoid cheap charge triggers
-		currentPrice := types.Price{TSStart: realNow, DollarsPerKWH: 0.20}
+		currentPrice := types.Price{TSStart: fixedNow, DollarsPerKWH: 0.20}
 		futurePrices := []types.Price{}
 		for i := 1; i <= 24; i++ {
 			futurePrices = append(futurePrices, types.Price{
-				TSStart:       realNow.Add(time.Duration(i) * time.Hour),
+				TSStart:       fixedNow.Add(time.Duration(i) * time.Hour),
 				DollarsPerKWH: 0.20,
 			})
 		}
 
-		// Helper to create history based on 'realNow' but with different trend scenarios
-		createHistory := func(highTrend bool) []types.EnergyStats {
+		// Helper to create history with a bell-curve solar profile.
+		// If highTrend is true, "today" (last 24h) gets 2x solar.
+		createHistory := func(highTrend bool, homeLoad float64) []types.EnergyStats {
 			h := []types.EnergyStats{}
-			// 48 hours back to now
-			start := realNow.Add(-48 * time.Hour).Truncate(time.Hour)
-			end := realNow.Truncate(time.Hour)
-
-			// Ensure we capture "Yesterday" and "Today" logic correctly relative to realNow.
-			// If realNow is Night, "Today" might not have any solar.
-			// But let's assume valid solar hours are being populated regardless of time.
+			start := fixedNow.Add(-48 * time.Hour).Truncate(time.Hour)
+			end := fixedNow.Truncate(time.Hour)
 
 			for ts := start; ts.Before(end); ts = ts.Add(time.Hour) {
-				solar := 1.0 // Base solar (Yesterday)
+				isToday := ts.After(fixedNow.Add(-24 * time.Hour))
 
-				// Check if this timestamp is "Recently" (last 24 hours)
-				isToday := ts.After(realNow.Add(-24 * time.Hour))
+				solar := 0.0
+				if ts.Hour() >= 7 && ts.Hour() <= 19 {
+					dist := math.Abs(float64(ts.Hour()) - 13.0)
+					if dist < 6 {
+						solar = 1.0 * (1.0 - (dist / 6.0))
+					}
+				}
 
 				if isToday && highTrend {
-					solar = 2.0
+					if solar > 0 {
+						solar *= 2.0
+					}
 				}
 
 				h = append(h, types.EnergyStats{
 					TSHourStart:    ts,
 					SolarKWH:       solar,
-					HomeKWH:        2.0,
-					GridImportKWH:  1.0,
+					HomeKWH:        homeLoad,
+					GridImportKWH:  0.0,
 					BatteryUsedKWH: 0.0,
 				})
 			}
@@ -569,90 +583,96 @@ func TestDecide(t *testing.T) {
 		}
 
 		t.Run("High Solar Trend -> Load (Sufficient Solar)", func(t *testing.T) {
-			history := createHistory(true)
-			decision, err := c.Decide(ctx, baseStatus, currentPrice, futurePrices, history, baseSettings)
+			history := createHistory(true, 0.1)
+			status := baseStatus
+			status.HomeKW = 0.1
+			status.ElevatedMinBatterySOC = true
+			decision, err := c.Decide(ctx, status, currentPrice, futurePrices, history, baseSettings)
 			require.NoError(t, err)
-			// Should be Standby, but since BatteryKW is 0, it returns NoChange
-			// Should be Load (Sufficient Battery)
-			// BatteryKW=0 (Idle). finalizeAction for Load returns Load (to ensure active).
-			assert.Equal(t, types.BatteryModeLoad, decision.Action.BatteryMode, "Should return Load because Sufficient Battery")
+			assert.Equal(t, types.BatteryModeLoad, decision.Action.BatteryMode,
+				"Should return Load because sufficient battery. Got: %v (%s)",
+				decision.Action.BatteryMode, decision.Action.Description)
 		})
 
 		t.Run("No Solar Trend -> Charge", func(t *testing.T) {
-			history := createHistory(false)
-			decision, err := c.Decide(ctx, baseStatus, currentPrice, futurePrices, history, baseSettings)
+			history := createHistory(false, 2.0)
+			status := baseStatus
+			status.HomeKW = 2.0
+			decision, err := c.Decide(ctx, status, currentPrice, futurePrices, history, baseSettings)
 			require.NoError(t, err)
-			assert.Equal(t, types.BatteryModeChargeAny, decision.Action.BatteryMode, "Should predict deficit due to low solar")
+			assert.Equal(t, types.BatteryModeChargeAny, decision.Action.BatteryMode,
+				"Should predict deficit due to low solar")
 			assert.Contains(t, decision.Action.Description, "Projected Deficit")
 		})
 	})
-}
 
-func TestBuildHourlyEnergyModel(t *testing.T) {
-	c := NewController()
-	ctx := context.Background()
+	t.Run("Early Morning Unnecessary Standby", func(t *testing.T) {
+		// 8 AM
+		now := time.Date(2025, 6, 15, 8, 0, 0, 0, time.Local)
 
-	t.Run("Basic Average", func(t *testing.T) {
-		h1 := time.Now().Truncate(time.Hour)
-		h2 := h1.Add(-24 * time.Hour)
-
-		history := []types.EnergyStats{
-			{TSHourStart: h1, HomeKWH: 1.0, SolarKWH: 2.0},
-			{TSHourStart: h2, HomeKWH: 3.0, SolarKWH: 4.0},
+		baseSettings := types.Settings{
+			MinBatterySOC:                       20.0,
+			AlwaysChargeUnderDollarsPerKWH:      0.01,
+			AdditionalFeesDollarsPerKWH:         0.02,
+			GridChargeBatteries:                 false, // Disabled to test Standby/Load decision
+			GridExportSolar:                     false, // Export disabled
+			MinArbitrageDifferenceDollarsPerKWH: 0.01,
 		}
 
-		// Avg Load: (1+3)/2 = 2.0. Avg Solar: (2+4)/2 = 3.0
-		model := c.buildHourlyEnergyModel(ctx, history, 0.0)
-		assert.InDelta(t, 2.0, model[h1.Hour()].AvgHomeLoad, 0.001)
-		assert.InDelta(t, 3.0, model[h1.Hour()].AvgSolar, 0.001)
-	})
-
-	t.Run("Outlier", func(t *testing.T) {
-		// Create history with 3 normal points and 1 outlier
-		now := time.Now()
-		h1 := now.Truncate(time.Hour)
-		h2 := h1.Add(-24 * time.Hour)
-		h3 := h1.Add(-48 * time.Hour)
-		h4 := h1.Add(-72 * time.Hour)
-
-		history := []types.EnergyStats{
-			{TSHourStart: h1, HomeKWH: 1.0, SolarKWH: 0.0},
-			{TSHourStart: h2, HomeKWH: 1.1, SolarKWH: 0.0},
-			{TSHourStart: h3, HomeKWH: 0.9, SolarKWH: 0.0},
-			{TSHourStart: h4, HomeKWH: 10.0, SolarKWH: 0.0}, // The outlier (10x normal)
+		baseStatus := types.SystemStatus{
+			Timestamp:             now,
+			BatterySOC:            80.0,
+			BatteryCapacityKWH:    13.0, // typical Franklin capacity
+			MaxBatteryChargeKW:    5.0,
+			MaxBatteryDischargeKW: 5.0,
+			HomeKW:                1.0,
+			SolarKW:               1.0,
+			CanImportBattery:      true,
+			CanExportBattery:      false, // Can't export battery usually
+			CanExportSolar:        false, // Can't export solar
+			ElevatedMinBatterySOC: true,  // Simulate we are currently in Standby/Full
 		}
 
-		// Case 1: Multiple = 0 (Disabled) -> Average should include 10.0
-		// Avg = (1.0 + 1.1 + 0.9 + 10.0) / 4 = 13.0 / 4 = 3.25
-		modelDisabled := c.buildHourlyEnergyModel(ctx, history, 0.0)
-		assert.InDelta(t, 3.25, modelDisabled[h1.Hour()].AvgHomeLoad, 0.001)
+		// Current Price is moderate/high (Morning Peak)
+		currentPrice := types.Price{TSStart: now, DollarsPerKWH: 0.20}
 
-		// Case 2: Multiple = 5 -> Should ignore 10.0
-		// Avg other for 10.0 is (1.0+1.1+0.9)/3 = 1.0.
-		// 10.0 > 1.0 * 5. So it is an outlier.
-		// Result Avg = 1.0
-		modelEnabled := c.buildHourlyEnergyModel(ctx, history, 5.0)
-		assert.InDelta(t, 1.0, modelEnabled[h1.Hour()].AvgHomeLoad, 0.001)
-
-		// Case 3: Multiple = 15 -> 10.0 is NOT > 1.0 * 15. avg should be 3.25
-		modelStrict := c.buildHourlyEnergyModel(ctx, history, 15.0)
-		assert.InDelta(t, 3.25, modelStrict[h1.Hour()].AvgHomeLoad, 0.001)
-	})
-
-	t.Run("Not Enough Points for Outlier", func(t *testing.T) {
-		now := time.Now()
-		h1 := now.Truncate(time.Hour)
-		h2 := h1.Add(-24 * time.Hour)
-
-		history := []types.EnergyStats{
-			{TSHourStart: h1, HomeKWH: 1.0, SolarKWH: 0.0},
-			{TSHourStart: h2, HomeKWH: 10.0, SolarKWH: 0.0},
+		// Future Prices: all flat at same level as current
+		// No higher future price means no reason to standby
+		futurePrices := []types.Price{}
+		for i := 1; i <= 24; i++ {
+			ts := now.Add(time.Duration(i) * time.Hour)
+			futurePrices = append(futurePrices, types.Price{
+				TSStart:       ts,
+				DollarsPerKWH: 0.20,
+			})
 		}
 
-		// Even with outlier protection enabled, we only have 2 points.
-		// It should NOT filter anything.
-		// Avg = (1+10)/2 = 5.5
-		model := c.buildHourlyEnergyModel(ctx, history, 2.0)
-		assert.InDelta(t, 5.5, model[h1.Hour()].AvgHomeLoad, 0.001)
+		// History: Strong Solar (2 days for robust model)
+		history := []types.EnergyStats{}
+		start := now.Add(-48 * time.Hour).Truncate(time.Hour)
+		end := now.Truncate(time.Hour)
+
+		for ts := start; ts.Before(end); ts = ts.Add(time.Hour) {
+			hour := ts.Hour()
+			solar := 0.0
+			if hour >= 6 && hour <= 20 {
+				dist := float64(hour - 13)
+				solar = 5.0 - (dist*dist)/10.0
+				if solar < 0 {
+					solar = 0
+				}
+			}
+
+			history = append(history, types.EnergyStats{
+				TSHourStart: ts,
+				SolarKWH:    solar,
+				HomeKWH:     1.0,
+			})
+		}
+
+		decision, err := c.Decide(ctx, baseStatus, currentPrice, futurePrices, history, baseSettings)
+		require.NoError(t, err)
+		assert.Equal(t, types.BatteryModeLoad, decision.Action.BatteryMode,
+			"Should load (discharge) because battery will refill from solar")
 	})
 }

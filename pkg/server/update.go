@@ -107,7 +107,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	// 2. Sync energy history
 	{
 		// First, find out the last time we have history for
-		lastHistoryTime, err := s.storage.GetLatestEnergyHistoryTime(ctx)
+		lastHistoryTime, lastVersion, err := s.storage.GetLatestEnergyHistoryTime(ctx)
 		if err != nil {
 			slog.WarnContext(ctx, "failed to get latest energy history time", slog.Any("error", err))
 		}
@@ -120,8 +120,16 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		fiveDaysAgo := now.Add(-5 * 24 * time.Hour)
 		syncStart := time.Date(fiveDaysAgo.Year(), fiveDaysAgo.Month(), fiveDaysAgo.Day(), 0, 0, 0, 0, fiveDaysAgo.Location())
 
-		if !lastHistoryTime.IsZero() && lastHistoryTime.After(syncStart) {
+		// Only use lastHistoryTime if version matches
+		if !lastHistoryTime.IsZero() && lastVersion >= types.CurrentEnergyStatsVersion && lastHistoryTime.After(syncStart) {
 			syncStart = lastHistoryTime.Truncate(time.Hour)
+		} else if !lastHistoryTime.IsZero() && lastVersion < types.CurrentEnergyStatsVersion {
+			slog.InfoContext(
+				ctx,
+				"backfilling energy history due to version mismatch",
+				slog.Int("lastVersion", lastVersion),
+				slog.Int("currentVersion", types.CurrentEnergyStatsVersion),
+			)
 		}
 
 		slog.DebugContext(ctx, "syncing energy history", slog.Any("since", syncStart))
@@ -133,14 +141,14 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 				end = now
 			}
 
-			slog.DebugContext(ctx, "syncing energy history batch", "start", t, "end", end)
+			slog.DebugContext(ctx, "syncing energy history batch", slog.Time("start", t), slog.Time("end", end))
 			newHistory, err := s.essSystem.GetEnergyHistory(ctx, t, end)
 			if err != nil {
 				slog.ErrorContext(ctx, "failed to get energy history from ess", slog.Any("error", err), slog.Time("start", t), slog.Time("end", end))
 				// continue to next day even if this one failed
 			} else {
 				for _, h := range newHistory {
-					if err := s.storage.UpsertEnergyHistory(ctx, h); err != nil {
+					if err := s.storage.UpsertEnergyHistory(ctx, h, types.CurrentEnergyStatsVersion); err != nil {
 						slog.ErrorContext(ctx, "failed to upsert energy history", slog.Any("error", err))
 					}
 				}
@@ -152,7 +160,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 	// 2b. Sync price history
 	{
-		lastPriceTime, err := s.storage.GetLatestPriceHistoryTime(ctx)
+		lastPriceTime, lastVersion, err := s.storage.GetLatestPriceHistoryTime(ctx)
 		if err != nil {
 			slog.WarnContext(ctx, "failed to get latest price history time", slog.Any("error", err))
 		}
@@ -161,8 +169,15 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		fiveDaysAgo := now.Add(-5 * 24 * time.Hour)
 		syncStart := time.Date(fiveDaysAgo.Year(), fiveDaysAgo.Month(), fiveDaysAgo.Day(), 0, 0, 0, 0, fiveDaysAgo.Location())
 
-		if !lastPriceTime.IsZero() && lastPriceTime.After(syncStart) {
+		if !lastPriceTime.IsZero() && lastVersion >= types.CurrentPriceHistoryVersion && lastPriceTime.After(syncStart) {
 			syncStart = lastPriceTime.Truncate(time.Hour)
+		} else if !lastPriceTime.IsZero() && lastVersion < types.CurrentPriceHistoryVersion {
+			slog.InfoContext(
+				ctx,
+				"backfilling price history due to version mismatch",
+				slog.Int("lastVersion", lastVersion),
+				slog.Int("currentVersion", types.CurrentPriceHistoryVersion),
+			)
 		}
 
 		slog.DebugContext(ctx, "syncing price history", slog.Any("since", syncStart))
@@ -180,7 +195,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 				slog.ErrorContext(ctx, "failed to get confirmed prices", slog.Any("error", err), slog.Time("start", t), slog.Time("end", end))
 			} else {
 				for _, p := range newPrices {
-					if err := s.storage.UpsertPrice(ctx, p); err != nil {
+					if err := s.storage.UpsertPrice(ctx, p, types.CurrentPriceHistoryVersion); err != nil {
 						slog.ErrorContext(ctx, "failed to upsert price", slog.Any("error", err))
 					}
 				}
@@ -215,10 +230,44 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	// don't update if we're in emergency mode
 	if status.EmergencyMode {
 		slog.InfoContext(ctx, "update: emergency mode")
+		action := types.Action{
+			Timestamp:    time.Now(),
+			BatteryMode:  types.BatteryModeNoChange,
+			SolarMode:    types.SolarModeNoChange,
+			Description:  "In emergency mode",
+			SystemStatus: status,
+			Fault:        true,
+		}
+		if err := s.storage.InsertAction(ctx, action); err != nil {
+			slog.ErrorContext(ctx, "failed to insert action", slog.Any("error", err))
+		}
 		w.WriteHeader(http.StatusOK)
 		// We return 200 OK so the scheduler doesn't think it failed
 		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"status": "emergency mode",
+		}); err != nil {
+			panic(http.ErrAbortHandler)
+		}
+		return
+	}
+
+	if len(status.Alarms) > 0 {
+		slog.InfoContext(ctx, "update: alarms present", slog.Any("alarms", status.Alarms))
+		action := types.Action{
+			Timestamp:    time.Now(),
+			BatteryMode:  types.BatteryModeNoChange,
+			SolarMode:    types.SolarModeNoChange,
+			Description:  fmt.Sprintf("%d alarms present", len(status.Alarms)),
+			SystemStatus: status,
+			Fault:        true,
+		}
+		if err := s.storage.InsertAction(ctx, action); err != nil {
+			slog.ErrorContext(ctx, "failed to insert action", slog.Any("error", err))
+		}
+		w.WriteHeader(http.StatusOK)
+		// We return 200 OK so the scheduler doesn't think it failed
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "alarms present",
 		}); err != nil {
 			panic(http.ErrAbortHandler)
 		}

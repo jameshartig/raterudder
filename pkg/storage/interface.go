@@ -15,16 +15,16 @@ type Provider interface {
 
 	// Data Persistence
 	// UpsertPrice adds or updates a price record.
-	UpsertPrice(ctx context.Context, price types.Price) error
+	UpsertPrice(ctx context.Context, price types.Price, version int) error
 	InsertAction(ctx context.Context, action types.Action) error
-	UpsertEnergyHistory(ctx context.Context, stats types.EnergyStats) error
+	UpsertEnergyHistory(ctx context.Context, stats types.EnergyStats, version int) error
 
 	// History
 	GetPriceHistory(ctx context.Context, start, end time.Time) ([]types.Price, error)
 	GetActionHistory(ctx context.Context, start, end time.Time) ([]types.Action, error)
 	GetEnergyHistory(ctx context.Context, start, end time.Time) ([]types.EnergyStats, error)
-	GetLatestEnergyHistoryTime(ctx context.Context) (time.Time, error)
-	GetLatestPriceHistoryTime(ctx context.Context) (time.Time, error)
+	GetLatestEnergyHistoryTime(ctx context.Context) (time.Time, int, error)
+	GetLatestPriceHistoryTime(ctx context.Context) (time.Time, int, error)
 
 	// Lifecycle
 	Close() error

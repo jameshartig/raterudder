@@ -26,16 +26,20 @@ import (
 // Franklin implements the System interface for FranklinWH.
 // It interacts with the FranklinWH API to monitor and control the energy storage system.
 type Franklin struct {
-	client      *http.Client
-	baseURL     string
-	username    string
-	password    string
-	md5Password string
-	gatewayID   string
-	tokenStr    string
-	tokenExpiry time.Time
-	mu          sync.Mutex
-	settings    types.Settings
+	client            *http.Client
+	baseURL           string
+	username          string
+	password          string
+	md5Password       string
+	gatewayID         string
+	tokenStr          string
+	tokenExpiry       time.Time
+	mu                sync.Mutex
+	settings          types.Settings
+	deviceInfoCache   deviceInfoV2Result
+	deviceInfoExpiry  time.Time
+	runtimeDataCache  deviceCompositeInfoResult
+	runtimeDataExpiry time.Time
 }
 
 type franklinMode struct {
@@ -289,10 +293,11 @@ func (f *Franklin) getRuntimeData(ctx context.Context) (deviceCompositeInfoResul
 
 	slog.DebugContext(ctx, "franklin runtime data",
 		slog.Float64("soc", res.RuntimeData.SOC),
-		slog.Float64("solar_kw", res.RuntimeData.PowerSolar),
-		slog.Float64("grid_kw", res.RuntimeData.PowerGrid),
-		slog.Float64("load_kw", res.RuntimeData.PowerLoad),
-		slog.Float64("battery_kw", res.RuntimeData.PowerBattery),
+		slog.Float64("solarKW", res.RuntimeData.PowerSolar),
+		slog.Float64("gridKW", res.RuntimeData.PowerGrid),
+		slog.Float64("loadKW", res.RuntimeData.PowerLoad),
+		slog.Float64("batteryKW", res.RuntimeData.PowerBattery),
+		slog.Int("alarms", len(res.CurrentAlarmList)),
 	)
 
 	return res, nil
@@ -330,6 +335,13 @@ func (f *Franklin) getDeviceInfo(ctx context.Context) (deviceInfoV2Result, error
 		return deviceInfoV2Result{}, err
 	}
 
+	loc, err := time.LoadLocation(res.TimeZone)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to load location, defaulting to UTC", slog.String("tz", res.TimeZone), slog.Any("error", err))
+		loc = time.UTC
+	}
+	res.location = loc
+
 	return res, nil
 }
 
@@ -348,9 +360,16 @@ func (f *Franklin) GetStatus(ctx context.Context) (types.SystemStatus, error) {
 		return types.SystemStatus{}, err
 	}
 
-	di, err := f.getDeviceInfo(ctx)
-	if err != nil {
-		return types.SystemStatus{}, err
+	var di deviceInfoV2Result
+	if time.Now().Before(f.deviceInfoExpiry) {
+		di = f.deviceInfoCache
+	} else {
+		di, err = f.getDeviceInfo(ctx)
+		if err != nil {
+			return types.SystemStatus{}, err
+		}
+		f.deviceInfoCache = di
+		f.deviceInfoExpiry = time.Now().Add(time.Minute)
 	}
 
 	modes, err := f.getAvailableModes(ctx)
@@ -363,7 +382,30 @@ func (f *Franklin) GetStatus(ctx context.Context) (types.SystemStatus, error) {
 		return types.SystemStatus{}, err
 	}
 
+	var alarms []types.SystemAlarm
+	for _, alarm := range rd.CurrentAlarmList {
+		t, err := time.ParseInLocation("2006-01-02 15:04:05", alarm.Time, di.location)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to parse alarmtime", slog.String("time", alarm.Time), slog.Any("error", err))
+		}
+		slog.DebugContext(
+			ctx,
+			"franklin alarm in status",
+			slog.String("name", alarm.Name),
+			slog.String("description", alarm.Explanation),
+			slog.Time("time", t),
+			slog.String("code", alarm.AlarmCode),
+		)
+		alarms = append(alarms, types.SystemAlarm{
+			Name:        alarm.Name,
+			Description: alarm.Explanation,
+			Time:        t,
+			Code:        alarm.AlarmCode,
+		})
+	}
+
 	return types.SystemStatus{
+		Timestamp:             time.Now().In(di.location),
 		BatterySOC:            rd.RuntimeData.SOC,
 		EachBatterySOC:        rd.RuntimeData.EachSOC,
 		BatteryKW:             rd.RuntimeData.PowerBattery,
@@ -382,6 +424,8 @@ func (f *Franklin) GetStatus(ctx context.Context) (types.SystemStatus, error) {
 		// TODO: get this from hes-gateway/common/getPowerCapConfigList
 		MaxBatteryChargeKW:    8 * float64(len(rd.RuntimeData.EachSOC)),
 		MaxBatteryDischargeKW: 10 * float64(len(rd.RuntimeData.EachSOC)),
+
+		Alarms: alarms,
 	}, nil
 }
 
@@ -837,26 +881,29 @@ func (f *Franklin) GetEnergyHistory(ctx context.Context, start, end time.Time) (
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	di, err := f.getDeviceInfo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	loc, err := time.LoadLocation(di.TimeZone)
-	if err != nil {
-		slog.WarnContext(ctx, "failed to load location, defaulting to UTC", slog.String("tz", di.TimeZone), slog.Any("error", err))
-		loc = time.UTC
+	var di deviceInfoV2Result
+	if time.Now().Before(f.deviceInfoExpiry) {
+		di = f.deviceInfoCache
+	} else {
+		var err error
+		di, err = f.getDeviceInfo(ctx)
+		if err != nil {
+			return nil, err
+		}
+		f.deviceInfoCache = di
+		f.deviceInfoExpiry = time.Now().Add(time.Minute)
 	}
 
 	var allStats []types.EnergyStats
 
-	startInLoc := start.In(loc)
-	endInLoc := end.In(loc)
+	startInLoc := start.In(di.location)
+	endInLoc := end.In(di.location)
 
 	// Iterate through days
 	// Start from the beginning of the start day
-	current := time.Date(startInLoc.Year(), startInLoc.Month(), startInLoc.Day(), 0, 0, 0, 0, loc)
+	current := time.Date(startInLoc.Year(), startInLoc.Month(), startInLoc.Day(), 0, 0, 0, 0, di.location)
 	for current.Before(endInLoc) || current.Equal(endInLoc) {
-		stats, err := f.getEnergyStatsForDay(ctx, current, loc)
+		stats, err := f.getEnergyStatsForDay(ctx, current, di.location)
 		if err != nil {
 			slog.ErrorContext(ctx, "failed to get energy stats for day", slog.String("day", current.Format("2006-01-02")), slog.Any("error", err))
 			// Continue or return error? Let's return error to be safe.
@@ -957,7 +1004,9 @@ func (f *Franklin) getEnergyStatsForDay(ctx context.Context, day time.Time, loc 
 		hourKey := t.Format("2006-01-02 15:00:00")
 		if _, exists := hourlyStats[hourKey]; !exists {
 			hourlyStats[hourKey] = &types.EnergyStats{
-				TSHourStart: time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, t.Location()),
+				TSHourStart:   time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, t.Location()),
+				MinBatterySOC: res.SOCArray[i],
+				MaxBatterySOC: res.SOCArray[i],
 			}
 			sortedKeys = append(sortedKeys, hourKey)
 		}
@@ -984,6 +1033,13 @@ func (f *Franklin) getEnergyStatsForDay(ctx context.Context, day time.Time, loc 
 		s.SolarToHomeKWH += solarToHome
 		s.SolarToBatteryKWH += solarToBat
 		s.SolarToGridKWH += solarToGrid
+
+		if res.SOCArray[i] < s.MinBatterySOC {
+			s.MinBatterySOC = res.SOCArray[i]
+		}
+		if res.SOCArray[i] > s.MaxBatterySOC {
+			s.MaxBatterySOC = res.SOCArray[i]
+		}
 	}
 
 	// Sort the keys in chronological order
@@ -991,8 +1047,7 @@ func (f *Franklin) getEnergyStatsForDay(ctx context.Context, day time.Time, loc 
 
 	var result []types.EnergyStats
 	for _, key := range sortedKeys {
-		s := hourlyStats[key]
-		result = append(result, *s)
+		result = append(result, *hourlyStats[key])
 	}
 
 	return result, nil
@@ -1000,18 +1055,40 @@ func (f *Franklin) getEnergyStatsForDay(ctx context.Context, day time.Time, loc 
 
 // Internal Structs
 
+type currentAlarmVO struct {
+	ID                   int    `json:"id"`
+	GatewayID            string `json:"gatewayId"`
+	AlarmForSerialNumber string `json:"alarmEqSn"`
+	AlarmCode            string `json:"alarmCode"`
+	Time                 string `json:"time"`
+	Name                 string `json:"logName"`
+	Explanation          string `json:"alarmExplanation"`
+	Plan                 string `json:"plan"`
+	// TODO: level?
+}
+
 type deviceCompositeInfoResult struct {
-	CurrentWorkMode int         `json:"currentWorkMode"`
-	DeviceStatus    int         `json:"deviceStatus"`
-	RuntimeData     runtimeData `json:"runtimeData"`
-	Valid           bool        `json:"valid"`
-	// there's also "currentAlarmVOList": [], "solarHaveVo": {...}
+	CurrentWorkMode  int              `json:"currentWorkMode"`
+	DeviceStatus     int              `json:"deviceStatus"`
+	RuntimeData      runtimeData      `json:"runtimeData"`
+	Valid            bool             `json:"valid"`
+	CurrentAlarmList []currentAlarmVO `json:"currentAlarmVOList"`
+
+	// there's also "solarHaveVo": {...}
 }
 
 type runtimeData struct {
-	TOUID     int    `json:"mode"`
-	ModeName  string `json:"name"`
-	RunStatus int    `json:"run_status"`
+	TOUID    int    `json:"mode"`
+	ModeName string `json:"name"`
+
+	// 0 is standby
+	// 1 is charging
+	// 2 is discharging
+	// 3 is fault?
+	// 5 is off-grid standby
+	// 6 is off-grid charging
+	// 7 is off-grid discharging
+	RunStatus int `json:"run_status"`
 
 	SOC     float64   `json:"soc"`
 	EachSOC []float64 `json:"fhpSoc"`
@@ -1049,6 +1126,8 @@ type deviceInfoV2Result struct {
 	TotalBatteryCapacityKWH float64       `json:"totalCap"`
 	TotalBatteryPowerKW     float64       `json:"fixedPowerTotal"`
 	BatteryList             []batteryInfo `json:"batteryList"`
+
+	location *time.Location
 
 	// TODO: solarFlag, solarTipMsg
 	// TODO: activeStatus

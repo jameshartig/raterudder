@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"math"
 	"sort"
 	"time"
 
@@ -43,9 +42,7 @@ func (c *Controller) Decide(
 		slog.Float64("currentPrice", currentPrice.DollarsPerKWH),
 	)
 
-	now := time.Now()
-	// Build Energy Model
-	model := c.buildHourlyEnergyModel(ctx, history, settings.IgnoreHourUsageOverMultiple)
+	now := time.Now().In(currentStatus.Timestamp.Location())
 
 	solarMode := types.SolarModeAny
 	if !settings.GridExportSolar {
@@ -148,7 +145,6 @@ func (c *Controller) Decide(
 				finalBatMode = types.BatteryModeNoChange
 			}
 		default:
-
 		}
 
 		// Check Solar Mode
@@ -168,7 +164,7 @@ func (c *Controller) Decide(
 
 		return Decision{
 			Action: types.Action{
-				Timestamp:    now,
+				Timestamp:    now.UTC(),
 				BatteryMode:  finalBatMode,
 				SolarMode:    finalSolarMode,
 				Description:  modeReason,
@@ -202,155 +198,75 @@ func (c *Controller) Decide(
 		return finalizeAction(types.BatteryModeStandby, "Battery Config Missing or Capacity 0. Standby.", "Zero Battery Capacity"), nil
 	}
 
-	currentSOC := currentStatus.BatterySOC
-	availableKWH := capacityKWH * (currentSOC / 100.0)
-	minKWH := capacityKWH * (settings.MinBatterySOC / 100.0)
 	chargeKW := currentStatus.MaxBatteryChargeKW
 	if chargeKW <= 0 {
 		// conservatively assume it takes 3 hours to charge the battery from 0->100
 		chargeKW = capacityKWH / 3.0
 	}
 
-	type simHour struct {
-		ts             time.Time
-		hour           int
-		netLoadSolar   float64
-		gridChargeCost float64
-		solarOppCost   float64
-	}
-
-	// simulate our energy state and prices for the next 24 hours
-	simData := make([]simHour, 0, 24)
-
-	// We simulate starting from the *next* hour usually, but we need to cover "Now".
-	// Let's create a timeline of prices per hour for the next 24 hours.
-	// TODO: support non-hourly prices
-
-	// helper to find price at time t
-	getPriceAt := func(t time.Time) float64 {
-		for _, fp := range futurePrices {
-			if fp.TSStart.Truncate(time.Hour).Equal(t.Truncate(time.Hour)) {
-				return fp.DollarsPerKWH
-			}
-		}
-		// default to current price if no future price found
-		// TODO: use historical price from last 72 hours
-		return currentPrice.DollarsPerKWH
-	}
-
-	// build our simulation timeline
-	todaySolarTrend := c.calculateSolarTrend(ctx, history, model)
-	slog.DebugContext(ctx, "solar trend calculated", slog.Float64("trend", todaySolarTrend))
-
-	maxFuturePrice := currentPrice.DollarsPerKWH
-
-	simTime := now
-	for i := 0; i < 24; i++ {
-		h := simTime.Hour()
-		price := getPriceAt(simTime)
-		if price > maxFuturePrice {
-			maxFuturePrice = price
-		}
-		solarOppCost := price
-		if !settings.GridExportSolar {
-			solarOppCost = 0
-		}
-
-		profile := model[h]
-		predictedAvgSolar := profile.AvgSolar * todaySolarTrend
-
-		netLoadSolar := profile.AvgHomeLoad - predictedAvgSolar
-
-		// if we're in the "now" hour, scale the load by the current minute
-		if i == 0 {
-			netLoadSolar *= (float64(now.Minute()) / 60.0)
-		}
-
-		simData = append(simData, simHour{
-			ts:             simTime,
-			hour:           h,
-			netLoadSolar:   netLoadSolar,
-			gridChargeCost: price + settings.AdditionalFeesDollarsPerKWH,
-			solarOppCost:   solarOppCost,
-		})
-		simTime = simTime.Add(1 * time.Hour)
-	}
+	simData := c.SimulateState(ctx, now, currentStatus, currentPrice, futurePrices, history, settings)
 
 	chargeNowCost := currentPrice.DollarsPerKWH + settings.AdditionalFeesDollarsPerKWH
 	shouldCharge := false
 	chargeReason := ""
 
+	maxFuturePrice := currentPrice.DollarsPerKWH
+	for _, slot := range simData {
+		if slot.GridChargeDollarsPerKWH > maxFuturePrice {
+			maxFuturePrice = slot.GridChargeDollarsPerKWH
+		}
+	}
+
 	// track simulated energy
-	simEnergy := availableKWH
-	hitCapacity := simEnergy >= capacityKWH
+	minKWH := capacityKWH * (settings.MinBatterySOC / 100.0)
 	var hitDeficitAt time.Time
-	minEnergy := availableKWH
-	maxEnergy := availableKWH
+	var hitCapacityAt time.Time
+	minEnergy := -1.0
+	maxEnergy := -1.0
 
 	// track the costs to charge until/including the simulated hour
 	chargeCosts := make([]float64, 0, len(simData))
 
 	for _, slot := range simData {
-		chargeCosts = append(chargeCosts, slot.gridChargeCost)
-
-		netLoadSolar := slot.netLoadSolar
+		chargeCosts = append(chargeCosts, slot.GridChargeDollarsPerKWH)
 
 		// update simulated energy state
-		if slot.netLoadSolar > 0 {
-			// make sure we don't simulate discharging more than we can
-			if currentStatus.MaxBatteryDischargeKW > 0 && netLoadSolar > currentStatus.MaxBatteryDischargeKW {
-				netLoadSolar = currentStatus.MaxBatteryDischargeKW
-			}
-			// Load > Solar: We consume battery
-			simEnergy -= netLoadSolar
-		} else {
-			// Solar > Load: We charge battery
-			// make sure we don't simulate charging more than we can
-			if currentStatus.MaxBatteryChargeKW > 0 && -netLoadSolar > currentStatus.MaxBatteryChargeKW {
-				netLoadSolar = -currentStatus.MaxBatteryChargeKW
-			}
-			simEnergy += (-netLoadSolar)
-			if simEnergy > capacityKWH {
-				simEnergy = capacityKWH
-			}
-			// if we ever hit the capacity of the battery, we can't store any more power
-			// so we set hitCapacity to true so we never try to charge since that power
-			// would be meaningless to pull from the grid since we end up filling up
-			// the batteries without the grid in the simulation anyways
-			if simEnergy >= capacityKWH {
-				if !hitCapacity {
-					slog.DebugContext(
-						ctx,
-						"simulated energy hit capacity",
-						slog.Float64("simEnergy", simEnergy),
-						slog.Float64("capacityKWH", capacityKWH),
-						slog.Int("simHour", slot.hour),
-					)
-				}
-				hitCapacity = true
-			}
+		// if we ever hit the capacity of the battery, we can't store any more power
+		// so we set hitCapacity to true so we never try to charge since that power
+		// would be meaningless to pull from the grid since we end up filling up
+		// the batteries without the grid in the simulation anyways
+		if slot.HitCapacity && hitCapacityAt.IsZero() {
+			slog.DebugContext(
+				ctx,
+				"simulated energy hit capacity",
+				slog.Float64("batteryKWH", slot.BatteryKWH),
+				slog.Float64("capacityKWH", capacityKWH),
+				slog.Int("simHour", slot.Hour),
+			)
+			hitCapacityAt = slot.TS
 		}
 
-		if simEnergy < minEnergy {
-			minEnergy = simEnergy
+		if minEnergy == -1 || slot.BatteryKWH < minEnergy {
+			minEnergy = slot.BatteryKWH
 		}
-		if simEnergy > maxEnergy {
-			maxEnergy = simEnergy
+		if maxEnergy == -1 || slot.BatteryKWH > maxEnergy {
+			maxEnergy = slot.BatteryKWH
 		}
 
 		// check if we are below the minimum SOC and when we need to charge
-		if simEnergy < minKWH {
-			if hitDeficitAt.IsZero() {
-				slog.DebugContext(
-					ctx,
-					"simulated energy below minimum SOC",
-					slog.Float64("simEnergy", simEnergy),
-					slog.Float64("minKWH", minKWH),
-					slog.Int("simHour", slot.hour),
-				)
-			}
-			hitDeficitAt = slot.ts
-			deficitAmount := minKWH - simEnergy
+		if slot.HitDeficit && hitDeficitAt.IsZero() {
+			slog.DebugContext(
+				ctx,
+				"simulated energy below minimum SOC causing a deficit",
+				slog.Float64("batteryKWH", slot.BatteryKWH),
+				slog.Float64("minKWH", minKWH),
+				slog.Int("simHour", slot.Hour),
+			)
+			hitDeficitAt = slot.TS
+		}
+
+		if slot.BatteryDeficitKWH > 0 {
+			deficitAmount := slot.BatteryDeficitKWH
 
 			// only consider charging if GridCharging is enabled
 			if settings.GridChargeBatteries {
@@ -371,7 +287,7 @@ func (c *Controller) Decide(
 				// charge now than later, charge now
 				if chargeNowCost+settings.MinDeficitPriceDifferenceDollarsPerKWH <= cheapestChargeCost {
 					shouldCharge = true
-					chargeReason = fmt.Sprintf("Projected Deficit at %s. Charge Now ($%.3f) <= Later ($%.3f) - Delta ($%.3f).", slot.ts.Format(time.Kitchen), chargeNowCost, cheapestChargeCost, settings.MinDeficitPriceDifferenceDollarsPerKWH)
+					chargeReason = fmt.Sprintf("Projected Deficit at %s. Charge Now ($%.3f) <= Later ($%.3f) - Delta ($%.3f).", slot.TS.Format(time.Kitchen), chargeNowCost, cheapestChargeCost, settings.MinDeficitPriceDifferenceDollarsPerKWH)
 					slog.DebugContext(
 						ctx,
 						"deficit predicted, charging now",
@@ -400,25 +316,25 @@ func (c *Controller) Decide(
 
 		// assume we need to charge for at least 10 minutes for it to be worth it
 		chargeDurationHours := 10.0 / 60.0
-		simEnergyAfterCharge := simEnergy + chargeKW*chargeDurationHours
+		simEnergyAfterCharge := slot.BatteryKWH + chargeKW*chargeDurationHours
 
 		// make sure we can charge the batteries, we can export solar, and we have
 		// enough headroom to charge
-		if settings.GridChargeBatteries && settings.GridExportSolar && simEnergyAfterCharge < capacityKWH && !hitCapacity {
+		if settings.GridChargeBatteries && settings.GridExportSolar && simEnergyAfterCharge < capacityKWH && hitCapacityAt.IsZero() {
 			var value float64
 			// if we are importing, we avoid the import cost
 			// if we are exporting, we get the export value
-			if slot.netLoadSolar > 0 {
-				value = slot.gridChargeCost
+			if slot.NetLoadSolarKWH > 0 {
+				value = slot.GridChargeDollarsPerKWH
 			} else {
-				value = slot.solarOppCost
+				value = slot.SolarOppDollarsPerKWH
 			}
 
 			// if the value we get later minus our cost to charge now is greater than
 			// the minimum arbitrage difference, we should charge now
 			if value-chargeNowCost > settings.MinArbitrageDifferenceDollarsPerKWH {
 				shouldCharge = true
-				chargeReason = fmt.Sprintf("Arbitrage Opportunity at %s. Buy@%.3f -> Sell/Save@%.3f.", slot.ts.Format(time.Kitchen), chargeNowCost, value)
+				chargeReason = fmt.Sprintf("Arbitrage Opportunity at %s. Buy@%.3f -> Sell/Save@%.3f.", slot.TS.Format(time.Kitchen), chargeNowCost, value)
 				slog.DebugContext(
 					ctx,
 					"arbitrage opportunity found",
@@ -451,11 +367,26 @@ func (c *Controller) Decide(
 	// If we have a deficit, and cheaper now than later, Standby (Save for later).
 
 	if !hitDeficitAt.IsZero() {
+		// Optimization: If we hit full capacity BEFORE we hit the deficit, then
+		// the current energy we have in the battery is "use it or lose it" effectively,
+		// because we will refill to 100% anyway. So we should NOT Standby to save THIS energy.
+		if !hitCapacityAt.IsZero() && hitCapacityAt.Before(hitDeficitAt) {
+			slog.DebugContext(
+				ctx,
+				"deficit predicted but will refill to capacity before then",
+				slog.Time("hitCapacityAt", hitCapacityAt),
+				slog.Time("hitDeficitAt", hitDeficitAt),
+			)
+			loadReason := fmt.Sprintf("Capacity hit at %s before deficit at %s.", hitCapacityAt.Format(time.Kitchen), hitDeficitAt.Format(time.Kitchen))
+			return finalizeAction(types.BatteryModeLoad, loadReason, "Use battery before capacity hit"), nil
+		}
+
 		// We are going to run out. Should we save it?
 		// Check if there is a significantly more expensive time later.
 		// If current price is lower than maxFuturePrice, we should probably save it.
-		if currentPrice.DollarsPerKWH < maxFuturePrice {
-			standbyReason := fmt.Sprintf("Deficit predicted at %s and higher prices later ($%.3f < $%.3f).", hitDeficitAt.Format(time.Kitchen), currentPrice.DollarsPerKWH, maxFuturePrice)
+		currentChargeCost := currentPrice.DollarsPerKWH + settings.AdditionalFeesDollarsPerKWH
+		if currentChargeCost < maxFuturePrice {
+			standbyReason := fmt.Sprintf("Deficit predicted at %s and higher prices later ($%.3f < $%.3f).", hitDeficitAt.Format(time.Kitchen), currentChargeCost, maxFuturePrice)
 			slog.DebugContext(
 				ctx,
 				"deficit predicted, saving for peak",
@@ -480,188 +411,5 @@ func (c *Controller) Decide(
 		slog.Float64("minEnergy", minEnergy),
 		slog.Float64("maxEnergy", maxEnergy),
 	)
-	return finalizeAction(types.BatteryModeLoad, "Sufficient Battery.", "Sufficient Battery"), nil
-}
-
-type timeProfile struct {
-	Hour        int
-	AvgSolar    float64
-	AvgHomeLoad float64
-}
-
-// buildHourlyEnergyModel averages usage and solar by hour of day from history.
-// It filters out outliers if ignoreHourUsageOverMultiple is set and > 0.
-func (c *Controller) buildHourlyEnergyModel(_ context.Context, history []types.EnergyStats, ignoreHourUsageOverMultiple float64) map[int]timeProfile {
-	type dataPoint struct {
-		solar float64
-		load  float64
-	}
-	hourlyData := make(map[int][]dataPoint)
-
-	// Regroup history by hour
-	for _, h := range history {
-		if h.TSHourStart.IsZero() {
-			continue
-		}
-		hour := h.TSHourStart.Hour()
-		hourlyData[hour] = append(hourlyData[hour], dataPoint{
-			solar: h.SolarKWH,
-			load:  h.HomeKWH,
-		})
-	}
-
-	result := make(map[int]timeProfile)
-	for h, points := range hourlyData {
-		if len(points) == 0 {
-			continue
-		}
-
-		validPoints := points
-		if len(points) >= 3 && ignoreHourUsageOverMultiple > 0 {
-			// Find outliers by calculating average of ALL OTHER points and if
-			// point > avg(others) * multiple, it's an outlier but only exclude if there
-			// is EXACTLY ONE such point.
-
-			var outliers []int // indices
-			for i, p := range points {
-				// Calculate average of others
-				var sumOtherLoad float64
-				for j, other := range points {
-					if i == j {
-						continue
-					}
-					sumOtherLoad += other.load
-				}
-
-				if len(points) > 1 {
-					avgOtherLoad := sumOtherLoad / float64(len(points)-1)
-					if p.load > avgOtherLoad*ignoreHourUsageOverMultiple {
-						outliers = append(outliers, i)
-					}
-				}
-			}
-
-			if len(outliers) == 1 {
-				// We found exactly one outlier, ignore it
-				slog.Debug("ignoring outlier data point",
-					slog.Int("hour", h),
-					slog.Float64("outlier_load", points[outliers[0]].load),
-					slog.Float64("solar", points[outliers[0]].solar),
-				)
-				// Rebuild valid points excluding this one
-				validPoints = make([]dataPoint, 0, len(points)-1)
-				for i, p := range points {
-					if i != outliers[0] {
-						validPoints = append(validPoints, p)
-					}
-				}
-			} else if len(outliers) > 1 {
-				slog.Debug("ignoring multiple outlier data points",
-					slog.Int("hour", h),
-					slog.Int("outliers", len(outliers)),
-					slog.Int("points", len(points)),
-				)
-			}
-		}
-
-		// Now calculate averages from valid points
-		var totalSolar, totalLoad float64
-		for _, p := range validPoints {
-			totalSolar += p.solar
-			totalLoad += p.load
-		}
-		count := float64(len(validPoints))
-
-		result[h] = timeProfile{
-			Hour:        h,
-			AvgSolar:    totalSolar / count,
-			AvgHomeLoad: totalLoad / count,
-		}
-	}
-	return result
-}
-
-func (c *Controller) calculateSolarTrend(ctx context.Context, history []types.EnergyStats, model map[int]timeProfile) float64 {
-	if len(history) < 2 {
-		return 1.0
-	}
-
-	now := time.Now().UTC()
-
-	// Index history by time for easy lookups
-	statsByTime := make(map[time.Time]types.EnergyStats)
-	var latestTime time.Time
-	for _, h := range history {
-		t := h.TSHourStart.UTC()
-		statsByTime[t] = h
-		// get the latest time today
-		if t.Day() == now.Day() && t.After(latestTime) {
-			latestTime = t
-		}
-	}
-
-	if latestTime.IsZero() {
-		slog.DebugContext(
-			ctx,
-			"no recent data",
-			slog.Time("now", now),
-			slog.Int("len(history)", len(history)),
-		)
-		return 1.0
-	}
-
-	// We need the last 2 hours of data
-	t1 := latestTime
-	t2 := t1.Add(-1 * time.Hour)
-
-	s1, ok1 := statsByTime[t1]
-	s2, ok2 := statsByTime[t2]
-
-	if !ok1 || !ok2 {
-		slog.DebugContext(
-			ctx,
-			"not enough recent data",
-			slog.Time("now", now),
-			slog.Time("t1", t1),
-			slog.Time("t2", t2),
-		)
-		return 1.0
-	}
-
-	// Calculate recent actual solar
-	recentSolar := s1.SolarKWH + s2.SolarKWH
-
-	// Calculate model expected solar for these hours
-	m1 := model[t1.Hour()]
-	m2 := model[t2.Hour()]
-
-	modelSolar := m1.AvgSolar + m2.AvgSolar
-
-	// If model expects no solar (e.g. night), we can't calculate a meaningful trend ratio.
-	// TODO: figure out a better way to handle this because it could be that
-	// yesterday was cloudy and today is sunny
-	if modelSolar < 0.001 {
-		slog.DebugContext(
-			ctx,
-			"model expects no solar",
-			slog.Time("now", now),
-			slog.Time("t1", t1),
-			slog.Time("t2", t2),
-			slog.Float64("modelSolar", modelSolar),
-		)
-		return 1.0
-	}
-
-	// check for > 10% variation
-	diff := recentSolar - modelSolar
-	if diff < 0 {
-		diff = -diff
-	}
-
-	if diff/modelSolar > 0.10 {
-		// cap the ratio at 300%
-		return math.Min(3.0, recentSolar/modelSolar)
-	}
-
-	return 1.0
+	return finalizeAction(types.BatteryModeLoad, "Sufficient battery.", "No deficit predicted"), nil
 }

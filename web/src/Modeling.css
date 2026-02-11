@@ -1,0 +1,42 @@
+.modeling-page {
+  max-width: 100%;
+}
+
+.modeling-page h2 {
+  margin: 0 0 4px 0;
+  color: var(--primary-color);
+}
+
+.modeling-subtitle {
+  margin: 0 0 20px 0;
+  color: #7f8c8d;
+  font-size: 0.9em;
+}
+
+.modeling-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.modeling-chart-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.modeling-chart-card h3 {
+  margin: 0 0 8px 0;
+  font-size: 0.95em;
+  color: #555;
+  font-weight: 600;
+}
+
+.modeling-loading {
+  text-align: center;
+  color: #777;
+  font-style: italic;
+  margin-top: 40px;
+}

@@ -26,8 +26,8 @@ func (m *mockStorage) SetSettings(ctx context.Context, settings types.Settings, 
 	return args.Error(0)
 }
 
-func (m *mockStorage) UpsertPrice(ctx context.Context, price types.Price) error {
-	args := m.Called(ctx, price)
+func (m *mockStorage) UpsertPrice(ctx context.Context, price types.Price, version int) error {
+	args := m.Called(ctx, price, version)
 	return args.Error(0)
 }
 
@@ -36,8 +36,8 @@ func (m *mockStorage) InsertAction(ctx context.Context, action types.Action) err
 	return args.Error(0)
 }
 
-func (m *mockStorage) UpsertEnergyHistory(ctx context.Context, stats types.EnergyStats) error {
-	args := m.Called(ctx, stats)
+func (m *mockStorage) UpsertEnergyHistory(ctx context.Context, stats types.EnergyStats, version int) error {
+	args := m.Called(ctx, stats, version)
 	return args.Error(0)
 }
 
@@ -65,20 +65,20 @@ func (m *mockStorage) GetEnergyHistory(ctx context.Context, start, end time.Time
 	return nil, nil
 }
 
-func (m *mockStorage) GetLatestEnergyHistoryTime(ctx context.Context) (time.Time, error) {
+func (m *mockStorage) GetLatestEnergyHistoryTime(ctx context.Context) (time.Time, int, error) {
 	args := m.Called(ctx)
 	if len(args) > 0 {
-		return args.Get(0).(time.Time), args.Error(1)
+		return args.Get(0).(time.Time), args.Int(1), args.Error(2)
 	}
-	return time.Time{}, nil
+	return time.Time{}, 0, nil
 }
 
-func (m *mockStorage) GetLatestPriceHistoryTime(ctx context.Context) (time.Time, error) {
+func (m *mockStorage) GetLatestPriceHistoryTime(ctx context.Context) (time.Time, int, error) {
 	args := m.Called(ctx)
 	if len(args) > 0 {
-		return args.Get(0).(time.Time), args.Error(1)
+		return args.Get(0).(time.Time), args.Int(1), args.Error(2)
 	}
-	return time.Time{}, nil
+	return time.Time{}, 0, nil
 }
 
 func (m *mockStorage) Close() error {

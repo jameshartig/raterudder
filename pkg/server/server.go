@@ -110,6 +110,7 @@ func (s *Server) setupHandler() http.Handler {
 	mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
 	mux.HandleFunc("POST /api/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
+	mux.HandleFunc("GET /api/modeling", s.handleModeling)
 
 	// serve the web frontend, either from the embedded filesystem or from the dev server
 	if s.devProxy != "" {

@@ -4,7 +4,7 @@ import "fmt"
 
 // CurrentSettingsVersion is the current version of the settings struct.
 // Increment this value when adding new fields that require default values.
-const CurrentSettingsVersion = 2
+const CurrentSettingsVersion = 3
 
 // Settings represents the configuration stored in the database.
 // These are dynamic settings that can be changed without redeploying.
@@ -40,6 +40,14 @@ type Settings struct {
 	GridExportSolar bool `json:"gridExportSolar"`
 	// Can export batteries to grid (not supported yet)
 	//GridExportBatteries bool `json:"gridExportBatteries"`
+
+	// Solar Settings
+	// Maximum ratio for solar trend adjustment (caps recentSolar/modelSolar).
+	// Higher values allow more aggressive upward solar predictions.
+	SolarTrendRatioMax float64 `json:"solarTrendRatioMax"`
+	// Multiplier for bell curve solar smoothing weight.
+	// 0 disables bell curve smoothing entirely. 1.0 = full weight.
+	SolarBellCurveMultiplier float64 `json:"solarBellCurveMultiplier"`
 }
 
 // MigrateSettings migrates the settings to the current version.
@@ -56,7 +64,7 @@ func MigrateSettings(s Settings, currentVersion int) (Settings, bool, error) {
 		case 1:
 			// version 1: initial
 			if s.IgnoreHourUsageOverMultiple == 0 {
-				s.IgnoreHourUsageOverMultiple = 3
+				s.IgnoreHourUsageOverMultiple = 2
 				migrated = true
 			}
 			if s.AlwaysChargeUnderDollarsPerKWH == 0 {
@@ -76,6 +84,16 @@ func MigrateSettings(s Settings, currentVersion int) (Settings, bool, error) {
 			// version 2: add MinDeficitPriceDifferenceDollarsPerKWH
 			if s.MinDeficitPriceDifferenceDollarsPerKWH == 0 {
 				s.MinDeficitPriceDifferenceDollarsPerKWH = 0.02
+				migrated = true
+			}
+		case 3:
+			// version 3: add solar trend ratio max and bell curve multiplier
+			if s.SolarTrendRatioMax == 0 {
+				s.SolarTrendRatioMax = 3.0
+				migrated = true
+			}
+			if s.SolarBellCurveMultiplier == 0 {
+				s.SolarBellCurveMultiplier = 1.0
 				migrated = true
 			}
 		default:

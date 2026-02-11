@@ -179,6 +179,44 @@ const Settings = ({ isAdmin }: { isAdmin: boolean }) => {
                     <span className="help-text">Allow exporting solar generation to the grid.</span>
                 </div>
 
+                <h3>Solar Settings</h3>
+                <div className="form-group">
+                    <label htmlFor="solarTrendRatioMax">Solar Trend Ratio Max</label>
+                    <input
+                        id="solarTrendRatioMax"
+                        type="number"
+                        step="0.1"
+                        min="1"
+                        value={settings.solarTrendRatioMax}
+                        onChange={(e) => handleChange('solarTrendRatioMax', parseFloat(e.target.value))}
+                    />
+                    <span className="help-text">Maximum ratio for solar trend adjustment. Higher values allow more aggressive upward solar predictions. Default: 3.0</span>
+                </div>
+                <div className="form-group">
+                    <label htmlFor="solarBellCurveMultiplier">Solar Bell Curve Multiplier</label>
+                    <input
+                        id="solarBellCurveMultiplier"
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        max="2"
+                        value={settings.solarBellCurveMultiplier}
+                        onChange={(e) => handleChange('solarBellCurveMultiplier', parseFloat(e.target.value))}
+                    />
+                    <span className="help-text">Multiplier for bell curve solar smoothing. 0 disables smoothing entirely. Default: 1.0</span>
+                </div>
+
+                {settings.gridExportSolar && settings.solarBellCurveMultiplier > 0.7 && (
+                    <div className="warning-notice">
+                        ⚠️ Solar export is enabled but the bell curve multiplier is high ({settings.solarBellCurveMultiplier}). Since solar readings are less likely curtailed with export on, consider lowering it (e.g. 0.5).
+                    </div>
+                )}
+                {!settings.gridExportSolar && settings.solarBellCurveMultiplier < 0.7 && settings.solarBellCurveMultiplier > 0 && (
+                    <div className="warning-notice">
+                        ⚠️ Solar export is disabled but the bell curve multiplier is low ({settings.solarBellCurveMultiplier}). Since solar readings may be curtailed without export, consider raising it (e.g. 1.0).
+                    </div>
+                )}
+
                 <button type="submit" className="save-button" disabled={!isAdmin}>
                     {isAdmin ? 'Save Settings' : 'Read Only'}
                 </button>

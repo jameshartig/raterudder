@@ -95,3 +95,15 @@
   margin-bottom: 20px;
   border: 1px solid #d5f5e3;
 }
+
+.warning-notice {
+  background-color: #fef9e7;
+  color: #7d6608;
+  padding: 10px 14px;
+  border-radius: 4px;
+  margin-top: 20px;
+  margin-bottom: 10px;
+  border: 1px solid #f9e79f;
+  font-size: 0.9em;
+  line-height: 1.4;
+}

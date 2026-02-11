@@ -167,6 +167,87 @@ func TestFranklin(t *testing.T) {
 		assert.True(t, status.BatteryAboveMinSOC, "BatteryAboveMinSOC should be true")
 	})
 
+	t.Run("GetStatus Alarms", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/hes-gateway/terminal/initialize/appUserOrInstallerLogin" {
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"code":    200.0,
+					"success": true,
+					"result":  map[string]interface{}{"token": "tok"},
+				})
+				return
+			}
+			if r.URL.Path == "/hes-gateway/terminal/getDeviceInfoV2" {
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"code":    200.0,
+					"success": true,
+					"result":  map[string]interface{}{"totalCap": 30.0, "timeZone": "UTC"},
+				})
+				return
+			}
+			if r.URL.Path == "/hes-gateway/terminal/tou/getPowerControlSetting" {
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"code":    200.0,
+					"success": true,
+					"result":  map[string]interface{}{"gridMaxFlag": 0, "gridFeedMaxFlag": 0},
+				})
+				return
+			}
+			if r.URL.Path == "/hes-gateway/terminal/tou/getGatewayTouListV2" {
+				list := []map[string]interface{}{
+					{"id": 1.0, "workMode": 1.0},
+				}
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"code":    200.0,
+					"success": true,
+					"result":  map[string]interface{}{"list": list, "currendId": 1.0},
+				})
+				return
+			}
+			if r.URL.Path == "/hes-gateway/terminal/getDeviceCompositeInfo" {
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"code":    200.0,
+					"success": true,
+					"result": map[string]interface{}{
+						"runtimeData": map[string]interface{}{
+							"soc": 50.0,
+						},
+						"currentAlarmVOList": []map[string]interface{}{
+							{
+								"logName":          "Test Alarm",
+								"alarmExplanation": "Test Description",
+								"alarmCode":        "E123",
+								"time":             "2023-10-27 12:00:00",
+							},
+						},
+					},
+				})
+				return
+			}
+			http.Error(w, "not found: "+r.URL.Path, 404)
+		}))
+		defer ts.Close()
+
+		f := &Franklin{
+			client:    ts.Client(),
+			baseURL:   ts.URL,
+			username:  "u",
+			password:  "p",
+			gatewayID: "g",
+			settings:  types.Settings{MinBatterySOC: 10},
+		}
+
+		status, err := f.GetStatus(context.Background())
+		require.NoError(t, err, "GetStatus should succeed")
+		require.Len(t, status.Alarms, 1, "should have 1 alarm")
+		assert.Equal(t, "Test Alarm", status.Alarms[0].Name)
+		assert.Equal(t, "Test Description", status.Alarms[0].Description)
+		assert.Equal(t, "E123", status.Alarms[0].Code)
+
+		expectedTime, _ := time.Parse(time.DateTime, "2023-10-27 12:00:00")
+		assert.Equal(t, expectedTime.UTC(), status.Alarms[0].Time.UTC())
+	})
+
 	t.Run("SetModes", func(t *testing.T) {
 		var callOrder []string
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -603,7 +684,7 @@ func TestFranklin(t *testing.T) {
 							"2026-02-01 13:00:00",
 						},
 						// SocArray length must match
-						"socArray": []float64{50.0, 50.0, 50.0},
+						"socArray": []float64{50.0, 40.0, 50.0},
 						// SolarToHome:
 						// 1st interval: 4.0 kW * 0.25 h = 1.0 kWh
 						// 2nd interval: 0.0 kW * 0.75 h = 0.0 kWh
@@ -657,5 +738,7 @@ func TestFranklin(t *testing.T) {
 
 		assert.InDelta(t, 1.0, s.SolarKWH, 0.01, "SolarKWH mismatch")
 		assert.InDelta(t, 5.0, s.BatteryUsedKWH, 0.01, "BatteryUsedKWH mismatch")
+		assert.Equal(t, 40.0, s.MinBatterySOC, "MinBatterySOC mismatch")
+		assert.Equal(t, 50.0, s.MaxBatterySOC, "MaxBatterySOC mismatch")
 	})
 }

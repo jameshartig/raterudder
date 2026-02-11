@@ -13,6 +13,7 @@ import (
 	"github.com/jameshartig/autoenergy/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/api/idtoken"
 )
 
@@ -28,10 +29,10 @@ func TestHandleUpdate(t *testing.T) {
 		DryRun:        true,
 		MinBatterySOC: 5.0,
 	}, types.CurrentSettingsVersion, nil)
-	mockS.On("GetLatestEnergyHistoryTime", mock.Anything).Return(time.Time{}, nil)
-	mockS.On("GetLatestPriceHistoryTime", mock.Anything).Return(time.Time{}, nil)
-	mockS.On("UpsertEnergyHistory", mock.Anything, mock.Anything).Return(nil)
-	mockS.On("UpsertPrice", mock.Anything, mock.Anything).Return(nil)
+	mockS.On("GetLatestEnergyHistoryTime", mock.Anything).Return(time.Time{}, 0, nil)
+	mockS.On("GetLatestPriceHistoryTime", mock.Anything).Return(time.Time{}, 0, nil)
+	mockS.On("UpsertEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	mockS.On("UpsertPrice", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	mockS.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
 	mockS.On("InsertAction", mock.Anything, mock.Anything).Return(nil)
 
@@ -68,10 +69,10 @@ func TestHandleUpdate(t *testing.T) {
 
 		mockS := &mockStorage{}
 		mockS.On("GetSettings", mock.Anything).Return(types.Settings{DryRun: true}, types.CurrentSettingsVersion, nil)
-		mockS.On("GetLatestEnergyHistoryTime", mock.Anything).Return(time.Time{}, nil)
-		mockS.On("GetLatestPriceHistoryTime", mock.Anything).Return(time.Time{}, nil)
-		mockS.On("UpsertEnergyHistory", mock.Anything, mock.Anything).Return(nil)
-		mockS.On("UpsertPrice", mock.Anything, mock.Anything).Return(nil)
+		mockS.On("GetLatestEnergyHistoryTime", mock.Anything).Return(time.Time{}, 0, nil)
+		mockS.On("GetLatestPriceHistoryTime", mock.Anything).Return(time.Time{}, 0, nil)
+		mockS.On("UpsertEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		mockS.On("UpsertPrice", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		mockS.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
 		// InsertAction might not be called if validation fails, so we can't strict expect it or we use .Maybe()
 		// But in this test suite we are testing auth failures mostly, so handleUpdate might not reach InsertAction.
@@ -198,10 +199,10 @@ func TestHandleUpdate(t *testing.T) {
 		mockS.On("GetSettings", mock.Anything).Return(types.Settings{
 			Pause: true,
 		}, types.CurrentSettingsVersion, nil)
-		mockS.On("GetLatestEnergyHistoryTime", mock.Anything).Return(time.Time{}, nil)
-		mockS.On("GetLatestPriceHistoryTime", mock.Anything).Return(time.Time{}, nil)
-		mockS.On("UpsertEnergyHistory", mock.Anything, mock.Anything).Return(nil)
-		mockS.On("UpsertPrice", mock.Anything, mock.Anything).Return(nil)
+		mockS.On("GetLatestEnergyHistoryTime", mock.Anything).Return(time.Time{}, 0, nil)
+		mockS.On("GetLatestPriceHistoryTime", mock.Anything).Return(time.Time{}, 0, nil)
+		mockS.On("UpsertEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		mockS.On("UpsertPrice", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		mockES := &mockESS{}
 		mockES.On("ApplySettings", mock.Anything, mock.Anything).Return(nil)
@@ -234,6 +235,201 @@ func TestHandleUpdate(t *testing.T) {
 
 		mockES.AssertNotCalled(t, "GetStatus")
 		mockES.AssertNotCalled(t, "SetModes")
+	})
+
+	t.Run("Action - Emergency Mode", func(t *testing.T) {
+		mockS := &mockStorage{}
+		mockS.On("GetSettings", mock.Anything).Return(types.Settings{}, types.CurrentSettingsVersion, nil)
+		mockS.On("GetLatestEnergyHistoryTime", mock.Anything).Return(time.Time{}, 0, nil)
+		mockS.On("GetLatestPriceHistoryTime", mock.Anything).Return(time.Time{}, 0, nil)
+		mockS.On("UpsertEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		mockS.On("UpsertPrice", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+		mockES := &mockESS{}
+		mockES.On("ApplySettings", mock.Anything, mock.Anything).Return(nil)
+		mockES.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
+		mockES.On("GetStatus", mock.Anything).Return(types.SystemStatus{EmergencyMode: true}, nil)
+
+		// Expect InsertAction with specific description
+		mockS.On("InsertAction", mock.Anything, mock.MatchedBy(func(a types.Action) bool {
+			return a.Description == "In emergency mode" && a.Fault
+		})).Return(nil)
+
+		mockU := &mockUtility{}
+		mockU.On("GetConfirmedPrices", mock.Anything, mock.Anything, mock.Anything).Return([]types.Price{}, nil)
+
+		srv := &Server{
+			utilityProvider: mockU,
+			essSystem:       mockES,
+			storage:         mockS,
+			listenAddr:      ":8080",
+			controller:      controller.NewController(),
+			bypassAuth:      true,
+		}
+
+		req := httptest.NewRequest("GET", "/api/update", nil)
+		w := httptest.NewRecorder()
+		srv.handleUpdate(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+		var resp map[string]interface{}
+		_ = json.NewDecoder(w.Body).Decode(&resp)
+		assert.Equal(t, "emergency mode", resp["status"])
+
+		mockU.AssertNotCalled(t, "GetCurrentPrice")
+		mockES.AssertNotCalled(t, "SetModes")
+	})
+
+	t.Run("Action - Alarms Present", func(t *testing.T) {
+		mockS := &mockStorage{}
+		mockS.On("GetSettings", mock.Anything).Return(types.Settings{}, types.CurrentSettingsVersion, nil)
+		mockS.On("GetLatestEnergyHistoryTime", mock.Anything).Return(time.Time{}, 0, nil)
+		mockS.On("GetLatestPriceHistoryTime", mock.Anything).Return(time.Time{}, 0, nil)
+		mockS.On("UpsertEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		mockS.On("UpsertPrice", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+		mockES := &mockESS{}
+		mockES.On("ApplySettings", mock.Anything, mock.Anything).Return(nil)
+		mockES.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
+		mockES.On("GetStatus", mock.Anything).Return(types.SystemStatus{
+			Alarms: []types.SystemAlarm{{Name: "Test Alarm"}},
+		}, nil)
+
+		// Expect InsertAction with specific description
+		mockS.On("InsertAction", mock.Anything, mock.MatchedBy(func(a types.Action) bool {
+			return a.Description == "1 alarms present" && a.Fault
+		})).Return(nil)
+
+		mockU := &mockUtility{}
+		mockU.On("GetConfirmedPrices", mock.Anything, mock.Anything, mock.Anything).Return([]types.Price{}, nil)
+
+		srv := &Server{
+			utilityProvider: mockU,
+			essSystem:       mockES,
+			storage:         mockS,
+			listenAddr:      ":8080",
+			controller:      controller.NewController(),
+			bypassAuth:      true,
+		}
+
+		req := httptest.NewRequest("GET", "/api/update", nil)
+		w := httptest.NewRecorder()
+		srv.handleUpdate(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+		var resp map[string]interface{}
+		_ = json.NewDecoder(w.Body).Decode(&resp)
+		assert.Equal(t, "alarms present", resp["status"])
+
+		mockU.AssertNotCalled(t, "GetCurrentPrice")
+		mockES.AssertNotCalled(t, "SetModes")
+	})
+
+	t.Run("Handle Update - Backfill Logic", func(t *testing.T) {
+		t.Run("Version Mismatch - Backfill Triggered", func(t *testing.T) {
+			mockS := &mockStorage{}
+			// Set up old version
+			lastTime := time.Date(2023, 10, 27, 12, 0, 0, 0, time.UTC)
+			mockS.On("GetLatestEnergyHistoryTime", mock.Anything).Return(lastTime, 0, nil) // Version 0 < CurrentVersion
+			mockS.On("GetLatestPriceHistoryTime", mock.Anything).Return(lastTime, 0, nil)
+
+			// Expect backfill from 5 days ago, not lastTime
+			// We can verify this by checking the start time in GetEnergyHistory call to ESS
+			// But for now, let's just ensure it calls GetEnergyHistory
+			mockES := &mockESS{}
+			mockES.On("ApplySettings", mock.Anything, mock.Anything).Return(nil)
+			mockES.On("GetStatus", mock.Anything).Return(types.SystemStatus{BatterySOC: 50}, nil)
+			mockES.On("SetModes", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+			// Capture arguments to Verify start time
+			var startTimes []time.Time
+			mockES.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+				startTimes = append(startTimes, args.Get(1).(time.Time))
+			}).Return([]types.EnergyStats{}, nil).Maybe()
+
+			mockU := &mockUtility{}
+			mockU.On("GetCurrentPrice", mock.Anything).Return(types.Price{}, nil)
+			mockU.On("GetFuturePrices", mock.Anything).Return([]types.Price{}, nil)
+			mockU.On("GetConfirmedPrices", mock.Anything, mock.Anything, mock.Anything).Return([]types.Price{}, nil)
+
+			// Other storage expectations
+			mockS.On("GetSettings", mock.Anything).Return(types.Settings{}, types.CurrentSettingsVersion, nil)
+			mockS.On("UpsertEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			mockS.On("UpsertPrice", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			mockS.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
+			mockS.On("InsertAction", mock.Anything, mock.Anything).Return(nil)
+
+			srv := &Server{
+				utilityProvider: mockU,
+				essSystem:       mockES,
+				storage:         mockS,
+				listenAddr:      ":8080",
+				controller:      controller.NewController(),
+				bypassAuth:      true,
+			}
+			req := httptest.NewRequest("GET", "/api/update", nil)
+			w := httptest.NewRecorder()
+			srv.handleUpdate(w, req)
+			assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+
+			// Verify that at least one call started from ~5 days ago (midnight)
+			require.NotEmpty(t, startTimes, "GetEnergyHistory should have been called")
+			earliest := startTimes[0]
+			for _, t := range startTimes {
+				if t.Before(earliest) {
+					earliest = t
+				}
+			}
+			now := time.Now()
+			fiveDaysAgo := now.Add(-5 * 24 * time.Hour)
+			expected := time.Date(fiveDaysAgo.Year(), fiveDaysAgo.Month(), fiveDaysAgo.Day(), 0, 0, 0, 0, fiveDaysAgo.Location())
+			assert.Equal(t, expected, earliest, "Backfill should start from midnight 5 days ago")
+		})
+
+		t.Run("Version Match - No Backfill", func(t *testing.T) {
+			mockS := &mockStorage{}
+			// Set up current version
+			// Make lastTime recent enough that it would normally just resume from there
+			lastTime := time.Now().Add(-2 * time.Hour).Truncate(time.Hour)
+			mockS.On("GetLatestEnergyHistoryTime", mock.Anything).Return(lastTime, types.CurrentEnergyStatsVersion, nil)
+			mockS.On("GetLatestPriceHistoryTime", mock.Anything).Return(lastTime, types.CurrentPriceHistoryVersion, nil)
+
+			mockES := &mockESS{}
+			mockES.On("ApplySettings", mock.Anything, mock.Anything).Return(nil)
+			mockES.On("GetStatus", mock.Anything).Return(types.SystemStatus{BatterySOC: 50}, nil)
+			mockES.On("SetModes", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+			// Capture arguments to Verify start time
+			mockES.On("GetEnergyHistory", mock.Anything, mock.MatchedBy(func(start time.Time) bool {
+				// Should be equal to lastTime (or close to it due to truncation logic)
+				return start.Equal(lastTime)
+			}), mock.Anything).Return([]types.EnergyStats{}, nil).Maybe()
+
+			mockU := &mockUtility{}
+			mockU.On("GetCurrentPrice", mock.Anything).Return(types.Price{}, nil)
+			mockU.On("GetFuturePrices", mock.Anything).Return([]types.Price{}, nil)
+			mockU.On("GetConfirmedPrices", mock.Anything, mock.Anything, mock.Anything).Return([]types.Price{}, nil)
+
+			// Other storage expectations
+			mockS.On("GetSettings", mock.Anything).Return(types.Settings{}, types.CurrentSettingsVersion, nil)
+			mockS.On("UpsertEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			mockS.On("UpsertPrice", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			mockS.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
+			mockS.On("InsertAction", mock.Anything, mock.Anything).Return(nil)
+
+			srv := &Server{
+				utilityProvider: mockU,
+				essSystem:       mockES,
+				storage:         mockS,
+				listenAddr:      ":8080",
+				controller:      controller.NewController(),
+				bypassAuth:      true,
+			}
+			req := httptest.NewRequest("GET", "/api/update", nil)
+			w := httptest.NewRecorder()
+			srv.handleUpdate(w, req)
+			assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+		})
 	})
 }
 

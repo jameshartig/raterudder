@@ -94,7 +94,8 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if newSettings.AdditionalFeesDollarsPerKWH < 0 ||
 		newSettings.MinArbitrageDifferenceDollarsPerKWH < 0 ||
 		newSettings.MinBatterySOC < 0 || newSettings.MinBatterySOC > 100 ||
-		newSettings.IgnoreHourUsageOverMultiple < 1 {
+		newSettings.IgnoreHourUsageOverMultiple < 1 ||
+		newSettings.SolarBellCurveMultiplier < 0 || newSettings.SolarTrendRatioMax < 1 {
 		http.Error(w, "invalid settings values", http.StatusBadRequest)
 		return
 	}

@@ -134,7 +134,7 @@ func (f *FirestoreProvider) SetSettings(ctx context.Context, settings types.Sett
 
 // UpsertPrice adds or updates a price record in the "utility_prices" collection.
 // The document ID is the RFC3339 timestamp of TSStart for efficient range queries.
-func (f *FirestoreProvider) UpsertPrice(ctx context.Context, price types.Price) error {
+func (f *FirestoreProvider) UpsertPrice(ctx context.Context, price types.Price, version int) error {
 	jsonBytes, err := json.Marshal(price)
 	if err != nil {
 		return fmt.Errorf("failed to marshal price: %w", err)
@@ -144,6 +144,7 @@ func (f *FirestoreProvider) UpsertPrice(ctx context.Context, price types.Price) 
 	_, err = f.client.Collection("utility_prices").Doc(docID).Set(ctx, map[string]interface{}{
 		"json":      string(jsonBytes),
 		"timestamp": price.TSStart,
+		"version":   version,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to upsert price: %w", err)
@@ -259,7 +260,7 @@ func (f *FirestoreProvider) GetActionHistory(ctx context.Context, start, end tim
 
 // UpsertEnergyHistory adds or updates an energy history record in the "energy_hourly" collection.
 // The document ID is the RFC3339 timestamp of TSHourStart for consistent formatting.
-func (f *FirestoreProvider) UpsertEnergyHistory(ctx context.Context, stats types.EnergyStats) error {
+func (f *FirestoreProvider) UpsertEnergyHistory(ctx context.Context, stats types.EnergyStats, version int) error {
 	if stats.TSHourStart.IsZero() {
 		return fmt.Errorf("energy stats missing tsHourStart")
 	}
@@ -272,6 +273,7 @@ func (f *FirestoreProvider) UpsertEnergyHistory(ctx context.Context, stats types
 	_, err = f.client.Collection("energy_hourly").Doc(docID).Set(ctx, map[string]interface{}{
 		"json":      string(jsonBytes),
 		"timestamp": stats.TSHourStart,
+		"version":   version,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to upsert energy history: %w", err)
@@ -322,7 +324,7 @@ func (f *FirestoreProvider) GetEnergyHistory(ctx context.Context, start, end tim
 }
 
 // GetLatestEnergyHistoryTime retrieves the timestamp of the last stored energy history record.
-func (f *FirestoreProvider) GetLatestEnergyHistoryTime(ctx context.Context) (time.Time, error) {
+func (f *FirestoreProvider) GetLatestEnergyHistoryTime(ctx context.Context) (time.Time, int, error) {
 	iter := f.client.Collection("energy_hourly").
 		OrderBy("timestamp", firestore.Desc).
 		Limit(1).
@@ -331,21 +333,30 @@ func (f *FirestoreProvider) GetLatestEnergyHistoryTime(ctx context.Context) (tim
 
 	doc, err := iter.Next()
 	if err == iterator.Done {
-		return time.Time{}, nil
+		return time.Time{}, 0, nil
 	}
 	if err != nil {
-		return time.Time{}, fmt.Errorf("failed to get latest energy history doc: %w", err)
+		return time.Time{}, 0, fmt.Errorf("failed to get latest energy history doc: %w", err)
 	}
 
 	ts, err := time.Parse(time.RFC3339, doc.Ref.ID)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid energy history doc id %s: %w", doc.Ref.ID, err)
+		return time.Time{}, 0, fmt.Errorf("invalid energy history doc id %s: %w", doc.Ref.ID, err)
 	}
-	return ts, nil
+
+	// Read version if available (default 0)
+	var version int
+	if v, err := doc.DataAt("version"); err == nil {
+		if vInt, ok := v.(int64); ok {
+			version = int(vInt)
+		}
+	}
+
+	return ts, version, nil
 }
 
 // GetLatestPriceHistoryTime retrieves the timestamp of the last stored price record.
-func (f *FirestoreProvider) GetLatestPriceHistoryTime(ctx context.Context) (time.Time, error) {
+func (f *FirestoreProvider) GetLatestPriceHistoryTime(ctx context.Context) (time.Time, int, error) {
 	// firestore automatically creates indexes for top-level fields
 	iter := f.client.Collection("utility_prices").
 		OrderBy("timestamp", firestore.Desc).
@@ -355,15 +366,24 @@ func (f *FirestoreProvider) GetLatestPriceHistoryTime(ctx context.Context) (time
 
 	doc, err := iter.Next()
 	if err == iterator.Done {
-		return time.Time{}, nil
+		return time.Time{}, 0, nil
 	}
 	if err != nil {
-		return time.Time{}, fmt.Errorf("failed to get latest price doc: %w", err)
+		return time.Time{}, 0, fmt.Errorf("failed to get latest price doc: %w", err)
 	}
 
 	ts, err := time.Parse(time.RFC3339, doc.Ref.ID)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid price doc id %s: %w", doc.Ref.ID, err)
+		return time.Time{}, 0, fmt.Errorf("invalid price doc id %s: %w", doc.Ref.ID, err)
 	}
-	return ts, nil
+
+	// Read version if available (default 0)
+	var version int
+	if v, err := doc.DataAt("version"); err == nil {
+		if vInt, ok := v.(int64); ok {
+			version = int(vInt)
+		}
+	}
+
+	return ts, version, nil
 }

@@ -106,7 +106,7 @@ func TestSettings(t *testing.T) {
 	t.Run("Update Settings - Success", func(t *testing.T) {
 		srv := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
 
-		body := `{"minBatterySOC": 80, "dryRun": true, "ignoreHourUsageOverMultiple": 5}`
+		body := `{"minBatterySOC": 80, "dryRun": true, "ignoreHourUsageOverMultiple": 5, "solarTrendRatioMax": 3.0, "solarBellCurveMultiplier": 1.0}`
 		req := httptest.NewRequest("POST", "/api/settings", strings.NewReader(body))
 		req = withEmail(req, "admin@example.com")
 		w := httptest.NewRecorder()

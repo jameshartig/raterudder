@@ -4,6 +4,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-ro
 import { GoogleOAuthProvider, GoogleLogin } from '@react-oauth/google';
 import ActionList from './ActionList';
 import Settings from './Settings';
+import Modeling from './Modeling';
 import './App.css';
 import { useEffect, useState } from 'react';
 import { fetchAuthStatus, login, logout } from './api';
@@ -86,6 +87,7 @@ function App() {
             <nav>
                 <Link to="/">Home</Link>
                 &nbsp;<Link to="/settings">Settings</Link>
+                &nbsp;<Link to="/modeling">Modeling</Link>
                 {loggedIn && <>&nbsp;<button onClick={handleLogout} className="logout-button">Logout</button></>}
             </nav>
         </header>
@@ -93,6 +95,7 @@ function App() {
           <Routes>
             <Route path="/" element={<ActionList />} />
             <Route path="/settings" element={<Settings isAdmin={isAdmin} />} />
+            <Route path="/modeling" element={<Modeling />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
