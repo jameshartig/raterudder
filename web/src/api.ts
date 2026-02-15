@@ -11,16 +11,35 @@ export interface SystemStatus {
     [key: string]: any;
 }
 
+export const ActionReason = {
+    AlwaysChargeBelowThreshold: 'alwaysChargeBelowThreshold',
+    MissingBattery: 'missingBattery',
+    DeficitCharge: 'deficitCharge',
+    ArbitrageCharge: 'arbitrageCharge',
+    DischargeBeforeCapacity: 'dischargeBeforeCapacity',
+    DeficitSave: 'deficitSave',
+    ArbitrageSave: 'dischargeAtPeak',
+    NoChange: 'sufficientBattery',
+} as const;
+
+export type ActionReason = typeof ActionReason[keyof typeof ActionReason];
+
+export interface PriceInfo {
+    tsStart: string;
+    tsEnd: string;
+    dollarsPerKWH: number;
+}
+
 export interface Action {
     timestamp: string;
     batteryMode: number;
     solarMode: number;
+    reason?: string;
     description: string;
-    currentPrice?: {
-        tsStart: string;
-        tsEnd: string;
-        dollarsPerKWH: number;
-    };
+    currentPrice?: PriceInfo;
+    futurePrice?: PriceInfo;
+    deficitAt?: string;
+    capacityAt?: string;
     systemStatus?: SystemStatus;
     dryRun?: boolean;
     fault?: boolean;
@@ -44,10 +63,17 @@ export const SolarMode = {
 
 export type SolarMode = typeof SolarMode[keyof typeof SolarMode];
 
-export const fetchActions = async (start: Date, end: Date): Promise<Action[]|null> => {
+export const fetchActions = async (start: Date, end: Date, siteID?: string): Promise<Action[]|null> => {
     const startStr = start.toISOString();
     const endStr = end.toISOString();
-    const response = await fetch(`/api/history/actions?start=${startStr}&end=${endStr}`);
+    const query = new URLSearchParams({
+        start: startStr,
+        end: endStr,
+    });
+    if (siteID) {
+        query.append('siteID', siteID);
+    }
+    const response = await fetch(`/api/history/actions?${query.toString()}`);
     if (!response.ok) {
         throw new Error('Failed to fetch actions');
     }
@@ -69,10 +95,17 @@ export interface SavingsStats {
     batteryUsed: number;
 }
 
-export const fetchSavings = async (start: Date, end: Date): Promise<SavingsStats|null> => {
+export const fetchSavings = async (start: Date, end: Date, siteID?: string): Promise<SavingsStats|null> => {
     const startStr = start.toISOString();
     const endStr = end.toISOString();
-    const response = await fetch(`/api/history/savings?start=${startStr}&end=${endStr}`);
+    const query = new URLSearchParams({
+        start: startStr,
+        end: endStr,
+    });
+    if (siteID) {
+        query.append('siteID', siteID);
+    }
+    const response = await fetch(`/api/history/savings?${query.toString()}`);
     if (!response.ok) {
         throw new Error('Failed to fetch savings');
     }
@@ -92,23 +125,53 @@ export interface Settings {
     gridExportSolar: boolean;
     solarTrendRatioMax: number;
     solarBellCurveMultiplier: number;
+    utilityProvider: string;
 }
 
-export const fetchSettings = async (): Promise<Settings> => {
-    const response = await fetch('/api/settings');
+export interface FranklinCredentials {
+    username: string;
+    md5Password: string;
+    gatewayID: string;
+}
+
+export interface SettingsUpdate {
+    settings: Settings;
+    franklin?: FranklinCredentials;
+    siteID?: string;
+}
+
+export const fetchSettings = async (siteID?: string): Promise<Settings> => {
+    const query = new URLSearchParams();
+    if (siteID) {
+        query.append('siteID', siteID);
+    }
+    const response = await fetch(`/api/settings?${query.toString()}`);
     if (!response.ok) {
         throw new Error('Failed to fetch settings');
     }
     return response.json();
 };
 
-export const updateSettings = async (settings: Settings): Promise<void> => {
+export const updateSettings = async (settings: Settings, siteID?: string, franklin?: FranklinCredentials): Promise<void> => {
+    const payload: any = {
+        ...settings,
+        siteID: siteID,
+    };
+
+    if (siteID) {
+        payload.siteID = siteID;
+    }
+
+    if (franklin) {
+        payload.franklin = franklin;
+    }
+
     const response = await fetch('/api/settings', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify(settings),
+        body: JSON.stringify(payload),
     });
     if (!response.ok) {
         throw new Error('Failed to update settings');
@@ -121,6 +184,7 @@ export interface AuthStatus {
     email: string;
     authRequired: boolean;
     clientID: string;
+    siteIDs?: string[];
 }
 
 export const fetchAuthStatus = async (): Promise<AuthStatus> => {
@@ -167,11 +231,28 @@ export interface ModelingHour {
     todaySolarTrend: number;
 }
 
-export const fetchModeling = async (): Promise<ModelingHour[]> => {
-    const response = await fetch('/api/modeling');
+export const fetchModeling = async (siteID?: string): Promise<ModelingHour[]> => {
+    const query = new URLSearchParams();
+    if (siteID) {
+        query.append('siteID', siteID);
+    }
+    const response = await fetch(`/api/modeling?${query.toString()}`);
     if (!response.ok) {
         throw new Error('Failed to fetch modeling data');
     }
     return response.json();
 };
 
+export const joinSite = async (joinSiteID: string, inviteCode: string): Promise<void> => {
+    const response = await fetch('/api/join', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ joinSiteID, inviteCode }),
+    });
+    if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text.trim() || 'Failed to join site');
+    }
+};

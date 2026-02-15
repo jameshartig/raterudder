@@ -2,30 +2,43 @@ package utility
 
 import (
 	"fmt"
-
-	"github.com/levenlabs/go-lflag"
+	"sync"
 )
 
 // Configured sets up the utility provider based on flags.
-func Configured() Provider {
-	provider := lflag.String("utility-provider", "comed", "Utility provider to use (available: comed)")
+func Configured() *Map {
+	m := NewMap()
+	m.SetProvider("comed_hourly", configuredComEd())
+	return m
+}
 
-	var p struct{ Provider }
+// Map manages multiple utility providers.
+type Map struct {
+	mu        sync.Mutex
+	providers map[string]Provider
+}
 
-	// Configure implementations
-	comed := configuredComEd()
+// NewMap creates a new ESS Map.
+func NewMap() *Map {
+	return &Map{
+		providers: make(map[string]Provider),
+	}
+}
 
-	lflag.Do(func() {
-		switch *provider {
-		case "comed":
-			if err := comed.Validate(); err != nil {
-				panic(fmt.Sprintf("comed validation failed: %v", err))
-			}
-			p.Provider = comed
-		default:
-			panic(fmt.Sprintf("unknown utility provider: %s", *provider))
-		}
-	})
+// Provider returns the provider for the given name.
+func (m *Map) Provider(name string) (Provider, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	return &p
+	if prov, ok := m.providers[name]; ok {
+		return prov, nil
+	}
+	return nil, fmt.Errorf("unknown utility provider: %s", name)
+}
+
+// SetProvider sets the provider for the given name. This is primarily used for testing.
+func (m *Map) SetProvider(name string, provider Provider) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.providers[name] = provider
 }

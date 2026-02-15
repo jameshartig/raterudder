@@ -1,6 +1,6 @@
-resource "google_cloud_scheduler_job" "autoenergy_update" {
-  name        = "autoenergy-update"
-  description = "Triggers the /api/update endpoint at minutes 13, 33, 53"
+resource "google_cloud_scheduler_job" "raterudder_update_sites" {
+  name        = "raterudder-update-sites"
+  description = "Triggers the /api/updateSites endpoint at minutes 13, 33, 53"
   # This runs at 13, 33, 53 minutes past the hour to give us enough time to
   # have 2 datapoints from the current hour at least.
   # we used to run every 15 minutes but the 0th minute of the hour didn't have
@@ -15,11 +15,13 @@ resource "google_cloud_scheduler_job" "autoenergy_update" {
 
   http_target {
     http_method = "POST"
-    uri         = "${local.run_deterministic_uri}/api/update"
+    uri         = "${local.run_deterministic_uri}/api/updateSites"
 
     oidc_token {
-      service_account_email = google_service_account.autoenergy.email
+      service_account_email = google_service_account.raterudder.email
       audience              = local.run_deterministic_uri
     }
   }
 }
+
+// TODO: separate endpoint to update utilit

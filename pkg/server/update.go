@@ -1,121 +1,131 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
-	"github.com/jameshartig/autoenergy/pkg/types"
+	"github.com/jameshartig/raterudder/pkg/log"
+	"github.com/jameshartig/raterudder/pkg/types"
 )
+
+// priceCache is a simple cache for utility prices during a bulk update.
+type priceCache struct {
+	CurrentPrices      map[string]types.Price
+	FuturePrices       map[string][]types.Price
+	SyncedPriceHistory map[string]bool
+}
+
+func newPriceCache() *priceCache {
+	return &priceCache{
+		CurrentPrices:      make(map[string]types.Price),
+		FuturePrices:       make(map[string][]types.Price),
+		SyncedPriceHistory: make(map[string]bool),
+	}
+}
 
 func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	siteID := s.getSiteID(r)
 
-	// Check if we need to enforce authentication
-	email, ok := ctx.Value(emailContextKey).(string)
-	if ok && email != "" {
-		// User is authenticated via Cookie (OIDC)
-		var allowed bool
-		if s.updateSpecificEmail != "" && email == s.updateSpecificEmail {
-			allowed = true
-		} else {
-			for _, admin := range s.adminEmails {
-				if email == admin {
-					allowed = true
-					break
-				}
-			}
-		}
-		if !allowed {
-			slog.WarnContext(ctx, "unauthorized email for update", slog.String("email", email))
-			http.Error(w, "unauthorized email", http.StatusForbidden)
-			return
-		}
-		slog.DebugContext(ctx, "update: authorized", slog.String("email", email))
-	} else if s.updateSpecificAudience != "" && (s.updateSpecificEmail != "" || len(s.adminEmails) > 0) {
-		// Not authenticated via Cookie, check Authorization Header (e.g. Cloud Scheduler)
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			http.Error(w, "missing authorization header", http.StatusUnauthorized)
-			return
-		}
+	action, status, err := s.performSiteUpdate(ctx, siteID, newPriceCache())
+	if err != nil {
+		// Log the error, but check if we returned an error that should be returned to the client
+		log.Ctx(ctx).ErrorContext(ctx, "update failed", slog.Any("error", err))
+		http.Error(w, "update failed", http.StatusInternalServerError)
+		return
+	}
 
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-			http.Error(w, "invalid authorization header", http.StatusUnauthorized)
-			return
+	w.WriteHeader(http.StatusOK)
+	if action != nil {
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "success",
+			"action": action,
+			"price":  action.CurrentPrice,
+		}); err != nil {
+			panic(http.ErrAbortHandler)
 		}
+	} else {
+		// No action taken (e.g. paused or emergency mode)
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": status,
+		}); err != nil {
+			panic(http.ErrAbortHandler)
+		}
+	}
+}
 
-		payload, err := s.tokenValidator(ctx, parts[1], s.updateSpecificAudience)
+func (s *Server) handleUpdateSites(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	sites, err := s.storage.ListSites(ctx)
+	if err != nil {
+		log.Ctx(ctx).ErrorContext(ctx, "failed to list sites", slog.Any("error", err))
+		http.Error(w, "failed to list sites", http.StatusInternalServerError)
+		return
+	}
+
+	cache := newPriceCache()
+	results := make(map[string]string)
+
+	for _, site := range sites {
+		log.Ctx(ctx).InfoContext(ctx, "processing site update", slog.String("siteID", site.ID))
+		_, status, err := s.performSiteUpdate(ctx, site.ID, cache)
 		if err != nil {
-			slog.WarnContext(ctx, "failed to validate id token", slog.Any("error", err))
-			http.Error(w, "invalid id token", http.StatusUnauthorized)
-			return
-		}
-
-		email, ok := payload.Claims["email"].(string)
-		if !ok {
-			slog.WarnContext(ctx, "invalid email in id token")
-			http.Error(w, "invalid token claims", http.StatusForbidden)
-			return
-		}
-
-		// Check admin emails
-		var allowed bool
-		if s.updateSpecificEmail != "" && email == s.updateSpecificEmail {
-			allowed = true
+			log.Ctx(ctx).ErrorContext(ctx, "site update failed", slog.String("siteID", site.ID), slog.Any("error", err))
+			results[site.ID] = fmt.Sprintf("failed: %v", err)
 		} else {
-			for _, admin := range s.adminEmails {
-				if email == admin {
-					allowed = true
-					break
-				}
+			if status == "" {
+				status = "success"
 			}
+			results[site.ID] = status
 		}
-		if !allowed {
-			slog.WarnContext(ctx, "unauthorized email for update", slog.String("email", email))
-			http.Error(w, "unauthorized email", http.StatusForbidden)
-			return
-		}
-		slog.DebugContext(ctx, "update: authorized", slog.String("email", email))
-	} else if !s.bypassAuth {
-		slog.WarnContext(ctx, "missing authentication for update")
-		http.Error(w, "missing authentication", http.StatusUnauthorized)
-		return
 	}
 
-	// 1. Get Settings
-	settings, err := s.getSettingsWithMigration(ctx)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to get settings", slog.Any("error", err))
-		http.Error(w, "failed to get settings", http.StatusInternalServerError)
-		return
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(results); err != nil {
+		panic(http.ErrAbortHandler)
 	}
+}
+
+func (s *Server) performSiteUpdate(ctx context.Context, siteID string, cache *priceCache) (*types.Action, string, error) {
+	// 1. Get Settings and Credentials
+	settings, creds, err := s.getSettingsWithMigration(ctx, siteID)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get settings: %w", err)
+	}
+
+	// Get ESS System
+	essSystem := s.ess.Site(siteID)
+
 	// and apply those settings to the ESS
-	err = s.essSystem.ApplySettings(ctx, settings)
+	err = essSystem.ApplySettings(ctx, settings, creds)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to apply settings", slog.Any("error", err))
-		http.Error(w, "failed to apply settings", http.StatusInternalServerError)
-		return
+		return nil, "", fmt.Errorf("failed to apply settings: %w", err)
 	}
 
-	slog.DebugContext(ctx, "update: settings applied")
+	log.Ctx(ctx).DebugContext(ctx, "update: settings applied")
+
+	// get utility
+	utility, err := s.utilities.Provider(settings.UtilityProvider)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get utility system (%s): %w", settings.UtilityProvider, err)
+	}
 
 	// 2. Sync energy history
 	{
 		// First, find out the last time we have history for
-		lastHistoryTime, lastVersion, err := s.storage.GetLatestEnergyHistoryTime(ctx)
+		lastHistoryTime, lastVersion, err := s.storage.GetLatestEnergyHistoryTime(ctx, siteID)
 		if err != nil {
-			slog.WarnContext(ctx, "failed to get latest energy history time", slog.Any("error", err))
+			log.Ctx(ctx).WarnContext(ctx, "failed to get latest energy history time", slog.Any("error", err))
 		}
 
 		// Determine start time for fetching new data
 		// We want at most last 5 days, but starting from the last record
 		// truncated to the hour in case we previously stored an incomplete hour.
-		// User requested to fetch from the beginning of the 5th previous day.
 		now := time.Now()
 		fiveDaysAgo := now.Add(-5 * 24 * time.Hour)
 		syncStart := time.Date(fiveDaysAgo.Year(), fiveDaysAgo.Month(), fiveDaysAgo.Day(), 0, 0, 0, 0, fiveDaysAgo.Location())
@@ -124,7 +134,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		if !lastHistoryTime.IsZero() && lastVersion >= types.CurrentEnergyStatsVersion && lastHistoryTime.After(syncStart) {
 			syncStart = lastHistoryTime.Truncate(time.Hour)
 		} else if !lastHistoryTime.IsZero() && lastVersion < types.CurrentEnergyStatsVersion {
-			slog.InfoContext(
+			log.Ctx(ctx).InfoContext(
 				ctx,
 				"backfilling energy history due to version mismatch",
 				slog.Int("lastVersion", lastVersion),
@@ -132,7 +142,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 			)
 		}
 
-		slog.DebugContext(ctx, "syncing energy history", slog.Any("since", syncStart))
+		log.Ctx(ctx).DebugContext(ctx, "syncing energy history", slog.Any("since", syncStart))
 
 		// Loop day by day
 		for t := syncStart; t.Before(now); t = t.Add(24 * time.Hour) {
@@ -141,28 +151,28 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 				end = now
 			}
 
-			slog.DebugContext(ctx, "syncing energy history batch", slog.Time("start", t), slog.Time("end", end))
-			newHistory, err := s.essSystem.GetEnergyHistory(ctx, t, end)
+			log.Ctx(ctx).DebugContext(ctx, "syncing energy history batch", slog.Time("start", t), slog.Time("end", end))
+			newHistory, err := essSystem.GetEnergyHistory(ctx, t, end)
 			if err != nil {
-				slog.ErrorContext(ctx, "failed to get energy history from ess", slog.Any("error", err), slog.Time("start", t), slog.Time("end", end))
+				log.Ctx(ctx).ErrorContext(ctx, "failed to get energy history from ess", slog.Any("error", err), slog.Time("start", t), slog.Time("end", end))
 				// continue to next day even if this one failed
 			} else {
 				for _, h := range newHistory {
-					if err := s.storage.UpsertEnergyHistory(ctx, h, types.CurrentEnergyStatsVersion); err != nil {
-						slog.ErrorContext(ctx, "failed to upsert energy history", slog.Any("error", err))
+					if err := s.storage.UpsertEnergyHistory(ctx, siteID, h, types.CurrentEnergyStatsVersion); err != nil {
+						log.Ctx(ctx).ErrorContext(ctx, "failed to upsert energy history", slog.Any("error", err))
 					}
 				}
 			}
 		}
 	}
 
-	slog.DebugContext(ctx, "update: energy history synced")
+	log.Ctx(ctx).DebugContext(ctx, "update: energy history synced")
 
 	// 2b. Sync price history
-	{
-		lastPriceTime, lastVersion, err := s.storage.GetLatestPriceHistoryTime(ctx)
+	if !cache.SyncedPriceHistory[settings.UtilityProvider] {
+		lastPriceTime, lastVersion, err := s.storage.GetLatestPriceHistoryTime(ctx, settings.UtilityProvider)
 		if err != nil {
-			slog.WarnContext(ctx, "failed to get latest price history time", slog.Any("error", err))
+			log.Ctx(ctx).WarnContext(ctx, "failed to get latest price history time", slog.Any("error", err))
 		}
 
 		now := time.Now()
@@ -172,7 +182,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		if !lastPriceTime.IsZero() && lastVersion >= types.CurrentPriceHistoryVersion && lastPriceTime.After(syncStart) {
 			syncStart = lastPriceTime.Truncate(time.Hour)
 		} else if !lastPriceTime.IsZero() && lastVersion < types.CurrentPriceHistoryVersion {
-			slog.InfoContext(
+			log.Ctx(ctx).InfoContext(
 				ctx,
 				"backfilling price history due to version mismatch",
 				slog.Int("lastVersion", lastVersion),
@@ -180,7 +190,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 			)
 		}
 
-		slog.DebugContext(ctx, "syncing price history", slog.Any("since", syncStart))
+		log.Ctx(ctx).DebugContext(ctx, "syncing price history", slog.Any("since", syncStart))
 
 		// Loop day by day
 		for t := syncStart; t.Before(now); t = t.Add(24 * time.Hour) {
@@ -189,47 +199,43 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 				end = now
 			}
 
-			slog.DebugContext(ctx, "syncing price history batch", "start", t, "end", end)
-			newPrices, err := s.utilityProvider.GetConfirmedPrices(ctx, t, end)
+			// Optimisation: if we're doing a bulk update, we might have already synced this provider recently.
+			// But since we're doing it site by site, logic is same.
+			log.Ctx(ctx).DebugContext(ctx, "syncing price history batch", "start", t, "end", end)
+			newPrices, err := utility.GetConfirmedPrices(ctx, t, end)
 			if err != nil {
-				slog.ErrorContext(ctx, "failed to get confirmed prices", slog.Any("error", err), slog.Time("start", t), slog.Time("end", end))
+				log.Ctx(ctx).ErrorContext(ctx, "failed to get confirmed prices", slog.Any("error", err), slog.Time("start", t), slog.Time("end", end))
 			} else {
 				for _, p := range newPrices {
 					if err := s.storage.UpsertPrice(ctx, p, types.CurrentPriceHistoryVersion); err != nil {
-						slog.ErrorContext(ctx, "failed to upsert price", slog.Any("error", err))
+						log.Ctx(ctx).ErrorContext(ctx, "failed to upsert price", slog.Any("error", err))
 					}
 				}
 			}
 		}
+		cache.SyncedPriceHistory[settings.UtilityProvider] = true
+	} else {
+		log.Ctx(ctx).DebugContext(ctx, "price history already synced", "provider", settings.UtilityProvider)
 	}
 
-	slog.DebugContext(ctx, "update: price history synced")
+	log.Ctx(ctx).DebugContext(ctx, "update: price history synced")
 
 	if settings.Pause {
-		slog.InfoContext(ctx, "update: paused")
-		w.WriteHeader(http.StatusOK)
-		// We return 200 OK so the scheduler doesn't think it failed
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"status": "paused",
-		}); err != nil {
-			panic(http.ErrAbortHandler)
-		}
-		return
+		log.Ctx(ctx).InfoContext(ctx, "update: paused")
+		return nil, "paused", nil
 	}
 
 	// 3. Fetch current ESS status
-	status, err := s.essSystem.GetStatus(ctx)
+	status, err := essSystem.GetStatus(ctx)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to get ess status", slog.Any("error", err))
-		http.Error(w, "failed to get ess status", http.StatusInternalServerError)
-		return
+		return nil, "", fmt.Errorf("failed to get ess status: %w", err)
 	}
 
-	slog.DebugContext(ctx, "update: ess status fetched")
+	log.Ctx(ctx).DebugContext(ctx, "update: ess status fetched")
 
 	// don't update if we're in emergency mode
 	if status.EmergencyMode {
-		slog.InfoContext(ctx, "update: emergency mode")
+		log.Ctx(ctx).InfoContext(ctx, "update: emergency mode")
 		action := types.Action{
 			Timestamp:    time.Now(),
 			BatteryMode:  types.BatteryModeNoChange,
@@ -238,21 +244,14 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 			SystemStatus: status,
 			Fault:        true,
 		}
-		if err := s.storage.InsertAction(ctx, action); err != nil {
-			slog.ErrorContext(ctx, "failed to insert action", slog.Any("error", err))
+		if err := s.storage.InsertAction(ctx, siteID, action); err != nil {
+			log.Ctx(ctx).ErrorContext(ctx, "failed to insert action", slog.Any("error", err))
 		}
-		w.WriteHeader(http.StatusOK)
-		// We return 200 OK so the scheduler doesn't think it failed
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"status": "emergency mode",
-		}); err != nil {
-			panic(http.ErrAbortHandler)
-		}
-		return
+		return nil, "emergency mode", nil
 	}
 
 	if len(status.Alarms) > 0 {
-		slog.InfoContext(ctx, "update: alarms present", slog.Any("alarms", status.Alarms))
+		log.Ctx(ctx).InfoContext(ctx, "update: alarms present", slog.Any("alarms", status.Alarms))
 		action := types.Action{
 			Timestamp:    time.Now(),
 			BatteryMode:  types.BatteryModeNoChange,
@@ -261,52 +260,54 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 			SystemStatus: status,
 			Fault:        true,
 		}
-		if err := s.storage.InsertAction(ctx, action); err != nil {
-			slog.ErrorContext(ctx, "failed to insert action", slog.Any("error", err))
+		if err := s.storage.InsertAction(ctx, siteID, action); err != nil {
+			log.Ctx(ctx).ErrorContext(ctx, "failed to insert action", slog.Any("error", err))
 		}
-		w.WriteHeader(http.StatusOK)
-		// We return 200 OK so the scheduler doesn't think it failed
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"status": "alarms present",
-		}); err != nil {
-			panic(http.ErrAbortHandler)
-		}
-		return
+		return nil, "alarms present", nil
 	}
 
 	// 4. Get Current Price for controller
-	currentPrice, err := s.utilityProvider.GetCurrentPrice(ctx)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to get price", slog.Any("error", err))
-		http.Error(w, "failed to get price", http.StatusInternalServerError)
-		return
+	var currentPrice types.Price
+	if p, ok := cache.CurrentPrices[settings.UtilityProvider]; ok {
+		currentPrice = p
+	} else {
+		currentPrice, err = utility.GetCurrentPrice(ctx)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to get price: %w", err)
+		}
+		cache.CurrentPrices[settings.UtilityProvider] = currentPrice
 	}
 
-	slog.DebugContext(ctx, "update: current price fetched")
+	log.Ctx(ctx).DebugContext(ctx, "update: current price fetched")
 
 	// 5. Get Future Prices for controller
-	futurePrices, err := s.utilityProvider.GetFuturePrices(ctx)
-	if err != nil {
-		slog.WarnContext(ctx, "failed to get future prices", slog.Any("error", err))
-		// Continue with empty future prices
+	var futurePrices []types.Price
+	if p, ok := cache.FuturePrices[settings.UtilityProvider]; ok {
+		futurePrices = p
+	} else {
+		futurePrices, err = utility.GetFuturePrices(ctx)
+		if err != nil {
+			log.Ctx(ctx).WarnContext(ctx, "failed to get future prices", slog.Any("error", err))
+			// Continue with empty future prices
+		} else {
+			cache.FuturePrices[settings.UtilityProvider] = futurePrices
+		}
 	}
 
 	// 6. Get History for Controller (Last 72 hours from Storage)
 	historyStart := time.Now().Add(-72 * time.Hour)
 	historyEnd := time.Now()
-	energyHistory, err := s.storage.GetEnergyHistory(ctx, historyStart, historyEnd)
+	energyHistory, err := s.storage.GetEnergyHistory(ctx, siteID, historyStart, historyEnd)
 	if err != nil {
-		slog.WarnContext(ctx, "failed to get energy history from storage", slog.Any("error", err))
+		log.Ctx(ctx).WarnContext(ctx, "failed to get energy history from storage", slog.Any("error", err))
 	}
 
-	slog.DebugContext(ctx, "update: starting decision")
+	log.Ctx(ctx).DebugContext(ctx, "update: starting decision")
 
 	// 7. Decide Action
 	decision, err := s.controller.Decide(ctx, status, currentPrice, futurePrices, energyHistory, settings)
 	if err != nil {
-		slog.ErrorContext(ctx, "controller decision failed", slog.Any("error", err))
-		http.Error(w, "controller error", http.StatusInternalServerError)
-		return
+		return nil, "", fmt.Errorf("controller decision failed: %w", err)
 	}
 
 	action := decision.Action
@@ -315,7 +316,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		action.Timestamp = time.Now()
 	}
 
-	slog.InfoContext(
+	log.Ctx(ctx).InfoContext(
 		ctx,
 		"update: decision made",
 		slog.Int("batteryMode", int(action.BatteryMode)),
@@ -329,15 +330,15 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	// 8. Execute Action
 	switch action.BatteryMode {
 	case types.BatteryModeChargeAny:
-		err = s.essSystem.SetModes(ctx, types.BatteryModeChargeAny, types.SolarModeAny) // Force charge
+		err = essSystem.SetModes(ctx, types.BatteryModeChargeAny, types.SolarModeAny) // Force charge
 	case types.BatteryModeLoad:
-		err = s.essSystem.SetModes(ctx, types.BatteryModeLoad, types.SolarModeAny) // Use battery
+		err = essSystem.SetModes(ctx, types.BatteryModeLoad, types.SolarModeAny) // Use battery
 	case types.BatteryModeStandby:
 		// "self_consumption" is usually safe for idle too (just don't force charge)
-		err = s.essSystem.SetModes(ctx, types.BatteryModeStandby, types.SolarModeAny)
+		err = essSystem.SetModes(ctx, types.BatteryModeStandby, types.SolarModeAny)
 	}
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to set mode", slog.Any("error", err))
+		log.Ctx(ctx).ErrorContext(ctx, "failed to set mode", slog.Any("error", err))
 		action.Description += fmt.Sprintf(" (FAILED: %v)", err)
 	}
 	if settings.DryRun {
@@ -345,16 +346,9 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 9. Log Action
-	if err := s.storage.InsertAction(ctx, action); err != nil {
-		slog.ErrorContext(ctx, "failed to insert action", slog.Any("error", err))
+	if err := s.storage.InsertAction(ctx, siteID, action); err != nil {
+		log.Ctx(ctx).ErrorContext(ctx, "failed to insert action", slog.Any("error", err))
 	}
 
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "success",
-		"action": action,
-		"price":  currentPrice,
-	}); err != nil {
-		panic(http.ErrAbortHandler)
-	}
+	return &action, "", nil
 }

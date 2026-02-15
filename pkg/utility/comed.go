@@ -12,7 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jameshartig/autoenergy/pkg/types"
+	"github.com/jameshartig/raterudder/pkg/log"
+	"github.com/jameshartig/raterudder/pkg/types"
 	"github.com/levenlabs/go-lflag"
 )
 
@@ -125,7 +126,7 @@ func (c *ComEd) fetchPrices(ctx context.Context) ([]types.Price, error) {
 // GetConfirmedPrices returns confirmed prices for a specific time range.
 // This requests 5-minute feed data and averages it into hourly buckets.
 func (c *ComEd) GetConfirmedPrices(ctx context.Context, start, end time.Time) ([]types.Price, error) {
-	slog.DebugContext(
+	log.Ctx(ctx).DebugContext(
 		ctx,
 		"getting comed confirmed price history",
 		slog.Time("start", start),
@@ -157,7 +158,7 @@ func (c *ComEd) GetConfirmedPrices(ctx context.Context, start, end time.Time) ([
 		// require full 12 5-minute periods to ensure complete data but somehow we
 		// don't have enough samples even though we have 59+minutes of data
 		if p.SampleCount != 12 {
-			slog.ErrorContext(
+			log.Ctx(ctx).ErrorContext(
 				ctx,
 				"incomplete price data for hour",
 				slog.Time("tsStart", p.TSStart),
@@ -176,7 +177,7 @@ func (c *ComEd) GetConfirmedPrices(ctx context.Context, start, end time.Time) ([
 		}
 	}
 
-	slog.DebugContext(
+	log.Ctx(ctx).DebugContext(
 		ctx,
 		"got comed confirmed prices",
 		slog.Time("earliest", earliest),
@@ -209,11 +210,11 @@ func (c *ComEd) fetchPricesRange(ctx context.Context, start, end time.Time) ([]t
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	slog.Debug("fetching prices from comed", "url", u.String())
+	log.Ctx(ctx).DebugContext(ctx, "fetching prices from comed", "url", u.String())
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		slog.Error("failed to fetch prices", "error", err)
+		log.Ctx(ctx).ErrorContext(ctx, "failed to fetch prices", "error", err)
 		return nil, fmt.Errorf("failed to fetch prices: %w", err)
 	}
 	defer resp.Body.Close()
@@ -225,10 +226,10 @@ func (c *ComEd) fetchPricesRange(ctx context.Context, start, end time.Time) ([]t
 	var data []comedPriceEntry
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		// Sometimes ComEd returns empty body or non-json on error or no data
-		slog.ErrorContext(ctx, "failed to decode comed response", slog.Any("error", err))
+		log.Ctx(ctx).ErrorContext(ctx, "failed to decode comed response", slog.Any("error", err))
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
-	slog.DebugContext(
+	log.Ctx(ctx).DebugContext(
 		ctx,
 		"fetched prices",
 		slog.Int("count", len(data)),
@@ -248,12 +249,12 @@ func (c *ComEd) fetchPricesRange(ctx context.Context, start, end time.Time) ([]t
 	for _, item := range data {
 		ms, err := strconv.ParseInt(item.MillisUTC, 10, 64)
 		if err != nil {
-			slog.WarnContext(ctx, "failed to parse comed millisUTC", slog.String("value", item.MillisUTC), slog.Any("error", err))
+			log.Ctx(ctx).WarnContext(ctx, "failed to parse comed millisUTC", slog.String("value", item.MillisUTC), slog.Any("error", err))
 			continue
 		}
 		centsPerKWH, err := strconv.ParseFloat(item.Price, 64)
 		if err != nil {
-			slog.WarnContext(ctx, "failed to parse comed price", slog.String("value", item.Price), slog.Any("error", err))
+			log.Ctx(ctx).WarnContext(ctx, "failed to parse comed price", slog.String("value", item.Price), slog.Any("error", err))
 			continue
 		}
 
@@ -276,6 +277,7 @@ func (c *ComEd) fetchPricesRange(ctx context.Context, start, end time.Time) ([]t
 	for _, h := range hours {
 		avgCents := h.sum / float64(h.count)
 		prices = append(prices, types.Price{
+			Provider:      "comed_hourly",
 			TSStart:       h.start,
 			TSEnd:         h.lastTime.Add(4*time.Minute + 59*time.Second),
 			DollarsPerKWH: avgCents / 100, // Cents to Dollars
@@ -294,7 +296,7 @@ func (c *ComEd) fetchPricesRange(ctx context.Context, start, end time.Time) ([]t
 // GetCurrentPrice returns the latest hourly-averaged price.
 // Note: This may be an incomplete average if the current hour is not yet finished.
 func (c *ComEd) GetCurrentPrice(ctx context.Context) (types.Price, error) {
-	slog.Debug("getting current price")
+	log.Ctx(ctx).DebugContext(ctx, "getting current price")
 
 	prices, err := c.fetchPrices(ctx)
 	if err != nil {
@@ -307,7 +309,7 @@ func (c *ComEd) GetCurrentPrice(ctx context.Context) (types.Price, error) {
 
 	// Return the latest available price (even if incomplete)
 	latest := prices[len(prices)-1]
-	slog.DebugContext(
+	log.Ctx(ctx).DebugContext(
 		ctx,
 		"got current price",
 		slog.Float64("price", latest.DollarsPerKWH),
@@ -320,7 +322,7 @@ func (c *ComEd) GetCurrentPrice(ctx context.Context) (types.Price, error) {
 // Prefers PJM API if configured, otherwise returns nothing
 func (c *ComEd) GetFuturePrices(ctx context.Context) ([]types.Price, error) {
 	if c.pjmAPIKey != "" {
-		slog.Debug("fetching pjm day ahead prices for comed")
+		log.Ctx(ctx).DebugContext(ctx, "fetching pjm day ahead prices for comed")
 		return c.fetchPJMDayAhead(ctx, pjmComedPNodeID)
 	}
 	return nil, nil
@@ -361,7 +363,7 @@ func (c *ComEd) fetchPJMDayAhead(ctx context.Context, pnodeID string) ([]types.P
 	req.Header.Set("Cache-Control", "no-cache")
 	req.Header.Set("Accept", "application/json")
 
-	slog.DebugContext(
+	log.Ctx(ctx).DebugContext(
 		ctx,
 		"fetching pjm prices",
 		slog.String("url", u.String()),
@@ -389,7 +391,7 @@ func (c *ComEd) fetchPJMDayAhead(ctx context.Context, pnodeID string) ([]types.P
 		// Parse EPT time
 		t, err := time.ParseInLocation("2006-01-02T15:04:05", item.DatetimeBeginningEPT, etLocation)
 		if err != nil {
-			slog.Warn("failed to parse pjm time", slog.String("time", item.DatetimeBeginningEPT), slog.Any("error", err))
+			log.Ctx(ctx).WarnContext(ctx, "failed to parse pjm time", slog.String("time", item.DatetimeBeginningEPT), slog.Any("error", err))
 			continue
 		}
 		// make sure it's truncated to the hour
@@ -399,6 +401,7 @@ func (c *ComEd) fetchPJMDayAhead(ctx context.Context, pnodeID string) ([]types.P
 		price := item.TotalLMPDA / 1000.0
 
 		prices = append(prices, types.Price{
+			Provider:      "comed_hourly",
 			TSStart:       t,
 			TSEnd:         t.Add(time.Hour),
 			DollarsPerKWH: price,
@@ -411,7 +414,7 @@ func (c *ComEd) fetchPJMDayAhead(ctx context.Context, pnodeID string) ([]types.P
 		}
 	}
 
-	slog.DebugContext(
+	log.Ctx(ctx).DebugContext(
 		ctx,
 		"fetched pjm prices",
 		slog.Int("count", len(prices)),

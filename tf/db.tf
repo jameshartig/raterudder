@@ -1,24 +1,52 @@
 # only the default database supports the free tier
-resource "google_firestore_database" "autoenergy" {
-  project     = var.project_id
-  name        = "(default)"
-  location_id = "us-central1"
-  type        = "FIRESTORE_NATIVE"
+resource "google_firestore_database" "default" {
+  project                           = var.project_id
+  name                              = "(default)"
+  location_id                       = "us-central1"
+  type                              = "FIRESTORE_NATIVE"
+  database_edition                  = "STANDARD"
+  concurrency_mode                  = "OPTIMISTIC"
+  app_engine_integration_mode       = "DISABLED"
+  point_in_time_recovery_enablement = "POINT_IN_TIME_RECOVERY_ENABLED"
+  delete_protection_state           = "DELETE_PROTECTION_ENABLED"
 
   depends_on = [module.enabled_google_apis]
 }
 
-resource "google_firestore_backup_schedule" "autoenergy_backup" {
+resource "google_firestore_backup_schedule" "default" {
   project  = var.project_id
-  database = google_firestore_database.autoenergy.name
+  database = google_firestore_database.default.name
 
-  retention = "259200s" # 3 days
+  retention = "86400s" # 1 day
 
   daily_recurrence {}
 }
 
-resource "google_project_iam_member" "autoenergy_firestore" {
+resource "google_project_iam_member" "raterudder_firestore" {
   project = var.project_id
   role    = "roles/datastore.user"
-  member  = "serviceAccount:${google_service_account.autoenergy.email}"
+  member  = "serviceAccount:${google_service_account.raterudder.email}"
 }
+
+locals {
+  collections = [
+    "config",
+    "actions",
+    "energy_hourly",
+    "utility_prices",
+    "users",
+    "sites",
+  ]
+}
+
+resource "google_firestore_field" "json" {
+  for_each   = toset(local.collections)
+  project    = var.project_id
+  database   = google_firestore_database.default.name
+  collection = each.value
+  field      = "json"
+
+  # disable indexing on json fields
+  index_config {}
+}
+

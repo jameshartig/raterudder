@@ -6,19 +6,29 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/jameshartig/raterudder/pkg/log"
 )
 
 func (s *Server) handleHistoryPrices(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	siteID := s.getSiteID(r)
 	start, end, err := parseTimeRange(r)
 	if err != nil {
 		http.Error(w, "invalid time range: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	prices, err := s.storage.GetPriceHistory(ctx, start, end)
+	settings, _, err := s.getSettingsWithMigration(ctx, siteID)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to get prices", "error", err)
+		log.Ctx(ctx).ErrorContext(ctx, "failed to get settings", slog.Any("error", err))
+		http.Error(w, "failed to get settings", http.StatusInternalServerError)
+		return
+	}
+
+	prices, err := s.storage.GetPriceHistory(ctx, settings.UtilityProvider, start, end)
+	if err != nil {
+		log.Ctx(ctx).ErrorContext(ctx, "failed to get prices", slog.String("utility", settings.UtilityProvider), slog.Any("error", err))
 		http.Error(w, "failed to get prices", http.StatusInternalServerError)
 		return
 	}
@@ -30,9 +40,9 @@ func (s *Server) handleHistoryPrices(w http.ResponseWriter, r *http.Request) {
 	// Otherwise, cache for 1 minute.
 	today := time.Now().Truncate(24 * time.Hour)
 	if end.Before(today) {
-		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Header().Set("Cache-Control", "private, max-age=86400")
 	} else {
-		w.Header().Set("Cache-Control", "public, max-age=60")
+		w.Header().Set("Cache-Control", "private, max-age=60")
 	}
 
 	if err := json.NewEncoder(w).Encode(prices); err != nil {
@@ -42,15 +52,16 @@ func (s *Server) handleHistoryPrices(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleHistoryActions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	siteID := s.getSiteID(r)
 	start, end, err := parseTimeRange(r)
 	if err != nil {
 		http.Error(w, "invalid time range: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	actions, err := s.storage.GetActionHistory(ctx, start, end)
+	actions, err := s.storage.GetActionHistory(ctx, siteID, start, end)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to get actions", "error", err)
+		log.Ctx(ctx).ErrorContext(ctx, "failed to get actions", slog.String("siteID", siteID), slog.Any("error", err))
 		http.Error(w, "failed to get actions", http.StatusInternalServerError)
 		return
 	}
@@ -62,9 +73,9 @@ func (s *Server) handleHistoryActions(w http.ResponseWriter, r *http.Request) {
 	// Otherwise, cache for 1 minute.
 	today := time.Now().Truncate(24 * time.Hour)
 	if end.Before(today) {
-		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Header().Set("Cache-Control", "private, max-age=86400")
 	} else {
-		w.Header().Set("Cache-Control", "public, max-age=60")
+		w.Header().Set("Cache-Control", "private, max-age=60")
 	}
 
 	if err := json.NewEncoder(w).Encode(actions); err != nil {

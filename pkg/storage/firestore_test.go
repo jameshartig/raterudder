@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jameshartig/autoenergy/pkg/types"
+	"github.com/jameshartig/raterudder/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -42,25 +42,31 @@ func TestFirestoreProvider(t *testing.T) {
 			MinBatterySOC:                  5.5,
 		}
 		// Pass version 1
-		require.NoError(t, f.SetSettings(ctx, settings, 1))
+		require.NoError(t, f.SetSettings(ctx, "test-site", settings, 1))
 
-		gotSettings, version, err := f.GetSettings(ctx)
+		gotSettings, version, err := f.GetSettings(ctx, "test-site")
 		require.NoError(t, err)
 		assert.Equal(t, 1, version)
 		assert.Equal(t, settings.AlwaysChargeUnderDollarsPerKWH, gotSettings.AlwaysChargeUnderDollarsPerKWH)
 		assert.Equal(t, settings.MinBatterySOC, gotSettings.MinBatterySOC)
 		assert.Equal(t, settings.DryRun, gotSettings.DryRun)
+		assert.Equal(t, settings.DryRun, gotSettings.DryRun)
+	})
+
+	t.Run("EmptySiteID", func(t *testing.T) {
+		_, _, err := f.GetSettings(ctx, "")
+		assert.ErrorContains(t, err, "siteID cannot be empty")
 	})
 
 	t.Run("Prices", func(t *testing.T) {
 		now := time.Now().Truncate(time.Second).UTC() // Firestore timestamp precision (RFC3339 is seconds)
-		p1 := types.Price{TSStart: now.Add(-1 * time.Hour), DollarsPerKWH: 0.10}
-		p2 := types.Price{TSStart: now, DollarsPerKWH: 0.12}
+		p1 := types.Price{TSStart: now.Add(-1 * time.Hour), DollarsPerKWH: 0.10, Provider: "comed_hourly"}
+		p2 := types.Price{TSStart: now, DollarsPerKWH: 0.12, Provider: "comed_hourly"}
 
 		require.NoError(t, f.UpsertPrice(ctx, p1, 0))
 		require.NoError(t, f.UpsertPrice(ctx, p2, 0))
 
-		prices, err := f.GetPriceHistory(ctx, now.Add(-2*time.Hour), now.Add(1*time.Minute))
+		prices, err := f.GetPriceHistory(ctx, "comed_hourly", now.Add(-2*time.Hour), now.Add(1*time.Minute))
 		require.NoError(t, err)
 
 		// Note: We depend on emulator state. It might have data from previous runs if not cleared.
@@ -79,10 +85,10 @@ func TestFirestoreProvider(t *testing.T) {
 		assert.True(t, foundP2, "did not find inserted p2")
 
 		t.Run("UpsertOverwrite", func(t *testing.T) {
-			p2Updated := types.Price{TSStart: p2.TSStart, DollarsPerKWH: 0.99}
+			p2Updated := types.Price{TSStart: p2.TSStart, DollarsPerKWH: 0.99, Provider: "comed_hourly"}
 			require.NoError(t, f.UpsertPrice(ctx, p2Updated, 0))
 
-			pricesUpdated, err := f.GetPriceHistory(ctx, now.Add(-2*time.Hour), now.Add(1*time.Minute))
+			pricesUpdated, err := f.GetPriceHistory(ctx, "comed_hourly", now.Add(-2*time.Hour), now.Add(1*time.Minute))
 			require.NoError(t, err)
 
 			foundP2Updated := false
@@ -101,10 +107,10 @@ func TestFirestoreProvider(t *testing.T) {
 		t.Run("GetLatestPriceHistoryTime", func(t *testing.T) {
 			// Insert a future price
 			future := now.Add(24 * time.Hour)
-			pFuture := types.Price{TSStart: future, DollarsPerKWH: 0.99}
+			pFuture := types.Price{TSStart: future, DollarsPerKWH: 0.99, Provider: "comed_hourly"}
 			require.NoError(t, f.UpsertPrice(ctx, pFuture, 0))
 
-			latestTime, version, err := f.GetLatestPriceHistoryTime(ctx)
+			latestTime, version, err := f.GetLatestPriceHistoryTime(ctx, "comed_hourly")
 			require.NoError(t, err)
 			assert.Equal(t, future, latestTime, "latest time should match the future timestamp we just inserted")
 			assert.Equal(t, 0, version, "version should be 0 because we didn't set it explicitly on upsert in this test")
@@ -120,9 +126,9 @@ func TestFirestoreProvider(t *testing.T) {
 			Description:  "Charging test",
 			CurrentPrice: types.Price{DollarsPerKWH: 0.05, TSStart: now},
 		}
-		require.NoError(t, f.InsertAction(ctx, a1))
+		require.NoError(t, f.InsertAction(ctx, "test-site", a1))
 
-		actions, err := f.GetActionHistory(ctx, now.Add(-1*time.Minute), now.Add(1*time.Minute))
+		actions, err := f.GetActionHistory(ctx, "test-site", now.Add(-1*time.Minute), now.Add(1*time.Minute))
 		require.NoError(t, err)
 
 		foundA1 := false
@@ -148,11 +154,11 @@ func TestFirestoreProvider(t *testing.T) {
 				Description:  "Second action in range",
 				CurrentPrice: types.Price{DollarsPerKWH: 0.06, TSStart: now.Add(10 * time.Second)},
 			}
-			require.NoError(t, f.InsertAction(ctx, a2))
-			require.NoError(t, f.InsertAction(ctx, a3))
+			require.NoError(t, f.InsertAction(ctx, "test-site", a2))
+			require.NoError(t, f.InsertAction(ctx, "test-site", a3))
 
 			// Query should return a1 and a3, but not a2 (which is outside range)
-			actionsFiltered, err := f.GetActionHistory(ctx, now.Add(-1*time.Minute), now.Add(1*time.Minute))
+			actionsFiltered, err := f.GetActionHistory(ctx, "test-site", now.Add(-1*time.Minute), now.Add(1*time.Minute))
 			require.NoError(t, err)
 
 			// Check that a2 (outside range) is not returned
@@ -182,10 +188,10 @@ func TestFirestoreProvider(t *testing.T) {
 			SolarKWH:          5.0,
 			BatteryChargedKWH: 2.0,
 		}
-		require.NoError(t, f.UpsertEnergyHistory(ctx, stats, 0))
+		require.NoError(t, f.UpsertEnergyHistory(ctx, "test-site", stats, 0))
 
 		t.Run("GetEnergyHistory", func(t *testing.T) {
-			energyHistory, err := f.GetEnergyHistory(ctx, now.Add(-1*time.Minute), now.Add(2*time.Hour))
+			energyHistory, err := f.GetEnergyHistory(ctx, "test-site", now.Add(-1*time.Minute), now.Add(2*time.Hour))
 			require.NoError(t, err)
 
 			foundS := false
@@ -207,12 +213,115 @@ func TestFirestoreProvider(t *testing.T) {
 				SolarKWH:          1.0,
 				BatteryChargedKWH: 1.0,
 			}
-			require.NoError(t, f.UpsertEnergyHistory(ctx, futureStats, 0))
+			require.NoError(t, f.UpsertEnergyHistory(ctx, "test-site", futureStats, 0))
 
-			latestTime, version, err := f.GetLatestEnergyHistoryTime(ctx)
+			latestTime, version, err := f.GetLatestEnergyHistoryTime(ctx, "test-site")
 			require.NoError(t, err)
 			assert.Equal(t, future, latestTime, "latest time should match the future timestamp we just inserted")
 			assert.Equal(t, 0, version, "version should be 0 because we didn't set it explicitly")
+		})
+	})
+
+	t.Run("Sites", func(t *testing.T) {
+		// First, manually create a site via SetSettings so it exists
+		site := types.Site{
+			ID:         "test-site-crud",
+			Name:       "Test Site",
+			InviteCode: "invite123",
+			Permissions: []types.SitePermissions{
+				{UserID: "owner@test.com"},
+			},
+		}
+
+		t.Run("UpdateSite", func(t *testing.T) {
+			// UpdateSite uses MergeAll so it creates or updates
+			require.NoError(t, f.UpdateSite(ctx, "test-site-crud", site))
+
+			got, err := f.GetSite(ctx, "test-site-crud")
+			require.NoError(t, err)
+			assert.Equal(t, "Test Site", got.Name)
+			assert.Equal(t, "invite123", got.InviteCode)
+			assert.Len(t, got.Permissions, 1)
+			assert.Equal(t, "owner@test.com", got.Permissions[0].UserID)
+		})
+
+		t.Run("UpdateSiteAddPermission", func(t *testing.T) {
+			site.Permissions = append(site.Permissions, types.SitePermissions{UserID: "newuser@test.com"})
+			require.NoError(t, f.UpdateSite(ctx, "test-site-crud", site))
+
+			got, err := f.GetSite(ctx, "test-site-crud")
+			require.NoError(t, err)
+			assert.Len(t, got.Permissions, 2)
+			assert.Equal(t, "newuser@test.com", got.Permissions[1].UserID)
+		})
+
+		t.Run("ListSites", func(t *testing.T) {
+			// Create another site to ensure we have at least 2
+			site2 := types.Site{ID: "site2", Name: "Site 2"}
+			require.NoError(t, f.UpdateSite(ctx, "site2", site2))
+
+			sites, err := f.ListSites(ctx)
+			require.NoError(t, err)
+
+			// We expect at least test-site-crud and site2
+			foundTestSite := false
+			foundSite2 := false
+			for _, s := range sites {
+				if s.ID == "test-site-crud" {
+					foundTestSite = true
+				}
+				if s.ID == "site2" {
+					foundSite2 = true
+				}
+			}
+			assert.True(t, foundTestSite, "ListSites did not return test-site-crud")
+			assert.True(t, foundSite2, "ListSites did not return site2")
+		})
+	})
+
+	t.Run("Users", func(t *testing.T) {
+		t.Run("CreateUser", func(t *testing.T) {
+			user := types.User{
+				ID:      "newuser@test.com",
+				Email:   "newuser@test.com",
+				SiteIDs: []string{"site1"},
+			}
+			require.NoError(t, f.CreateUser(ctx, user))
+
+			got, err := f.GetUser(ctx, "newuser@test.com")
+			require.NoError(t, err)
+			assert.Equal(t, "newuser@test.com", got.ID)
+			assert.Equal(t, "newuser@test.com", got.Email)
+			assert.Equal(t, []string{"site1"}, got.SiteIDs)
+		})
+
+		t.Run("CreateUserDuplicate", func(t *testing.T) {
+			user := types.User{
+				ID:      "newuser@test.com",
+				Email:   "newuser@test.com",
+				SiteIDs: []string{"site1"},
+			}
+			// Create uses Firestore's Create which should fail on duplicates
+			err := f.CreateUser(ctx, user)
+			assert.Error(t, err)
+		})
+
+		t.Run("UpdateUser", func(t *testing.T) {
+			user := types.User{
+				ID:      "newuser@test.com",
+				Email:   "newuser@test.com",
+				SiteIDs: []string{"site1", "site2"},
+			}
+			require.NoError(t, f.UpdateUser(ctx, user))
+
+			got, err := f.GetUser(ctx, "newuser@test.com")
+			require.NoError(t, err)
+			assert.Equal(t, []string{"site1", "site2"}, got.SiteIDs)
+		})
+
+		t.Run("GetUserNotFound", func(t *testing.T) {
+			_, err := f.GetUser(ctx, "nonexistent@test.com")
+			assert.ErrorContains(t, err, "user not found")
 		})
 	})
 }

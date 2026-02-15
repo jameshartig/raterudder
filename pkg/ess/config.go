@@ -1,31 +1,54 @@
 package ess
 
 import (
-	"fmt"
+	"sync"
 
-	"github.com/levenlabs/go-lflag"
+	"github.com/jameshartig/raterudder/pkg/types"
 )
 
-// Configured sets up the ESS system based on flags.
-func Configured() System {
-	provider := lflag.String("ess-provider", "franklin", "Energy Storage System provider to use (available: franklin)")
+// Configured sets up the ESS system provider and defaults to a configured
+// franklin system.
+func Configured() *Map {
+	p := NewMap()
+	p.SetSystem(types.SiteIDNone, configuredFranklin())
+	return p
+}
 
-	var s struct{ System }
+// Map manages multiple ESS systems.
+type Map struct {
+	mu      sync.Mutex
+	systems map[string]System
+}
 
-	// Configure implementations
-	franklin := configuredFranklin()
+// NewMap creates a new ESS Map.
+func NewMap() *Map {
+	return &Map{
+		systems: make(map[string]System),
+	}
+}
 
-	lflag.Do(func() {
-		switch *provider {
-		case "franklin":
-			if err := franklin.Validate(); err != nil {
-				panic(fmt.Sprintf("franklin validation failed: %v", err))
-			}
-			s.System = franklin
-		default:
-			panic(fmt.Sprintf("unknown ess provider: %s", *provider))
-		}
-	})
+// Site returns the system for the given siteID.
+// If the siteID is new, it creates a new system instance.
+func (m *Map) Site(siteID string) System {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	return &s
+	if siteID == "" {
+		siteID = types.SiteIDNone
+	}
+
+	if sys, ok := m.systems[siteID]; ok {
+		return sys
+	}
+
+	// TODO: we should check what kind of system this is
+	m.systems[siteID] = newFranklin()
+	return m.systems[siteID]
+}
+
+// SetSystem sets the system for a specific site. This is primarily used for testing.
+func (m *Map) SetSystem(siteID string, sys System) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.systems[siteID] = sys
 }

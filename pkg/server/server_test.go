@@ -6,8 +6,10 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/jameshartig/autoenergy/pkg/controller"
-	"github.com/jameshartig/autoenergy/pkg/types"
+	"github.com/jameshartig/raterudder/pkg/controller"
+	"github.com/jameshartig/raterudder/pkg/ess"
+	"github.com/jameshartig/raterudder/pkg/types"
+	"github.com/jameshartig/raterudder/pkg/utility"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -18,10 +20,17 @@ func TestSPAHandler(t *testing.T) {
 	// Setup basics for server
 	mockU := &mockUtility{}
 	mockS := &mockStorage{}
+	mockE := &mockESS{}
+	mockP := ess.NewMap()
+	mockP.SetSystem(types.SiteIDNone, mockE)
+
+	mockUMap := utility.NewMap()
+	mockUMap.SetProvider("comed_hourly", mockU)
 
 	mockS.On("GetSettings", mock.Anything).Return(types.Settings{
-		DryRun:        true,
-		MinBatterySOC: 5.0,
+		DryRun:          true,
+		MinBatterySOC:   5.0,
+		UtilityProvider: "comed_hourly",
 	}, types.CurrentSettingsVersion, nil)
 
 	// Create a map-based filesystem for testing
@@ -30,21 +39,23 @@ func TestSPAHandler(t *testing.T) {
 		"assets/main.js": {Data: []byte("console.log('hello');")},
 	}
 
-	t.Run("Serve Existing File", func(t *testing.T) {
+	t.Run("Serve Existing SPA File", func(t *testing.T) {
 		srv := &Server{
-			utilityProvider: mockU,
-			essSystem:       &mockESS{},
-			storage:         mockS,
-			listenAddr:      ":8080",
-			controller:      controller.NewController(),
+			utilities:  mockUMap,
+			ess:        mockP,
+			storage:    mockS,
+			listenAddr: ":8080",
+			controller: controller.NewController(),
 		}
 
-		// Manually setup the handler with our test FS to avoid web.DistFS dependency in this specific test unit
 		mux := http.NewServeMux()
 		fileServer := http.FileServer(http.FS(testFS))
 		mux.Handle("/", srv.spaHandler(testFS, fileServer))
 
-		req := httptest.NewRequest("GET", "/assets/main.js", nil)
+		// Add a non-asset file to test map
+		testFS["favicon.ico"] = &fstest.MapFile{Data: []byte("icon")}
+
+		req := httptest.NewRequest("GET", "/favicon.ico", nil)
 		w := httptest.NewRecorder()
 
 		mux.ServeHTTP(w, req)
@@ -52,16 +63,17 @@ func TestSPAHandler(t *testing.T) {
 		resp := w.Result()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 		body := w.Body.String()
-		assert.Equal(t, "console.log('hello');", body)
+		assert.Equal(t, "icon", body)
+		assert.Equal(t, "public, max-age=3600", w.Header().Get("Cache-Control"))
 	})
 
 	t.Run("Serve Index on Root", func(t *testing.T) {
 		srv := &Server{
-			utilityProvider: mockU,
-			essSystem:       &mockESS{},
-			storage:         mockS,
-			listenAddr:      ":8080",
-			controller:      controller.NewController(),
+			utilities:  mockUMap,
+			ess:        mockP,
+			storage:    mockS,
+			listenAddr: ":8080",
+			controller: controller.NewController(),
 		}
 
 		mux := http.NewServeMux()
@@ -76,15 +88,16 @@ func TestSPAHandler(t *testing.T) {
 		resp := w.Result()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 		assert.Equal(t, "<html>index</html>", w.Body.String())
+		assert.Equal(t, "public, max-age=3600", w.Header().Get("Cache-Control"))
 	})
 
 	t.Run("Serve Index on Unknown Route", func(t *testing.T) {
 		srv := &Server{
-			utilityProvider: mockU,
-			essSystem:       &mockESS{},
-			storage:         mockS,
-			listenAddr:      ":8080",
-			controller:      controller.NewController(),
+			utilities:  mockUMap,
+			ess:        mockP,
+			storage:    mockS,
+			listenAddr: ":8080",
+			controller: controller.NewController(),
 		}
 
 		mux := http.NewServeMux()
@@ -99,6 +112,7 @@ func TestSPAHandler(t *testing.T) {
 		resp := w.Result()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 		assert.Equal(t, "<html>index</html>", w.Body.String())
+		assert.Equal(t, "public, max-age=3600", w.Header().Get("Cache-Control"))
 	})
 
 	t.Run("Proxy to Dev Server", func(t *testing.T) {
@@ -109,13 +123,17 @@ func TestSPAHandler(t *testing.T) {
 		}))
 		defer devServer.Close()
 
+		t.Setenv("VITE_DEV_SERVER_URL", devServer.URL)
+
 		srv := &Server{
-			utilityProvider: mockU,
-			essSystem:       &mockESS{},
-			storage:         mockS,
-			listenAddr:      ":8080",
-			controller:      controller.NewController(),
-			devProxy:        devServer.URL, // Point to our mock dev server
+			utilities:  mockUMap,
+			ess:        mockP,
+			storage:    mockS,
+			listenAddr: ":8080",
+			bypassAuth: true,
+			singleSite: true,
+			controller: controller.NewController(),
+			devProxy:   devServer.URL, // Point to our mock dev server
 		}
 
 		// This uses setupHandler which reads srv.devProxy
@@ -129,5 +147,27 @@ func TestSPAHandler(t *testing.T) {
 		resp := w.Result()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 		assert.Equal(t, "dev server response", w.Body.String())
+	})
+
+	t.Run("Serve Not Found on .well-known", func(t *testing.T) {
+		srv := &Server{
+			utilities:  mockUMap,
+			ess:        mockP,
+			storage:    mockS,
+			listenAddr: ":8080",
+			controller: controller.NewController(),
+		}
+
+		mux := http.NewServeMux()
+		fileServer := http.FileServer(http.FS(testFS))
+		mux.Handle("/", srv.spaHandler(testFS, fileServer))
+
+		req := httptest.NewRequest("GET", "/.well-known/some-file", nil)
+		w := httptest.NewRecorder()
+
+		mux.ServeHTTP(w, req)
+
+		resp := w.Result()
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	})
 }

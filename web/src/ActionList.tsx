@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { fetchActions, fetchSavings, type Action, type SavingsStats, BatteryMode, SolarMode } from './api';
+import { fetchActions, fetchSavings, type Action, type SavingsStats, BatteryMode, SolarMode, ActionReason } from './api';
 
 const getBatteryModeLabel = (mode: number) => {
     switch (mode) {
@@ -43,7 +43,49 @@ const getSolarModeClass = (mode: number) => {
     }
 };
 
-const ActionList: React.FC = () => {
+const formatPrice = (dollars: number) => `$${dollars.toFixed(3)}/kWh`;
+
+const formatTime = (ts: string) => {
+    try {
+        return new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    } catch {
+        return ts;
+    }
+};
+
+const getReasonText = (action: Action): string => {
+    const reason = action.reason;
+    if (!reason) {
+        return action.description;
+    }
+    const currentPriceStr = action.currentPrice ? formatPrice(action.currentPrice.dollarsPerKWH) : '';
+    const futurePriceStr = action.futurePrice && action.futurePrice.dollarsPerKWH ? formatPrice(action.futurePrice.dollarsPerKWH) : '';
+    const deficitTimeStr = action.deficitAt ? formatTime(action.deficitAt) : '';
+    const capacityTimeStr = action.capacityAt ? formatTime(action.capacityAt) : '';
+
+    switch (reason) {
+        case ActionReason.AlwaysChargeBelowThreshold:
+            return `Price is low (${currentPriceStr}). Charging batteries.`;
+        case ActionReason.MissingBattery:
+            return 'Battery configuration missing or capacity is 0. Standing by.';
+        case ActionReason.DeficitCharge:
+            return `Battery deficit predicted${deficitTimeStr ? ` at ${deficitTimeStr}` : ''}. Charging now at ${currentPriceStr}${futurePriceStr ? ` (peak later: ${futurePriceStr})` : ''}.`;
+        case ActionReason.ArbitrageCharge:
+            return `Arbitrage opportunity: charging at ${currentPriceStr}${futurePriceStr ? `, peak later at ${futurePriceStr}` : ''}.`;
+        case ActionReason.DischargeBeforeCapacity:
+            return `Battery will reach capacity${capacityTimeStr ? ` at ${capacityTimeStr}` : ''} before deficit${deficitTimeStr ? ` at ${deficitTimeStr}` : ''}. Using battery now.`;
+        case ActionReason.DeficitSave:
+            return `Battery deficit predicted${deficitTimeStr ? ` at ${deficitTimeStr}` : ''}. Saving battery for higher prices${futurePriceStr ? ` (peak: ${futurePriceStr})` : ''}.`;
+        case ActionReason.ArbitrageSave:
+            return `Current price is peak (${currentPriceStr}). Using battery to offset grid costs.`;
+        case ActionReason.NoChange:
+            return 'Battery is sufficient. Using battery normally.';
+        default:
+            return action.description || `Unknown reason: ${reason}`;
+    }
+};
+
+const ActionList: React.FC<{ siteID?: string }> = ({ siteID }) => {
     const [searchParams, setSearchParams] = useSearchParams();
     const dateQuery = searchParams.get('date');
     const [actions, setActions] = useState<Action[]>([]);
@@ -77,8 +119,8 @@ const ActionList: React.FC = () => {
 
                 // Fetch both actions and savings in parallel
                 const [actionsData, savingsData] = await Promise.all([
-                    fetchActions(start, end),
-                    fetchSavings(start, end)
+                    fetchActions(start, end, siteID),
+                    fetchSavings(start, end, siteID)
                 ]);
 
                 setActions(actionsData || []);
@@ -92,7 +134,7 @@ const ActionList: React.FC = () => {
         };
 
         loadData();
-    }, [currentDate]);
+    }, [currentDate, siteID]);
 
     const handleDateChange = (days: number) => {
         const newDate = new Date(currentDate);
@@ -217,9 +259,11 @@ const ActionList: React.FC = () => {
     return (
         <div className="action-list-container">
             <header className="header">
-                <button onClick={() => handleDateChange(-1)} disabled={loading}>&lt; Prev</button>
-                <h2>{formattedDate}</h2>
-                <button onClick={() => handleDateChange(1)} disabled={loading || currentDate.toDateString() === new Date().toDateString()}>Next &gt;</button>
+                <div className="date-controls">
+                    <button onClick={() => handleDateChange(-1)} disabled={loading}>&lt; Prev</button>
+                    <h2>{formattedDate}</h2>
+                    <button onClick={() => handleDateChange(1)} disabled={loading || currentDate.toDateString() === new Date().toDateString()}>Next &gt;</button>
+                </div>
             </header>
 
             {loading && <p>Loading day...</p>}
@@ -263,12 +307,6 @@ const ActionList: React.FC = () => {
                                         ${savings.credit.toFixed(2)}
                                     </span>
                                 </div>
-                                <div className="savings-item">
-                                    <span className="savings-label">Avoided Cost</span>
-                                    <span className="savings-value">
-                                        ${savings.avoidedCost.toFixed(2)}
-                                    </span>
-                                </div>
                             </div>
                             <div className="savings-details">
                                 <span><strong>Home:</strong> {savings.homeUsed.toFixed(2)} kWh</span>
@@ -310,6 +348,7 @@ const ActionList: React.FC = () => {
                                 );
                             }
                             const action = item as Action;
+                            const reasonText = getReasonText(action);
                             return (
                                 <li key={index} className="action-item">
                                     <div className="action-time">
@@ -317,7 +356,7 @@ const ActionList: React.FC = () => {
                                     </div>
                                     <div className="action-details">
                                         <h3>{getBatteryModeLabel(action.batteryMode)}</h3>
-                                        <p>{action.description}</p>
+                                        <p>{reasonText}</p>
                                         <div className="tags">
                                             {action.batteryMode !== BatteryMode.NoChange && (
                                                 <span className={`tag mode-${getBatteryModeClass(action.batteryMode)}`}>{getBatteryModeLabel(action.batteryMode)}</span>
@@ -328,10 +367,19 @@ const ActionList: React.FC = () => {
                                             {action.dryRun && (
                                                 <span className="tag dry-run">Dry Run</span>
                                             )}
+                                            {action.deficitAt && action.deficitAt !== '0001-01-01T00:00:00Z' && (
+                                                <span className="tag tag-info">Deficit: {formatTime(action.deficitAt)}</span>
+                                            )}
+                                            {action.capacityAt && action.capacityAt !== '0001-01-01T00:00:00Z' && (
+                                                <span className="tag tag-info">Capacity: {formatTime(action.capacityAt)}</span>
+                                            )}
                                         </div>
                                         {action.currentPrice && (
                                             <div className="action-footer">
                                                 <span className="price-label">Price:</span> ${action.currentPrice.dollarsPerKWH.toFixed(3)}/kWh
+                                                {action.futurePrice && action.futurePrice.dollarsPerKWH > 0 && (
+                                                    <span className="price-future"> · Peak: ${action.futurePrice.dollarsPerKWH.toFixed(3)}/kWh</span>
+                                                )}
                                             </div>
                                         )}
                                     </div>

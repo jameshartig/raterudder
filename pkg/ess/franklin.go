@@ -19,27 +19,25 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jameshartig/autoenergy/pkg/types"
+	"github.com/jameshartig/raterudder/pkg/log"
+	"github.com/jameshartig/raterudder/pkg/types"
 	"github.com/levenlabs/go-lflag"
 )
 
 // Franklin implements the System interface for FranklinWH.
 // It interacts with the FranklinWH API to monitor and control the energy storage system.
 type Franklin struct {
-	client            *http.Client
-	baseURL           string
-	username          string
-	password          string
-	md5Password       string
-	gatewayID         string
-	tokenStr          string
-	tokenExpiry       time.Time
-	mu                sync.Mutex
-	settings          types.Settings
-	deviceInfoCache   deviceInfoV2Result
-	deviceInfoExpiry  time.Time
-	runtimeDataCache  deviceCompositeInfoResult
-	runtimeDataExpiry time.Time
+	client           *http.Client
+	baseURL          string
+	username         string
+	md5Password      string
+	gatewayID        string
+	tokenStr         string
+	tokenExpiry      time.Time
+	mu               sync.Mutex
+	settings         types.Settings
+	deviceInfoCache  deviceInfoV2Result
+	deviceInfoExpiry time.Time
 }
 
 type franklinMode struct {
@@ -54,10 +52,7 @@ type franklinMode struct {
 
 // configuredFranklin sets up the FranklinWH system.
 func configuredFranklin() *Franklin {
-	f := &Franklin{
-		client:  &http.Client{Timeout: 30 * time.Second},
-		baseURL: "https://energy.franklinwh.com",
-	}
+	f := newFranklin()
 
 	username := lflag.String("franklin-username", "", "FranklinWH Email/Username")
 	password := lflag.String("franklin-password", "", "FranklinWH Password")
@@ -67,8 +62,13 @@ func configuredFranklin() *Franklin {
 
 	lflag.Do(func() {
 		f.username = *username
-		f.password = *password
-		f.md5Password = *md5Password
+		if *password != "" && *md5Password == "" {
+			hasher := md5.New()
+			hasher.Write([]byte(*password))
+			f.md5Password = hex.EncodeToString(hasher.Sum(nil))
+		} else {
+			f.md5Password = *md5Password
+		}
 		f.gatewayID = *gatewayID
 		f.tokenStr = *token
 	})
@@ -76,16 +76,11 @@ func configuredFranklin() *Franklin {
 	return f
 }
 
-// Validate ensures that the required credentials are set.
-func (f *Franklin) Validate() error {
-	if f.tokenStr == "" && (f.username == "" || (f.password == "" && f.md5Password == "")) {
-		return fmt.Errorf("franklin credentials (token or username/password) are required")
+func newFranklin() *Franklin {
+	return &Franklin{
+		client:  &http.Client{Timeout: 30 * time.Second},
+		baseURL: "https://energy.franklinwh.com",
 	}
-
-	// we use to require login to validate but that means for every start up we
-	// need to login even if we don't end up using franklin at all
-	//return f.login(context.TODO())
-	return nil
 }
 
 type loginResult struct {
@@ -103,19 +98,16 @@ func (f *Franklin) login(ctx context.Context) error {
 		return nil
 	}
 
-	// Create MD5 hash of the password
-	var pwdHash string
-	if f.md5Password != "" {
-		pwdHash = f.md5Password
-	} else {
-		hasher := md5.New()
-		hasher.Write([]byte(f.password))
-		pwdHash = hex.EncodeToString(hasher.Sum(nil))
+	if f.username == "" {
+		return errors.New("missing username")
+	}
+	if f.md5Password == "" {
+		return errors.New("missing password")
 	}
 
 	data := url.Values{}
 	data.Set("account", f.username)
-	data.Set("password", pwdHash)
+	data.Set("password", f.md5Password)
 	data.Set("type", "0")
 
 	req, err := f.newPostFormRequest(ctx, "hes-gateway/terminal/initialize/appUserOrInstallerLogin", data)
@@ -125,10 +117,10 @@ func (f *Franklin) login(ctx context.Context) error {
 
 	var res loginResult
 	if err := f.doRequest(req, &res); err != nil {
-		slog.ErrorContext(ctx, "franklin login failed", "error", err)
+		log.Ctx(ctx).ErrorContext(ctx, "franklin login failed", slog.Any("error", err))
 		return fmt.Errorf("login failed: %w", err)
 	}
-	slog.DebugContext(ctx, "franklin login success")
+	log.Ctx(ctx).DebugContext(ctx, "franklin login success")
 
 	f.tokenStr = res.Token
 	// TODO: what is the actual expiry of the token?
@@ -140,7 +132,7 @@ func (f *Franklin) login(ctx context.Context) error {
 			return fmt.Errorf("failed to get default gateway id: %w", err)
 		}
 		f.gatewayID = id
-		slog.InfoContext(ctx, "automatically selected gateway", slog.String("id", f.gatewayID))
+		log.Ctx(ctx).InfoContext(ctx, "automatically selected gateway", slog.String("gatewayID", f.gatewayID))
 	}
 
 	return nil
@@ -245,26 +237,26 @@ func (f *Franklin) doRequest(req *http.Request, dest interface{}) error {
 
 	var fr franklinResponse
 	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&fr); err != nil {
-		slog.ErrorContext(req.Context(), "failed to decode franklin response", slog.Any("error", err), slog.String("body", string(body)))
+		log.Ctx(req.Context()).ErrorContext(req.Context(), "failed to decode franklin response", slog.Any("error", err), slog.String("body", string(body)))
 		return err
 	}
 
 	if !fr.Success && fr.Code != 200 {
 		if fr.Message == "" {
-			slog.ErrorContext(req.Context(), "franklin api unknown error", slog.String("body", string(body)))
+			log.Ctx(req.Context()).ErrorContext(req.Context(), "franklin api unknown error", slog.String("body", string(body)))
 			return fmt.Errorf("franklin unknown error")
 		}
-		slog.ErrorContext(req.Context(), "franklin api error", slog.String("message", fr.Message))
+		log.Ctx(req.Context()).ErrorContext(req.Context(), "franklin api error", slog.String("message", fr.Message))
 		return fmt.Errorf("franklin api error: %s", fr.Message)
 	}
 
 	if dest != nil {
 		if err := json.Unmarshal(fr.Result, dest); err != nil {
-			slog.ErrorContext(req.Context(), "failed to decode franklin result", slog.Any("error", err))
+			log.Ctx(req.Context()).ErrorContext(req.Context(), "failed to decode franklin result", slog.Any("error", err))
 			return fmt.Errorf("failed to decode franklin result: %w", err)
 		}
 	} else {
-		slog.DebugContext(req.Context(), "franklin request success (no destination)", slog.String("url", req.URL.String()))
+		log.Ctx(req.Context()).DebugContext(req.Context(), "franklin request success (no destination)", slog.String("url", req.URL.String()))
 	}
 
 	return nil
@@ -291,7 +283,7 @@ func (f *Franklin) getRuntimeData(ctx context.Context) (deviceCompositeInfoResul
 		res.RuntimeData.PowerSolar = 0
 	}
 
-	slog.DebugContext(ctx, "franklin runtime data",
+	log.Ctx(ctx).DebugContext(ctx, "franklin runtime data",
 		slog.Float64("soc", res.RuntimeData.SOC),
 		slog.Float64("solarKW", res.RuntimeData.PowerSolar),
 		slog.Float64("gridKW", res.RuntimeData.PowerGrid),
@@ -337,7 +329,7 @@ func (f *Franklin) getDeviceInfo(ctx context.Context) (deviceInfoV2Result, error
 
 	loc, err := time.LoadLocation(res.TimeZone)
 	if err != nil {
-		slog.WarnContext(ctx, "failed to load location, defaulting to UTC", slog.String("tz", res.TimeZone), slog.Any("error", err))
+		log.Ctx(ctx).WarnContext(ctx, "failed to load location, defaulting to UTC", slog.String("tz", res.TimeZone), slog.Any("error", err))
 		loc = time.UTC
 	}
 	res.location = loc
@@ -347,7 +339,7 @@ func (f *Franklin) getDeviceInfo(ctx context.Context) (deviceInfoV2Result, error
 
 // GetStatus returns the status of the franklin system
 func (f *Franklin) GetStatus(ctx context.Context) (types.SystemStatus, error) {
-	slog.DebugContext(ctx, "getting franklin system status")
+	log.Ctx(ctx).DebugContext(ctx, "getting franklin system status")
 	if err := f.login(ctx); err != nil {
 		return types.SystemStatus{}, err
 	}
@@ -386,9 +378,9 @@ func (f *Franklin) GetStatus(ctx context.Context) (types.SystemStatus, error) {
 	for _, alarm := range rd.CurrentAlarmList {
 		t, err := time.ParseInLocation("2006-01-02 15:04:05", alarm.Time, di.location)
 		if err != nil {
-			slog.WarnContext(ctx, "failed to parse alarmtime", slog.String("time", alarm.Time), slog.Any("error", err))
+			log.Ctx(ctx).WarnContext(ctx, "failed to parse alarmtime", slog.String("time", alarm.Time), slog.Any("error", err))
 		}
-		slog.DebugContext(
+		log.Ctx(ctx).DebugContext(
 			ctx,
 			"franklin alarm in status",
 			slog.String("name", alarm.Name),
@@ -443,7 +435,7 @@ func (f *Franklin) getPowerControl(ctx context.Context) (getPowerControlSettingR
 		return getPowerControlSettingResult{}, err
 	}
 
-	slog.DebugContext(
+	log.Ctx(ctx).DebugContext(
 		ctx,
 		"franklin power control",
 		slog.Int("gridMaxFlag", int(res.GridMaxFlag)),
@@ -453,63 +445,6 @@ func (f *Franklin) getPowerControl(ctx context.Context) (getPowerControlSettingR
 	)
 
 	return res, nil
-}
-
-// SetPowerControl sets the power control configuration for the franklin system
-func (f *Franklin) SetPowerControl(ctx context.Context, cfg types.PowerControlConfig) error {
-	slog.DebugContext(
-		ctx,
-		"SetPowerControl called",
-		slog.Bool("gridChargeEnabled", cfg.GridChargeEnabled),
-		slog.Bool("gridExportEnabled", cfg.GridExportEnabled),
-		slog.Float64("gridExportMax", cfg.GridExportMax),
-	)
-	if err := f.login(ctx); err != nil {
-		return err
-	}
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	pc, err := f.getPowerControl(ctx)
-	if err != nil {
-		return err
-	}
-
-	var updated bool
-	if cfg.GridChargeEnabled {
-		if pc.GridMaxFlag != 2 {
-			pc.GridMaxFlag = 2
-			updated = true
-		}
-	} else {
-		// Default to disabled?
-		if pc.GridMaxFlag != 0 {
-			pc.GridMaxFlag = 0 // Assuming 0 is disabled
-			updated = true
-		}
-	}
-
-	if cfg.GridExportEnabled {
-		if cfg.GridExportMax > 0 {
-			pc.GridFeedMax = cfg.GridExportMax
-		}
-		if pc.GridFeedMaxFlag != 2 { // 2: Battery+Solar export ? Or 1: Solar only?
-			// Test expects 2 for enabled
-			pc.GridFeedMaxFlag = 2
-			updated = true
-		}
-	} else {
-		if pc.GridFeedMaxFlag != 3 { // 3: No export
-			pc.GridFeedMaxFlag = 3
-			updated = true
-		}
-	}
-
-	if updated {
-		return f.setPowerControl(ctx, pc)
-	}
-	return nil
 }
 
 func (f *Franklin) setPowerControl(ctx context.Context, pc getPowerControlSettingResult) error {
@@ -528,7 +463,7 @@ func (f *Franklin) setPowerControl(ctx context.Context, pc getPowerControlSettin
 	}
 	data["gridFeedMaxFlag"] = pc.GridFeedMaxFlag
 
-	slog.InfoContext(
+	log.Ctx(ctx).InfoContext(
 		ctx,
 		"setting franklin power control",
 		slog.Float64("gridMax", pc.GridMax),
@@ -590,7 +525,7 @@ func (f *Franklin) getAvailableModes(ctx context.Context) (availableModes, error
 		case 3: // backup
 			modes[i] = m
 		default:
-			slog.WarnContext(
+			log.Ctx(ctx).WarnContext(
 				ctx,
 				"unknown work mode",
 				slog.Int("id", item.ID),
@@ -619,16 +554,31 @@ func (f *Franklin) getAvailableModes(ctx context.Context) (availableModes, error
 	}, nil
 }
 
-func (f *Franklin) ApplySettings(ctx context.Context, settings types.Settings) error {
+// ApplySettings applies the given settings to the Franklin struct.
+func (f *Franklin) ApplySettings(ctx context.Context, settings types.Settings, creds types.Credentials) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.settings = settings
+
+	if creds.Franklin != nil {
+		if f.username != creds.Franklin.Username || f.md5Password != creds.Franklin.MD5Password {
+			f.tokenStr = ""
+		}
+
+		f.username = creds.Franklin.Username
+		f.md5Password = creds.Franklin.MD5Password
+		f.gatewayID = creds.Franklin.GatewayID
+	}
+	if f.username == "" || f.md5Password == "" {
+		return errors.New("franklin credentials not set")
+	}
+	// TODO: should we login?
 	return nil
 }
 
 // SetModes sets the battery and solar modes for the franklin system
 func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol types.SolarMode) error {
-	slog.DebugContext(ctx, "SetModes called", slog.Any("batteryMode", bat), slog.Any("solarMode", sol))
+	log.Ctx(ctx).DebugContext(ctx, "SetModes called", slog.Any("batteryMode", bat), slog.Any("solarMode", sol))
 	if err := f.login(ctx); err != nil {
 		return err
 	}
@@ -646,12 +596,12 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 	}
 
 	if modes.currentMode.WorkMode == 3 {
-		slog.InfoContext(ctx, "device is in backup mode, skipping set modes")
+		log.Ctx(ctx).InfoContext(ctx, "device is in backup mode, skipping set modes")
 		return errors.New("device is in backup mode")
 	}
 
 	if modes.selfConsumption == (franklinMode{}) {
-		slog.ErrorContext(ctx, "self consumption mode not available", slog.Any("modes", modes))
+		log.Ctx(ctx).ErrorContext(ctx, "self consumption mode not available", slog.Any("modes", modes))
 		return errors.New("self consumption mode not available")
 	}
 	sc := modes.selfConsumption
@@ -672,7 +622,7 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 
 	soc := sc.ReserveSOC
 
-	slog.DebugContext(ctx, "existing reserve SOC", slog.Float64("reserveSOC", sc.ReserveSOC))
+	log.Ctx(ctx).DebugContext(ctx, "existing reserve SOC", slog.Float64("reserveSOC", sc.ReserveSOC))
 
 	pc, err := f.getPowerControl(ctx)
 	if err != nil {
@@ -745,7 +695,7 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 		// battery to charge
 		// make sure we don't set it to less than the minimum battery SOC
 		if !sc.CanEditReserveSOC {
-			slog.WarnContext(ctx, "cannot edit reserve SOC")
+			log.Ctx(ctx).WarnContext(ctx, "cannot edit reserve SOC")
 			return errors.New("cannot edit reserve SOC")
 		}
 		soc = math.Max(math.Floor(rd.RuntimeData.SOC), minBatterySOC)
@@ -794,14 +744,14 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 	if updatedModeOrSOC {
 		if f.settings.DryRun {
 			if alreadySC {
-				slog.DebugContext(
+				log.Ctx(ctx).DebugContext(
 					ctx,
 					"dry run: would've updated just soc",
 					slog.String("soc", data.Get("soc")),
 					slog.String("workMode", data.Get("workMode")),
 				)
 			} else {
-				slog.DebugContext(
+				log.Ctx(ctx).DebugContext(
 					ctx,
 					"dry run: would've tou mode",
 					slog.String("soc", data.Get("soc")),
@@ -810,7 +760,7 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 			}
 		} else {
 			if alreadySC {
-				slog.InfoContext(
+				log.Ctx(ctx).InfoContext(
 					ctx,
 					"updating franklin soc",
 					slog.String("soc", data.Get("soc")),
@@ -827,11 +777,11 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 					return err
 				}
 				if err := f.doRequest(req, &struct{}{}); err != nil {
-					slog.ErrorContext(ctx, "failed to update soc", slog.Any("error", err))
+					log.Ctx(ctx).ErrorContext(ctx, "failed to update soc", slog.Any("error", err))
 					return err
 				}
 			} else {
-				slog.InfoContext(
+				log.Ctx(ctx).InfoContext(
 					ctx,
 					"updating franklin tou mode",
 					slog.String("soc", data.Get("soc")),
@@ -842,7 +792,7 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 					return err
 				}
 				if err := f.doRequest(req, &struct{}{}); err != nil {
-					slog.ErrorContext(ctx, "failed to update tou mode", slog.Any("error", err))
+					log.Ctx(ctx).ErrorContext(ctx, "failed to update tou mode", slog.Any("error", err))
 					return err
 				}
 			}
@@ -862,7 +812,7 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 		} else {
 			err := f.setPowerControl(ctx, pc)
 			if err != nil {
-				slog.ErrorContext(ctx, "failed to set power control", slog.Any("error", err))
+				log.Ctx(ctx).ErrorContext(ctx, "failed to set power control", slog.Any("error", err))
 				return err
 			}
 		}
@@ -905,7 +855,7 @@ func (f *Franklin) GetEnergyHistory(ctx context.Context, start, end time.Time) (
 	for current.Before(endInLoc) || current.Equal(endInLoc) {
 		stats, err := f.getEnergyStatsForDay(ctx, current, di.location)
 		if err != nil {
-			slog.ErrorContext(ctx, "failed to get energy stats for day", slog.String("day", current.Format("2006-01-02")), slog.Any("error", err))
+			log.Ctx(ctx).ErrorContext(ctx, "failed to get energy stats for day", slog.String("day", current.Format("2006-01-02")), slog.Any("error", err))
 			// Continue or return error? Let's return error to be safe.
 			return nil, err
 		}
@@ -946,42 +896,42 @@ func (f *Franklin) getEnergyStatsForDay(ctx context.Context, day time.Time, loc 
 
 	expLen := len(res.DeviceTimeArray)
 	if len(res.SolarToHomeKWHRates) != expLen {
-		slog.WarnContext(ctx, "powerSolarHomeArray length unexpected", slog.Int("expected", expLen), slog.Int("length", len(res.SolarToHomeKWHRates)))
+		log.Ctx(ctx).WarnContext(ctx, "powerSolarHomeArray length unexpected", slog.Int("expected", expLen), slog.Int("length", len(res.SolarToHomeKWHRates)))
 		return nil, errors.New("unexpected array length in response")
 	}
 	if len(res.SolarToGridKWHRates) != expLen {
-		slog.WarnContext(ctx, "powerSolarGirdArray length unexpected", slog.Int("expected", expLen), slog.Int("length", len(res.SolarToGridKWHRates)))
+		log.Ctx(ctx).WarnContext(ctx, "powerSolarGirdArray length unexpected", slog.Int("expected", expLen), slog.Int("length", len(res.SolarToGridKWHRates)))
 		return nil, errors.New("unexpected array length in response")
 	}
 	if len(res.SolarToBatteryKWHRates) != expLen {
-		slog.WarnContext(ctx, "powerSolarFhpArray length unexpected", slog.Int("expected", expLen), slog.Int("length", len(res.SolarToBatteryKWHRates)))
+		log.Ctx(ctx).WarnContext(ctx, "powerSolarFhpArray length unexpected", slog.Int("expected", expLen), slog.Int("length", len(res.SolarToBatteryKWHRates)))
 		return nil, errors.New("unexpected array length in response")
 	}
 	if len(res.GridToBatteryKWHRates) != expLen {
-		slog.WarnContext(ctx, "powerGirdFhpArray length unexpected", slog.Int("expected", expLen), slog.Int("length", len(res.GridToBatteryKWHRates)))
+		log.Ctx(ctx).WarnContext(ctx, "powerGirdFhpArray length unexpected", slog.Int("expected", expLen), slog.Int("length", len(res.GridToBatteryKWHRates)))
 		return nil, errors.New("unexpected array length in response")
 	}
 	if len(res.GridToHomeKWHRates) != expLen {
-		slog.WarnContext(ctx, "powerGirdHomeArray length unexpected", slog.Int("expected", expLen), slog.Int("length", len(res.GridToHomeKWHRates)))
+		log.Ctx(ctx).WarnContext(ctx, "powerGirdHomeArray length unexpected", slog.Int("expected", expLen), slog.Int("length", len(res.GridToHomeKWHRates)))
 		return nil, errors.New("unexpected array length in response")
 	}
 	if len(res.BatteryToGridKWHRates) != expLen {
-		slog.WarnContext(ctx, "powerFhpGirdArray length unexpected", slog.Int("expected", expLen), slog.Int("length", len(res.BatteryToGridKWHRates)))
+		log.Ctx(ctx).WarnContext(ctx, "powerFhpGirdArray length unexpected", slog.Int("expected", expLen), slog.Int("length", len(res.BatteryToGridKWHRates)))
 		return nil, errors.New("unexpected array length in response")
 	}
 	if len(res.BatteryToHomeKWHRates) != expLen {
-		slog.WarnContext(ctx, "powerFhpHomeArray length unexpected", slog.Int("expected", expLen), slog.Int("length", len(res.BatteryToHomeKWHRates)))
+		log.Ctx(ctx).WarnContext(ctx, "powerFhpHomeArray length unexpected", slog.Int("expected", expLen), slog.Int("length", len(res.BatteryToHomeKWHRates)))
 		return nil, errors.New("unexpected array length in response")
 	}
 	if len(res.SOCArray) != expLen {
-		slog.WarnContext(ctx, "socArray length unexpected", slog.Int("expected", expLen), slog.Int("length", len(res.SOCArray)))
+		log.Ctx(ctx).WarnContext(ctx, "socArray length unexpected", slog.Int("expected", expLen), slog.Int("length", len(res.SOCArray)))
 		return nil, errors.New("unexpected array length in response")
 	}
 
 	for i, timeStr := range res.DeviceTimeArray {
 		t, err := time.ParseInLocation("2006-01-02 15:04:05", timeStr, loc)
 		if err != nil {
-			slog.WarnContext(ctx, "failed to parse time", slog.String("time", timeStr), slog.Any("error", err))
+			log.Ctx(ctx).WarnContext(ctx, "failed to parse time", slog.String("time", timeStr), slog.Any("error", err))
 			return nil, err
 		}
 		// figure out the duration of this "bucket"
@@ -989,7 +939,7 @@ func (f *Franklin) getEnergyStatsForDay(ctx context.Context, day time.Time, loc 
 		if len(res.DeviceTimeArray) > i+1 {
 			nextT, err := time.ParseInLocation("2006-01-02 15:04:05", res.DeviceTimeArray[i+1], loc)
 			if err != nil {
-				slog.WarnContext(ctx, "failed to parse time", slog.String("time", timeStr), slog.Any("error", err))
+				log.Ctx(ctx).WarnContext(ctx, "failed to parse time", slog.String("time", timeStr), slog.Any("error", err))
 				return nil, err
 			}
 			duration = nextT.Sub(t)

@@ -5,7 +5,7 @@ Build/Test/Lint
 - Lint/format: go fmt -w . && go vet ./...
 
 Architecture
-- cmd/autoenergy is the main entry point and orchestrator.
+- cmd/raterudder is the main entry point and orchestrator.
 - pkg/controller contains decision logic for charging/discharging.
 - pkg/utility fetches electricity prices (ComEd).
 - pkg/ess controls the Energy Storage System (FranklinWH).

@@ -1,22 +1,36 @@
 import { useEffect, useState } from 'react';
 import { fetchSettings, updateSettings, type Settings as SettingsType } from './api';
 import './Settings.css';
+import SparkMD5 from 'spark-md5';
 
-const Settings = ({ isAdmin }: { isAdmin: boolean }) => {
+const Settings = ({ isAdmin, siteID }: { isAdmin: boolean, siteID?: string }) => {
     const [settings, setSettings] = useState<SettingsType | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+    // Credentials State
+    const [franklinUsername, setFranklinUsername] = useState("");
+    const [franklinPassword, setFranklinPassword] = useState("");
+    const [franklinGatewayID, setFranklinGatewayID] = useState("");
+
     useEffect(() => {
         loadSettings();
-    }, []);
+    }, [siteID]);
 
     const loadSettings = async () => {
         try {
             setLoading(true);
-            const data = await fetchSettings();
+            const data = await fetchSettings(siteID);
             setSettings(data);
+
+            // We don't load existing credentials for security/simplicity (they are write-only effectively or masked)
+            // But if we wanted to show them, we'd need them in the API.
+            // For now, assume fields are blank unless user wants to update them.
+            setFranklinUsername("");
+            setFranklinPassword("");
+            setFranklinGatewayID("");
+
             setError(null);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to load settings');
@@ -32,8 +46,27 @@ const Settings = ({ isAdmin }: { isAdmin: boolean }) => {
         try {
             setError(null);
             setSuccessMessage(null);
-            await updateSettings(settings);
+
+            let franklinHeaders = undefined;
+            if (franklinUsername || franklinPassword || franklinGatewayID) {
+                // If any credential field is filled, we include credentials update
+                if (!franklinUsername || !franklinPassword || !franklinGatewayID) {
+                    throw new Error("All Franklin credential fields (Username, Password, Gateway ID) must be filled to update credentials.");
+                }
+
+                franklinHeaders = {
+                    username: franklinUsername,
+                    md5Password: SparkMD5.hash(franklinPassword),
+                    gatewayID: franklinGatewayID
+                };
+            }
+
+            await updateSettings(settings, siteID, franklinHeaders);
             setSuccessMessage('Settings saved successfully');
+
+            // Clear password field after save
+            setFranklinPassword("");
+
             setTimeout(() => setSuccessMessage(null), 3000);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to save settings');
@@ -217,6 +250,50 @@ const Settings = ({ isAdmin }: { isAdmin: boolean }) => {
                     </div>
                 )}
 
+                <h3>Utility Provider</h3>
+                <div className="form-group">
+                    <label htmlFor="utilityProvider">Provider</label>
+                    <input
+                        id="utilityProvider"
+                        type="text"
+                        value={settings.utilityProvider}
+                        disabled
+                    />
+                    <span className="help-text">The configured utility provider. This cannot be changed here.</span>
+                </div>
+
+                <h3>Franklin Credentials</h3>
+                <div className="form-group">
+                    <label htmlFor="franklinUsername">Username (Email)</label>
+                    <input
+                        id="franklinUsername"
+                        type="email"
+                        value={franklinUsername}
+                        onChange={(e) => setFranklinUsername(e.target.value)}
+                        placeholder="Enter FranklinWH email"
+                    />
+                </div>
+                <div className="form-group">
+                    <label htmlFor="franklinPassword">Password</label>
+                    <input
+                        id="franklinPassword"
+                        type="password"
+                        value={franklinPassword}
+                        onChange={(e) => setFranklinPassword(e.target.value)}
+                        placeholder="Enter new password to update"
+                    />
+                </div>
+                <div className="form-group">
+                    <label htmlFor="franklinGatewayID">Gateway ID</label>
+                    <input
+                        id="franklinGatewayID"
+                        type="text"
+                        value={franklinGatewayID}
+                        onChange={(e) => setFranklinGatewayID(e.target.value)}
+                        placeholder="Enter FranklinWH Gateway ID"
+                    />
+                </div>
+
                 <button type="submit" className="save-button" disabled={!isAdmin}>
                     {isAdmin ? 'Save Settings' : 'Read Only'}
                 </button>
@@ -224,5 +301,4 @@ const Settings = ({ isAdmin }: { isAdmin: boolean }) => {
         </div>
     );
 };
-
 export default Settings;

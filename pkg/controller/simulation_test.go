@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jameshartig/autoenergy/pkg/types"
+	"github.com/jameshartig/raterudder/pkg/types"
 	"github.com/stretchr/testify/assert"
 )
 

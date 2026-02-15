@@ -1,55 +1,55 @@
-resource "google_service_account" "autoenergy" {
-  account_id = "autoenergy"
+resource "google_service_account" "raterudder" {
+  account_id = "raterudder"
 
   depends_on = [module.enabled_google_apis]
 }
 
-resource "google_service_account" "autoenergy_build" {
-  account_id = "autoenergy-build"
+resource "google_service_account" "raterudder_build" {
+  account_id = "raterudder-build"
 
   depends_on = [module.enabled_google_apis]
 }
 
-resource "google_service_account_iam_member" "autoenergy_build_act_as" {
-  service_account_id = google_service_account.autoenergy.name
+resource "google_service_account_iam_member" "raterudder_build_act_as" {
+  service_account_id = google_service_account.raterudder.name
   role               = "roles/iam.serviceAccountUser"
-  member             = "serviceAccount:${google_service_account.autoenergy_build.email}"
+  member             = "serviceAccount:${google_service_account.raterudder_build.email}"
 }
 
-resource "google_project_iam_member" "autoenergy_logs_writer" {
+resource "google_project_iam_member" "raterudder_logs_writer" {
   project = var.project_id
   role    = "roles/logging.logWriter"
-  member  = "serviceAccount:${google_service_account.autoenergy.email}"
+  member  = "serviceAccount:${google_service_account.raterudder.email}"
 }
 
-resource "google_project_iam_member" "autoenergy_build_logs_writer" {
+resource "google_project_iam_member" "raterudder_build_logs_writer" {
   project = var.project_id
   role    = "roles/logging.logWriter"
-  member  = "serviceAccount:${google_service_account.autoenergy_build.email}"
+  member  = "serviceAccount:${google_service_account.raterudder_build.email}"
 }
 
-resource "google_artifact_registry_repository" "autoenergy" {
+resource "google_artifact_registry_repository" "raterudder" {
   project       = var.project_id
   location      = "us-central1"
-  repository_id = "autoenergy"
+  repository_id = "raterudder"
   format        = "DOCKER"
 }
 
-resource "google_artifact_registry_repository_iam_member" "autoenergy_build" {
-  project    = google_artifact_registry_repository.autoenergy.project
-  location   = google_artifact_registry_repository.autoenergy.location
-  repository = google_artifact_registry_repository.autoenergy.name
+resource "google_artifact_registry_repository_iam_member" "raterudder_build" {
+  project    = google_artifact_registry_repository.raterudder.project
+  location   = google_artifact_registry_repository.raterudder.location
+  repository = google_artifact_registry_repository.raterudder.name
   role       = "roles/artifactregistry.writer"
-  member     = "serviceAccount:${google_service_account.autoenergy_build.email}"
+  member     = "serviceAccount:${google_service_account.raterudder_build.email}"
 }
 
 resource "google_cloudbuild_trigger" "github" {
   project         = var.project_id
   location        = "us-central1"
-  service_account = google_service_account.autoenergy_build.id
+  service_account = google_service_account.raterudder_build.id
 
   repository_event_config {
-    repository = "projects/${var.project_id}/locations/us-central1/connections/github-jameshartig/repositories/jameshartig-autoenergy"
+    repository = "projects/${var.project_id}/locations/us-central1/connections/github-jameshartig/repositories/jameshartig-raterudder"
     push {
       branch = "^(main|wip)$"
     }
@@ -57,8 +57,8 @@ resource "google_cloudbuild_trigger" "github" {
 
   build {
     images = [
-      "${google_artifact_registry_repository.autoenergy.registry_uri}/autoenergy:$COMMIT_SHA",
-      "${google_artifact_registry_repository.autoenergy.registry_uri}/autoenergy:latest",
+      "${google_artifact_registry_repository.raterudder.registry_uri}/raterudder:$COMMIT_SHA",
+      "${google_artifact_registry_repository.raterudder.registry_uri}/raterudder:latest",
     ]
 
     step {
@@ -66,9 +66,9 @@ resource "google_cloudbuild_trigger" "github" {
       args = [
         "build",
         "-t",
-        "${google_artifact_registry_repository.autoenergy.registry_uri}/autoenergy:$COMMIT_SHA",
+        "${google_artifact_registry_repository.raterudder.registry_uri}/raterudder:$COMMIT_SHA",
         "-t",
-        "${google_artifact_registry_repository.autoenergy.registry_uri}/autoenergy:latest",
+        "${google_artifact_registry_repository.raterudder.registry_uri}/raterudder:latest",
         ".",
       ]
     }
@@ -77,7 +77,7 @@ resource "google_cloudbuild_trigger" "github" {
       name = "gcr.io/cloud-builders/docker"
       args = [
         "push",
-        "${google_artifact_registry_repository.autoenergy.registry_uri}/autoenergy:$COMMIT_SHA",
+        "${google_artifact_registry_repository.raterudder.registry_uri}/raterudder:$COMMIT_SHA",
       ]
     }
 
@@ -88,9 +88,9 @@ resource "google_cloudbuild_trigger" "github" {
         "run",
         "services",
         "update",
-        "autoenergy",
+        "raterudder",
         "--platform=managed",
-        "--image=${google_artifact_registry_repository.autoenergy.registry_uri}/autoenergy:$COMMIT_SHA",
+        "--image=${google_artifact_registry_repository.raterudder.registry_uri}/raterudder:$COMMIT_SHA",
         "--region=us-central1",
         "--quiet",
       ]
@@ -105,13 +105,13 @@ resource "google_cloudbuild_trigger" "github" {
 locals {
   # from https://docs.cloud.google.com/run/docs/triggering/https-request#deterministic
   # we can't use the uri from the run resource because it's not known at plan time
-  run_deterministic_uri = "https://autoenergy-${data.google_project.autoenergy.number}.us-central1.run.app"
+  run_deterministic_uri = "https://raterudder-${data.google_project.raterudder.number}.us-central1.run.app"
 }
 
-resource "google_cloud_run_v2_service" "autoenergy" {
+resource "google_cloud_run_v2_service" "raterudder" {
   provider             = google-beta
   project              = var.project_id
-  name                 = "autoenergy"
+  name                 = "raterudder"
   location             = "us-central1"
   ingress              = "INGRESS_TRAFFIC_ALL"
   default_uri_disabled = false
@@ -123,7 +123,7 @@ resource "google_cloud_run_v2_service" "autoenergy" {
 
   template {
     max_instance_request_concurrency = 1000
-    service_account                  = google_service_account.autoenergy.email
+    service_account                  = google_service_account.raterudder.email
     timeout                          = "60s"
 
     containers {
@@ -166,7 +166,17 @@ resource "google_cloud_run_v2_service" "autoenergy" {
 
       env {
         name  = "UPDATE_SPECIFIC_EMAIL"
-        value = google_service_account.autoenergy.email
+        value = google_service_account.raterudder.email
+      }
+
+      env {
+        name  = "SINGLE_SITE"
+        value = "false"
+      }
+
+      env {
+        name  = "FIRESTORE_PROJECT_ID"
+        value = var.project_id
       }
 
       env {
@@ -183,7 +193,7 @@ resource "google_cloud_run_v2_service" "autoenergy" {
     volumes {
       name = "secrets"
       secret {
-        secret = "autoenergy-secrets"
+        secret = "raterudder-secrets"
         items {
           version = "latest"
           path    = "config.json"
@@ -209,20 +219,31 @@ resource "google_cloud_run_v2_service" "autoenergy" {
   depends_on = [google_cloudbuild_trigger.github]
 }
 
-resource "google_cloud_run_v2_service_iam_member" "autoenergy_build" {
+resource "google_cloud_run_v2_service_iam_member" "raterudder_build" {
   project  = var.project_id
-  location = google_cloud_run_v2_service.autoenergy.location
-  name     = google_cloud_run_v2_service.autoenergy.name
+  location = google_cloud_run_v2_service.raterudder.location
+  name     = google_cloud_run_v2_service.raterudder.name
   role     = "roles/run.developer"
-  member   = "serviceAccount:${google_service_account.autoenergy_build.email}"
+  member   = "serviceAccount:${google_service_account.raterudder_build.email}"
 }
 
-resource "google_cloud_run_v2_service_iam_binding" "autoenergy" {
+resource "google_cloud_run_v2_service_iam_binding" "raterudder" {
   project  = var.project_id
-  location = google_cloud_run_v2_service.autoenergy.location
-  name     = google_cloud_run_v2_service.autoenergy.name
+  location = google_cloud_run_v2_service.raterudder.location
+  name     = google_cloud_run_v2_service.raterudder.name
   role     = "roles/run.invoker"
   members = [
     "allUsers"
   ]
+}
+
+resource "google_cloud_run_domain_mapping" "raterudder_com" {
+  name     = "raterudder.com"
+  location = google_cloud_run_v2_service.raterudder.location
+  metadata {
+    namespace = data.google_project.raterudder.project_id
+  }
+  spec {
+    route_name = google_cloud_run_v2_service.raterudder.name
+  }
 }

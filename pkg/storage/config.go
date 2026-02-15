@@ -8,10 +8,10 @@ import (
 )
 
 // Configured sets up the Storage provider based on flags.
-func Configured() Provider {
+func Configured() Database {
 	provider := lflag.String("storage-provider", "firestore", "Storage provider to use (available: firestore)")
 
-	var p struct{ Provider }
+	var p struct{ Database }
 
 	fs := configuredFirestore()
 
@@ -21,7 +21,7 @@ func Configured() Provider {
 			if err := fs.Validate(); err != nil {
 				panic(fmt.Sprintf("firestore validation failed: %v", err))
 			}
-			p.Provider = fs
+			p.Database = fs
 			if err := fs.Init(context.Background()); err != nil {
 				panic(fmt.Sprintf("firestore init failed: %v", err))
 			}

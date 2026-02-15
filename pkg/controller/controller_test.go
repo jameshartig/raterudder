@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jameshartig/autoenergy/pkg/types"
+	"github.com/jameshartig/raterudder/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -70,6 +70,9 @@ func TestDecide(t *testing.T) {
 
 		assert.Equal(t, types.BatteryModeChargeAny, decision.Action.BatteryMode)
 		assert.Equal(t, types.SolarModeNoExport, decision.Action.SolarMode)
+		assert.Equal(t, types.ActionReasonAlwaysChargeBelowThreshold, decision.Action.Reason)
+		assert.True(t, decision.Action.HitDeficitAt.IsZero(), "HitDeficitAt should be zero for always-charge")
+		assert.True(t, decision.Action.HitCapacityAt.IsZero(), "HitCapacityAt should be zero for always-charge")
 	})
 
 	t.Run("Low Price -> Charge", func(t *testing.T) {
@@ -78,6 +81,7 @@ func TestDecide(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, types.BatteryModeChargeAny, decision.Action.BatteryMode)
+		assert.Equal(t, types.ActionReasonAlwaysChargeBelowThreshold, decision.Action.Reason)
 	})
 
 	t.Run("High Price Now -> Load (Discharge)", func(t *testing.T) {
@@ -144,6 +148,9 @@ func TestDecide(t *testing.T) {
 
 		assert.Equal(t, types.BatteryModeChargeAny, decision.Action.BatteryMode)
 		assert.Contains(t, decision.Action.Description, "Projected Deficit")
+		assert.Equal(t, types.ActionReasonDeficitChargeNow, decision.Action.Reason)
+		assert.False(t, decision.Action.HitDeficitAt.IsZero(), "HitDeficitAt should be set for deficit charge")
+		assert.NotZero(t, decision.Action.FuturePrice.DollarsPerKWH, "FuturePrice should be set for deficit charge")
 	})
 
 	t.Run("Deficit detected -> Charge Later due to MinDeficitPriceDifference", func(t *testing.T) {
@@ -173,6 +180,8 @@ func TestDecide(t *testing.T) {
 		// Should not charge now, so it should be Standby
 		assert.Equal(t, types.BatteryModeStandby, decision.Action.BatteryMode)
 		assert.Contains(t, decision.Action.Description, "Deficit predicted")
+		assert.Equal(t, types.ActionReasonDeficitSave, decision.Action.Reason)
+		assert.False(t, decision.Action.HitDeficitAt.IsZero(), "HitDeficitAt should be set")
 	})
 
 	t.Run("Arbitrage Opportunity -> Charge", func(t *testing.T) {
@@ -186,6 +195,8 @@ func TestDecide(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, types.BatteryModeChargeAny, decision.Action.BatteryMode)
+		assert.Equal(t, types.ActionReasonArbitrageChargeNow, decision.Action.Reason)
+		assert.Equal(t, 0.50, decision.Action.FuturePrice.DollarsPerKWH, "FuturePrice should be the peak future price")
 	})
 
 	t.Run("Arbitrage Constraint -> Standby", func(t *testing.T) {
@@ -251,6 +262,7 @@ func TestDecide(t *testing.T) {
 
 		assert.Equal(t, types.BatteryModeStandby, decision.Action.BatteryMode)
 		assert.Contains(t, decision.Action.Description, "Capacity 0")
+		assert.Equal(t, types.ActionReasonMissingBattery, decision.Action.Reason)
 	})
 
 	t.Run("Default to Standby", func(t *testing.T) {
@@ -301,6 +313,9 @@ func TestDecide(t *testing.T) {
 
 		assert.Equal(t, types.BatteryModeLoad, decision.Action.BatteryMode)
 		assert.Contains(t, decision.Action.Description, "Sufficient battery")
+		assert.Equal(t, types.ActionReasonNoChange, decision.Action.Reason)
+		assert.True(t, decision.Action.HitDeficitAt.IsZero(), "HitDeficitAt should be zero for sufficient battery")
+		assert.Zero(t, decision.Action.FuturePrice.DollarsPerKWH, "FuturePrice should be zero for sufficient battery")
 	})
 
 	t.Run("Deficit + Moderate Price + High Future Price -> Standby", func(t *testing.T) {
@@ -323,6 +338,9 @@ func TestDecide(t *testing.T) {
 
 		assert.Equal(t, types.BatteryModeStandby, decision.Action.BatteryMode)
 		assert.Contains(t, decision.Action.Description, "Deficit predicted")
+		assert.Equal(t, types.ActionReasonDeficitSave, decision.Action.Reason)
+		assert.False(t, decision.Action.HitDeficitAt.IsZero(), "HitDeficitAt should be set")
+		assert.Equal(t, 0.50, decision.Action.FuturePrice.DollarsPerKWH)
 	})
 
 	t.Run("Deficit + High Price (Peak) -> Load", func(t *testing.T) {
@@ -344,6 +362,9 @@ func TestDecide(t *testing.T) {
 
 		assert.Equal(t, types.BatteryModeLoad, decision.Action.BatteryMode)
 		assert.Contains(t, decision.Action.Description, "Deficit predicted but Current Price is Peak")
+		assert.Equal(t, types.ActionReasonArbitrageSave, decision.Action.Reason)
+		assert.False(t, decision.Action.HitDeficitAt.IsZero(), "HitDeficitAt should be set")
+		assert.Zero(t, decision.Action.FuturePrice.DollarsPerKWH, "FuturePrice should be zero for peak discharge")
 	})
 
 	t.Run("NoChange", func(t *testing.T) {

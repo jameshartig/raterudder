@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/jameshartig/autoenergy/pkg/types"
+	"github.com/jameshartig/raterudder/pkg/types"
 )
 
 // Provider defines the interface for fetching energy prices.

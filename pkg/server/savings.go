@@ -6,6 +6,8 @@ import (
 	"math"
 	"net/http"
 	"time"
+
+	"github.com/jameshartig/raterudder/pkg/log"
 )
 
 type hourlySavingsStatsDebugging struct {
@@ -36,31 +38,32 @@ type SavingsStats struct {
 
 func (s *Server) handleHistorySavings(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	siteID := s.getSiteID(r)
 	start, end, err := parseTimeRange(r)
 	if err != nil {
 		http.Error(w, "invalid time range: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	settings, err := s.getSettingsWithMigration(ctx)
+	settings, _, err := s.getSettingsWithMigration(ctx, siteID)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to get settings", slog.Any("error", err))
+		log.Ctx(ctx).ErrorContext(ctx, "failed to get settings", slog.Any("error", err))
 		http.Error(w, "failed to get settings", http.StatusInternalServerError)
 		return
 	}
 
 	// Fetch prices (these are hourly)
-	prices, err := s.storage.GetPriceHistory(ctx, start, end)
+	prices, err := s.storage.GetPriceHistory(ctx, settings.UtilityProvider, start, end)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to get prices", slog.Any("error", err))
+		log.Ctx(ctx).ErrorContext(ctx, "failed to get prices", slog.Any("error", err))
 		http.Error(w, "failed to get prices", http.StatusInternalServerError)
 		return
 	}
 
 	// Fetch energy stats (these are hourly)
-	energyStats, err := s.storage.GetEnergyHistory(ctx, start, end)
+	energyStats, err := s.storage.GetEnergyHistory(ctx, siteID, start, end)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to get energy history", slog.Any("error", err))
+		log.Ctx(ctx).ErrorContext(ctx, "failed to get energy history", slog.Any("error", err))
 		http.Error(w, "failed to get energy history", http.StatusInternalServerError)
 		return
 	}

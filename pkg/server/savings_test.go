@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jameshartig/autoenergy/pkg/types"
+	"github.com/jameshartig/raterudder/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -19,22 +19,22 @@ type mockSavingsStorage struct {
 	stats  []types.EnergyStats
 }
 
-func (m *mockSavingsStorage) GetPriceHistory(ctx context.Context, start, end time.Time) ([]types.Price, error) {
+func (m *mockSavingsStorage) GetPriceHistory(ctx context.Context, provider string, start, end time.Time) ([]types.Price, error) {
 	return m.prices, nil
 }
 
-func (m *mockSavingsStorage) GetEnergyHistory(ctx context.Context, start, end time.Time) ([]types.EnergyStats, error) {
+func (m *mockSavingsStorage) GetEnergyHistory(ctx context.Context, siteID string, start, end time.Time) ([]types.EnergyStats, error) {
 	return m.stats, nil
 }
 
 func TestHandleHistorySavings(t *testing.T) {
 	mockStoreBase := &mockStorage{}
-	mockStoreBase.On("GetSettings", mock.Anything).Return(types.Settings{}, types.CurrentSettingsVersion, nil)
+	mockStoreBase.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{}, types.CurrentSettingsVersion, nil)
 
 	mockStore := &mockSavingsStorage{
 		mockStorage: mockStoreBase,
 	}
-	s := &Server{storage: mockStore}
+	s := &Server{storage: mockStore, bypassAuth: true}
 
 	// Create test data
 	start := time.Now().Truncate(24 * time.Hour)
@@ -95,6 +95,7 @@ func TestHandleHistorySavings(t *testing.T) {
 	mockStore.stats = stats
 
 	req, _ := http.NewRequest("GET", "/api/history/savings?start="+start.Format(time.RFC3339)+"&end="+end.Format(time.RFC3339), nil)
+	req = req.WithContext(context.WithValue(req.Context(), siteIDContextKey, types.SiteIDNone))
 	rr := httptest.NewRecorder()
 
 	s.handleHistorySavings(rr, req)

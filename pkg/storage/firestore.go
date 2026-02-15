@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"github.com/jameshartig/autoenergy/pkg/types"
+	"github.com/jameshartig/raterudder/pkg/types"
 	"github.com/levenlabs/go-lflag"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
@@ -78,9 +79,20 @@ func (f *FirestoreProvider) Close() error {
 	return nil
 }
 
+func (f *FirestoreProvider) getCollection(siteID, name string) (*firestore.CollectionRef, error) {
+	if siteID == "" {
+		return nil, fmt.Errorf("siteID cannot be empty")
+	}
+	return f.client.Collection("sites").Doc(siteID).Collection(name), nil
+}
+
 // GetSettings retrieves the dynamic configuration from the "config/settings" document.
-func (f *FirestoreProvider) GetSettings(ctx context.Context) (types.Settings, int, error) {
-	doc, err := f.client.Collection("config").Doc("settings").Get(ctx)
+func (f *FirestoreProvider) GetSettings(ctx context.Context, siteID string) (types.Settings, int, error) {
+	coll, err := f.getCollection(siteID, "config")
+	if err != nil {
+		return types.Settings{}, 0, err
+	}
+	doc, err := coll.Doc("settings").Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			// Return default settings if not found
@@ -99,16 +111,19 @@ func (f *FirestoreProvider) GetSettings(ctx context.Context) (types.Settings, in
 
 	val, err := doc.DataAt("json")
 	if err != nil {
+		slog.WarnContext(ctx, "settings doc missing json", slog.String("siteID", siteID))
 		return types.Settings{}, 0, fmt.Errorf("settings document missing 'json' field: %w", err)
 	}
 
 	jsonStr, ok := val.(string)
 	if !ok {
+		slog.WarnContext(ctx, "settings doc json not string", slog.String("siteID", siteID))
 		return types.Settings{}, 0, fmt.Errorf("settings 'json' field is not a string")
 	}
 
 	var s types.Settings
 	if err := json.Unmarshal([]byte(jsonStr), &s); err != nil {
+		slog.WarnContext(ctx, "failed to unmarshal settings json", slog.String("siteID", siteID), slog.Any("err", err))
 		return types.Settings{}, 0, fmt.Errorf("failed to unmarshal settings json: %w", err)
 	}
 	return s, version, nil
@@ -116,13 +131,17 @@ func (f *FirestoreProvider) GetSettings(ctx context.Context) (types.Settings, in
 
 // SetSettings saves the dynamic configuration to the "config/settings" document.
 // It stores the settings as a JSON string for portability.
-func (f *FirestoreProvider) SetSettings(ctx context.Context, settings types.Settings, version int) error {
+func (f *FirestoreProvider) SetSettings(ctx context.Context, siteID string, settings types.Settings, version int) error {
 	jsonBytes, err := json.Marshal(settings)
 	if err != nil {
 		return fmt.Errorf("failed to marshal settings: %w", err)
 	}
 
-	_, err = f.client.Collection("config").Doc("settings").Set(ctx, map[string]interface{}{
+	coll, err := f.getCollection(siteID, "config")
+	if err != nil {
+		return err
+	}
+	_, err = coll.Doc("settings").Set(ctx, map[string]interface{}{
 		"json":    string(jsonBytes),
 		"version": version,
 	})
@@ -132,37 +151,21 @@ func (f *FirestoreProvider) SetSettings(ctx context.Context, settings types.Sett
 	return nil
 }
 
-// UpsertPrice adds or updates a price record in the "utility_prices" collection.
-// The document ID is the RFC3339 timestamp of TSStart for efficient range queries.
-func (f *FirestoreProvider) UpsertPrice(ctx context.Context, price types.Price, version int) error {
-	jsonBytes, err := json.Marshal(price)
-	if err != nil {
-		return fmt.Errorf("failed to marshal price: %w", err)
-	}
-
-	docID := price.TSStart.UTC().Format(time.RFC3339)
-	_, err = f.client.Collection("utility_prices").Doc(docID).Set(ctx, map[string]interface{}{
-		"json":      string(jsonBytes),
-		"timestamp": price.TSStart,
-		"version":   version,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to upsert price: %w", err)
-	}
-	return nil
-}
-
 // InsertAction adds a new action record to the "actions" collection as a JSON blob.
 // The document ID is the RFC3339 timestamp for efficient range queries.
-func (f *FirestoreProvider) InsertAction(ctx context.Context, action types.Action) error {
+func (f *FirestoreProvider) InsertAction(ctx context.Context, siteID string, action types.Action) error {
 	jsonBytes, err := json.Marshal(action)
 	if err != nil {
 		return fmt.Errorf("failed to marshal action: %w", err)
 	}
 
+	coll, err := f.getCollection(siteID, "action_history")
+	if err != nil {
+		return err
+	}
 	// Use RFC3339 as document ID for lexicographic ordering and efficient range queries
 	docID := action.Timestamp.UTC().Format(time.RFC3339)
-	_, err = f.client.Collection("actions").Doc(docID).Set(ctx, map[string]interface{}{
+	_, err = coll.Doc(docID).Set(ctx, map[string]interface{}{
 		"json":      string(jsonBytes),
 		"timestamp": action.Timestamp,
 	})
@@ -172,56 +175,16 @@ func (f *FirestoreProvider) InsertAction(ctx context.Context, action types.Actio
 	return nil
 }
 
-// GetPriceHistory retrieves price records within the specified time range.
-// Uses document ID range queries for efficient filtering.
-func (f *FirestoreProvider) GetPriceHistory(ctx context.Context, start, end time.Time) ([]types.Price, error) {
-	startDocID := start.UTC().Format(time.RFC3339)
-	endDocID := end.UTC().Format(time.RFC3339)
-
-	coll := f.client.Collection("utility_prices")
-	iter := coll.
-		Where(firestore.DocumentID, ">=", coll.Doc(startDocID)).
-		Where(firestore.DocumentID, "<", coll.Doc(endDocID)).
-		OrderBy(firestore.DocumentID, firestore.Asc).
-		Documents(ctx)
-	defer iter.Stop()
-
-	var prices []types.Price
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("error iterating prices: %w", err)
-		}
-
-		val, err := doc.DataAt("json")
-		if err != nil {
-			return nil, fmt.Errorf("price document %s missing 'json' field: %w", doc.Ref.ID, err)
-		}
-
-		jsonStr, ok := val.(string)
-		if !ok {
-			return nil, fmt.Errorf("price document %s 'json' field is not string", doc.Ref.ID)
-		}
-
-		var p types.Price
-		if err := json.Unmarshal([]byte(jsonStr), &p); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal price (id=%s): %w", doc.Ref.ID, err)
-		}
-		prices = append(prices, p)
-	}
-	return prices, nil
-}
-
 // GetActionHistory retrieves action records within the specified time range.
 // Uses document ID range queries for efficient filtering without reading all documents.
-func (f *FirestoreProvider) GetActionHistory(ctx context.Context, start, end time.Time) ([]types.Action, error) {
+func (f *FirestoreProvider) GetActionHistory(ctx context.Context, siteID string, start, end time.Time) ([]types.Action, error) {
 	startDocID := start.UTC().Format(time.RFC3339)
 	endDocID := end.UTC().Format(time.RFC3339)
 
-	coll := f.client.Collection("actions")
+	coll, err := f.getCollection(siteID, "action_history")
+	if err != nil {
+		return nil, err
+	}
 	iter := coll.
 		Where(firestore.DocumentID, ">=", coll.Doc(startDocID)).
 		Where(firestore.DocumentID, "<", coll.Doc(endDocID)).
@@ -241,16 +204,19 @@ func (f *FirestoreProvider) GetActionHistory(ctx context.Context, start, end tim
 
 		val, err := doc.DataAt("json")
 		if err != nil {
+			slog.WarnContext(ctx, "action doc missing json", slog.String("actionID", doc.Ref.ID), slog.String("siteID", siteID), slog.Any("err", err))
 			return nil, fmt.Errorf("action document %s missing 'json' field: %w", doc.Ref.ID, err)
 		}
 
 		jsonStr, ok := val.(string)
 		if !ok {
+			slog.WarnContext(ctx, "action doc json not string", slog.String("actionID", doc.Ref.ID), slog.String("siteID", siteID))
 			return nil, fmt.Errorf("action document %s 'json' field is not string", doc.Ref.ID)
 		}
 
 		var a types.Action
 		if err := json.Unmarshal([]byte(jsonStr), &a); err != nil {
+			slog.WarnContext(ctx, "failed to unmarshal action", slog.String("actionID", doc.Ref.ID), slog.String("siteID", siteID), slog.Any("err", err))
 			return nil, fmt.Errorf("failed to unmarshal action (id=%s): %w", doc.Ref.ID, err)
 		}
 		actions = append(actions, a)
@@ -258,9 +224,9 @@ func (f *FirestoreProvider) GetActionHistory(ctx context.Context, start, end tim
 	return actions, nil
 }
 
-// UpsertEnergyHistory adds or updates an energy history record in the "energy_hourly" collection.
+// UpsertEnergyHistory adds or updates an energy history record in the "energy_history" collection.
 // The document ID is the RFC3339 timestamp of TSHourStart for consistent formatting.
-func (f *FirestoreProvider) UpsertEnergyHistory(ctx context.Context, stats types.EnergyStats, version int) error {
+func (f *FirestoreProvider) UpsertEnergyHistory(ctx context.Context, siteID string, stats types.EnergyStats, version int) error {
 	if stats.TSHourStart.IsZero() {
 		return fmt.Errorf("energy stats missing tsHourStart")
 	}
@@ -269,8 +235,12 @@ func (f *FirestoreProvider) UpsertEnergyHistory(ctx context.Context, stats types
 		return fmt.Errorf("failed to marshal energy stats: %w", err)
 	}
 
+	coll, err := f.getCollection(siteID, "energy_history")
+	if err != nil {
+		return err
+	}
 	docID := stats.TSHourStart.UTC().Format(time.RFC3339)
-	_, err = f.client.Collection("energy_hourly").Doc(docID).Set(ctx, map[string]interface{}{
+	_, err = coll.Doc(docID).Set(ctx, map[string]interface{}{
 		"json":      string(jsonBytes),
 		"timestamp": stats.TSHourStart,
 		"version":   version,
@@ -282,11 +252,14 @@ func (f *FirestoreProvider) UpsertEnergyHistory(ctx context.Context, stats types
 }
 
 // GetEnergyHistory retrieves energy history records within the specified time range.
-func (f *FirestoreProvider) GetEnergyHistory(ctx context.Context, start, end time.Time) ([]types.EnergyStats, error) {
+func (f *FirestoreProvider) GetEnergyHistory(ctx context.Context, siteID string, start, end time.Time) ([]types.EnergyStats, error) {
 	startDocID := start.Truncate(time.Hour).UTC().Format(time.RFC3339)
 	endDocID := end.Truncate(time.Hour).UTC().Format(time.RFC3339)
 
-	coll := f.client.Collection("energy_hourly")
+	coll, err := f.getCollection(siteID, "energy_history")
+	if err != nil {
+		return nil, err
+	}
 	iter := coll.
 		Where(firestore.DocumentID, ">=", coll.Doc(startDocID)).
 		Where(firestore.DocumentID, "<", coll.Doc(endDocID)).
@@ -306,16 +279,19 @@ func (f *FirestoreProvider) GetEnergyHistory(ctx context.Context, start, end tim
 
 		val, err := doc.DataAt("json")
 		if err != nil {
+			slog.WarnContext(ctx, "energy stats doc missing json", slog.String("docID", doc.Ref.ID), slog.String("siteID", siteID), slog.Any("err", err))
 			return nil, fmt.Errorf("energy stats doc %s missing 'json' field: %w", doc.Ref.ID, err)
 		}
 
 		jsonStr, ok := val.(string)
 		if !ok {
+			slog.WarnContext(ctx, "energy stats doc json not string", slog.String("docID", doc.Ref.ID), slog.String("siteID", siteID))
 			return nil, fmt.Errorf("energy stats doc %s 'json' field is not string", doc.Ref.ID)
 		}
 
 		var s types.EnergyStats
 		if err := json.Unmarshal([]byte(jsonStr), &s); err != nil {
+			slog.WarnContext(ctx, "failed to unmarshal energy stats", slog.String("docID", doc.Ref.ID), slog.String("siteID", siteID), slog.Any("err", err))
 			return nil, fmt.Errorf("failed to unmarshal energy stats (id=%s): %w", doc.Ref.ID, err)
 		}
 		allStats = append(allStats, s)
@@ -324,8 +300,12 @@ func (f *FirestoreProvider) GetEnergyHistory(ctx context.Context, start, end tim
 }
 
 // GetLatestEnergyHistoryTime retrieves the timestamp of the last stored energy history record.
-func (f *FirestoreProvider) GetLatestEnergyHistoryTime(ctx context.Context) (time.Time, int, error) {
-	iter := f.client.Collection("energy_hourly").
+func (f *FirestoreProvider) GetLatestEnergyHistoryTime(ctx context.Context, siteID string) (time.Time, int, error) {
+	coll, err := f.getCollection(siteID, "energy_history")
+	if err != nil {
+		return time.Time{}, 0, err
+	}
+	iter := coll.
 		OrderBy("timestamp", firestore.Desc).
 		Limit(1).
 		Documents(ctx)
@@ -355,10 +335,183 @@ func (f *FirestoreProvider) GetLatestEnergyHistoryTime(ctx context.Context) (tim
 	return ts, version, nil
 }
 
+// GetSite retrieves a site from the "sites" collection.
+func (f *FirestoreProvider) GetSite(ctx context.Context, siteID string) (types.Site, error) {
+	doc, err := f.client.Collection("sites").Doc(siteID).Get(ctx)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return types.Site{}, fmt.Errorf("site not found: %s", siteID)
+		}
+		return types.Site{}, fmt.Errorf("failed to get site %s: %w", siteID, err)
+	}
+
+	val, err := doc.DataAt("json")
+	if err != nil {
+		slog.WarnContext(ctx, "site doc missing json", slog.String("siteID", siteID), slog.Any("err", err))
+		return types.Site{}, fmt.Errorf("site %s missing json: %w", siteID, err)
+	}
+	jsonStr, ok := val.(string)
+	if !ok {
+		slog.WarnContext(ctx, "site doc json not string", slog.String("siteID", siteID))
+		return types.Site{}, fmt.Errorf("site %s json not string", siteID)
+	}
+
+	var site types.Site
+	if err := json.Unmarshal([]byte(jsonStr), &site); err != nil {
+		slog.WarnContext(ctx, "failed to unmarshal site", slog.String("siteID", siteID), slog.Any("err", err))
+		return types.Site{}, fmt.Errorf("failed to unmarshal site %s: %w", siteID, err)
+	}
+	return site, nil
+}
+
+// ListSites retrieves all sites from the "sites" collection.
+func (f *FirestoreProvider) ListSites(ctx context.Context) ([]types.Site, error) {
+	iter := f.client.Collection("sites").Documents(ctx)
+	defer iter.Stop()
+
+	var sites []types.Site
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("error iterating sites: %w", err)
+		}
+
+		val, err := doc.DataAt("json")
+		if err != nil {
+			slog.WarnContext(ctx, "site doc missing json", slog.String("siteID", doc.Ref.ID))
+			// Skip malformed documents
+			continue
+		}
+		jsonStr, ok := val.(string)
+		if !ok {
+			slog.WarnContext(ctx, "site doc json not string", slog.String("siteID", doc.Ref.ID))
+			continue
+		}
+
+		var site types.Site
+		if err := json.Unmarshal([]byte(jsonStr), &site); err != nil {
+			slog.WarnContext(ctx, "failed to unmarshal site", slog.String("siteID", doc.Ref.ID), slog.Any("err", err))
+			// Skip malformed JSON
+			continue
+		}
+		sites = append(sites, site)
+	}
+	return sites, nil
+}
+
+// GetUser retrieves a user from the "users" collection.
+func (f *FirestoreProvider) GetUser(ctx context.Context, userID string) (types.User, error) {
+	doc, err := f.client.Collection("users").Doc(userID).Get(ctx)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return types.User{}, fmt.Errorf("%w: %s", ErrUserNotFound, userID)
+		}
+		return types.User{}, fmt.Errorf("failed to get user %s: %w", userID, err)
+	}
+
+	val, err := doc.DataAt("json")
+	if err != nil {
+		slog.WarnContext(ctx, "user doc missing json", slog.String("userID", userID))
+		return types.User{}, fmt.Errorf("user %s missing json: %w", userID, err)
+	}
+	jsonStr, ok := val.(string)
+	if !ok {
+		slog.WarnContext(ctx, "user doc json not string", slog.String("userID", userID))
+		return types.User{}, fmt.Errorf("user %s json not string", userID)
+	}
+
+	var user types.User
+	if err := json.Unmarshal([]byte(jsonStr), &user); err != nil {
+		return types.User{}, fmt.Errorf("failed to unmarshal user %s: %w", userID, err)
+	}
+	return user, nil
+}
+
+// UpsertPrice adds or updates a price record in the "utility_prices" collection.
+// The document ID is the RFC3339 timestamp of TSStart for efficient range queries.
+func (f *FirestoreProvider) UpsertPrice(ctx context.Context, price types.Price, version int) error {
+	jsonBytes, err := json.Marshal(price)
+	if err != nil {
+		return fmt.Errorf("failed to marshal price: %w", err)
+	}
+
+	if price.Provider == "" {
+		return fmt.Errorf("price provider cannot be empty")
+	}
+
+	docID := price.TSStart.UTC().Format(time.RFC3339)
+	_, err = f.client.Collection("utilities").Doc(price.Provider).Collection("price_history").Doc(docID).Set(ctx, map[string]interface{}{
+		"json":      string(jsonBytes),
+		"timestamp": price.TSStart,
+		"version":   version,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to upsert price: %w", err)
+	}
+	return nil
+}
+
+// GetPriceHistory retrieves price records within the specified time range.
+// Uses document ID range queries for efficient filtering.
+func (f *FirestoreProvider) GetPriceHistory(ctx context.Context, provider string, start, end time.Time) ([]types.Price, error) {
+	startDocID := start.UTC().Format(time.RFC3339)
+	endDocID := end.UTC().Format(time.RFC3339)
+
+	if provider == "" {
+		return nil, fmt.Errorf("price provider cannot be empty")
+	}
+
+	coll := f.client.Collection("utilities").Doc(provider).Collection("price_history")
+	iter := coll.
+		Where(firestore.DocumentID, ">=", coll.Doc(startDocID)).
+		Where(firestore.DocumentID, "<", coll.Doc(endDocID)).
+		OrderBy(firestore.DocumentID, firestore.Asc).
+		Documents(ctx)
+	defer iter.Stop()
+
+	var prices []types.Price
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("error iterating prices: %w", err)
+		}
+
+		val, err := doc.DataAt("json")
+		if err != nil {
+			slog.WarnContext(ctx, "price doc missing json", slog.String("docID", doc.Ref.ID), slog.String("provider", provider), slog.Any("err", err))
+			return nil, fmt.Errorf("price document %s missing 'json' field: %w", doc.Ref.ID, err)
+		}
+
+		jsonStr, ok := val.(string)
+		if !ok {
+			slog.WarnContext(ctx, "price doc json not string", slog.String("docID", doc.Ref.ID), slog.String("provider", provider))
+			return nil, fmt.Errorf("price document %s 'json' field is not string", doc.Ref.ID)
+		}
+
+		var p types.Price
+		if err := json.Unmarshal([]byte(jsonStr), &p); err != nil {
+			slog.WarnContext(ctx, "failed to unmarshal price", slog.String("docID", doc.Ref.ID), slog.String("provider", provider), slog.Any("err", err))
+			return nil, fmt.Errorf("failed to unmarshal price (id=%s): %w", doc.Ref.ID, err)
+		}
+		prices = append(prices, p)
+	}
+	return prices, nil
+}
+
 // GetLatestPriceHistoryTime retrieves the timestamp of the last stored price record.
-func (f *FirestoreProvider) GetLatestPriceHistoryTime(ctx context.Context) (time.Time, int, error) {
+func (f *FirestoreProvider) GetLatestPriceHistoryTime(ctx context.Context, provider string) (time.Time, int, error) {
+	if provider == "" {
+		return time.Time{}, 0, fmt.Errorf("price provider cannot be empty")
+	}
+
 	// firestore automatically creates indexes for top-level fields
-	iter := f.client.Collection("utility_prices").
+	iter := f.client.Collection("utilities").Doc(provider).Collection("price_history").
 		OrderBy("timestamp", firestore.Desc).
 		Limit(1).
 		Documents(ctx)
@@ -386,4 +539,49 @@ func (f *FirestoreProvider) GetLatestPriceHistoryTime(ctx context.Context) (time
 	}
 
 	return ts, version, nil
+}
+
+// UpdateSite updates a site document in the "sites" collection.
+func (f *FirestoreProvider) UpdateSite(ctx context.Context, siteID string, site types.Site) error {
+	siteJSON, err := json.Marshal(site)
+	if err != nil {
+		return fmt.Errorf("failed to marshal site %s: %w", siteID, err)
+	}
+	_, err = f.client.Collection("sites").Doc(siteID).Set(ctx, map[string]interface{}{
+		"json": string(siteJSON),
+	}, firestore.MergeAll)
+	if err != nil {
+		return fmt.Errorf("failed to update site %s: %w", siteID, err)
+	}
+	return nil
+}
+
+// CreateUser creates a new user document in the "users" collection.
+func (f *FirestoreProvider) CreateUser(ctx context.Context, user types.User) error {
+	userJSON, err := json.Marshal(user)
+	if err != nil {
+		return fmt.Errorf("failed to marshal user %s: %w", user.ID, err)
+	}
+	_, err = f.client.Collection("users").Doc(user.ID).Create(ctx, map[string]interface{}{
+		"json": string(userJSON),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create user %s: %w", user.ID, err)
+	}
+	return nil
+}
+
+// UpdateUser updates an existing user document in the "users" collection.
+func (f *FirestoreProvider) UpdateUser(ctx context.Context, user types.User) error {
+	userJSON, err := json.Marshal(user)
+	if err != nil {
+		return fmt.Errorf("failed to marshal user %s: %w", user.ID, err)
+	}
+	_, err = f.client.Collection("users").Doc(user.ID).Set(ctx, map[string]interface{}{
+		"json": string(userJSON),
+	}, firestore.MergeAll)
+	if err != nil {
+		return fmt.Errorf("failed to update user %s: %w", user.ID, err)
+	}
+	return nil
 }

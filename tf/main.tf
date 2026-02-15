@@ -18,10 +18,10 @@ provider "google" {
 
 variable "project_id" {
   description = "gcp project ID"
-  default     = "jameshartig-autoenergy"
+  default     = "raterudder"
 }
 
-data "google_project" "autoenergy" {
+data "google_project" "raterudder" {
   project_id = var.project_id
 }
 
@@ -59,6 +59,6 @@ module "enabled_google_apis" {
     "developerconnect.googleapis.com",
     "cloudscheduler.googleapis.com",
     "firestore.googleapis.com",
-    "secretmanager.googleapis.com"
+    "secretmanager.googleapis.com",
   ]
 }

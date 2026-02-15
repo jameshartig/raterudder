@@ -4,7 +4,7 @@ import "fmt"
 
 // CurrentSettingsVersion is the current version of the settings struct.
 // Increment this value when adding new fields that require default values.
-const CurrentSettingsVersion = 3
+const CurrentSettingsVersion = 4
 
 // Settings represents the configuration stored in the database.
 // These are dynamic settings that can be changed without redeploying.
@@ -18,6 +18,7 @@ type Settings struct {
 	IgnoreHourUsageOverMultiple float64 `json:"ignoreHourUsageOverMultiple"`
 
 	// Price Settings
+	UtilityProvider string `json:"utilityProvider"`
 	// Always charge when the price is under this amount (in $/kWh)
 	AlwaysChargeUnderDollarsPerKWH float64 `json:"alwaysChargeUnderDollarsPerKWH"`
 	// Additional fees to add to the price when charging (in $/kWh)
@@ -48,6 +49,21 @@ type Settings struct {
 	// Multiplier for bell curve solar smoothing weight.
 	// 0 disables bell curve smoothing entirely. 1.0 = full weight.
 	SolarBellCurveMultiplier float64 `json:"solarBellCurveMultiplier"`
+
+	// Credentials for external systems (encrypted)
+	EncryptedCredentials []byte `json:"encryptedCredentials,omitempty"`
+}
+
+// Credentials for external systems
+type Credentials struct {
+	Franklin *FranklinCredentials `json:"franklin,omitempty"`
+}
+
+// Credentials for Franklin
+type FranklinCredentials struct {
+	Username    string `json:"username"`
+	MD5Password string `json:"md5Password"`
+	GatewayID   string `json:"gatewayID"`
 }
 
 // MigrateSettings migrates the settings to the current version.
@@ -94,6 +110,12 @@ func MigrateSettings(s Settings, currentVersion int) (Settings, bool, error) {
 			}
 			if s.SolarBellCurveMultiplier == 0 {
 				s.SolarBellCurveMultiplier = 1.0
+				migrated = true
+			}
+		case 4:
+			// version 4: add utility provider
+			if s.UtilityProvider == "" {
+				s.UtilityProvider = "comed_hourly"
 				migrated = true
 			}
 		default:

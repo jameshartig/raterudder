@@ -26,6 +26,16 @@ vi.mock('./api', () => ({
         NoExport: 1,
         Any: 2,
     },
+    ActionReason: {
+        AlwaysChargeBelowThreshold: 'alwaysChargeBelowThreshold',
+        MissingBattery: 'missingBattery',
+        DeficitCharge: 'deficitCharge',
+        ArbitrageCharge: 'arbitrageCharge',
+        DischargeBeforeCapacity: 'dischargeBeforeCapacity',
+        DeficitSave: 'deficitSave',
+        ArbitrageSave: 'dischargeAtPeak',
+        NoChange: 'sufficientBattery',
+    },
 }));
 
 const renderWithRouter = (component: React.ReactNode) => {
@@ -47,7 +57,28 @@ describe('ActionList', () => {
         expect(screen.getByText('Loading day...')).toBeInTheDocument();
     });
 
-    it('renders actions when loaded', async () => {
+    it('renders actions with reason-based text', async () => {
+        const actions = [{
+            reason: 'alwaysChargeBelowThreshold',
+            description: 'This is a legacy description',
+            timestamp: new Date().toISOString(),
+            batteryMode: 2, // ChargeAny
+            solarMode: 0,
+            currentPrice: { dollarsPerKWH: 0.04, tsStart: '', tsEnd: '' },
+        }];
+        (fetchActions as any).mockResolvedValue(actions);
+
+        renderWithRouter(<ActionList />);
+
+        await waitFor(() => {
+            // Should show reason-based text, not description
+            expect(screen.getByText(/Price is low.*Charging batteries/)).toBeInTheDocument();
+            // Legacy description should NOT be shown
+            expect(screen.queryByText('This is a legacy description')).not.toBeInTheDocument();
+        });
+    });
+
+    it('falls back to description when reason is empty (legacy actions)', async () => {
         const actions = [{
             description: 'This is a test',
             timestamp: new Date().toISOString(),
@@ -100,11 +131,13 @@ describe('ActionList', () => {
 
     it('renders dry run badge', async () => {
         const actions = [{
+            reason: 'alwaysChargeBelowThreshold',
             description: 'Dry run test',
             timestamp: new Date().toISOString(),
             batteryMode: 1, // Standby
             solarMode: 1, // NoExport
             dryRun: true,
+            currentPrice: { dollarsPerKWH: 0.01, tsStart: '', tsEnd: '' },
         }];
         (fetchActions as any).mockResolvedValue(actions);
 
@@ -244,6 +277,69 @@ describe('ActionList', () => {
             expect(screen.getByText('$5.00')).toBeInTheDocument();
             expect(screen.getByText('Battery Savings')).toBeInTheDocument();
             expect(screen.getByText('$5.50')).toBeInTheDocument();
+        });
+    });
+
+    it('renders deficit charge reason with future price and deficit time', async () => {
+        const deficitTime = new Date('2026-02-15T14:00:00').toISOString();
+        const actions = [{
+            reason: 'deficitCharge',
+            description: 'Charging Optimized: Projected Deficit...',
+            timestamp: new Date().toISOString(),
+            batteryMode: 2, // ChargeAny
+            solarMode: 0,
+            currentPrice: { dollarsPerKWH: 0.10, tsStart: '', tsEnd: '' },
+            futurePrice: { dollarsPerKWH: 0.50, tsStart: '', tsEnd: '' },
+            deficitAt: deficitTime,
+        }];
+        (fetchActions as any).mockResolvedValue(actions);
+
+        renderWithRouter(<ActionList />);
+
+        await waitFor(() => {
+            // Should show the templatized deficit charge text
+            expect(screen.getByText(/Battery deficit predicted/)).toBeInTheDocument();
+            expect(screen.getByText(/Charging now/)).toBeInTheDocument();
+            expect(screen.getByText(/peak later/)).toBeInTheDocument();
+            // Should show the future price in footer
+            expect(screen.getByText(/Peak:.*\$0.500/)).toBeInTheDocument();
+        });
+    });
+
+    it('renders sufficient battery reason text', async () => {
+        const actions = [{
+            reason: 'sufficientBattery',
+            description: 'Sufficient battery.',
+            timestamp: new Date().toISOString(),
+            batteryMode: -1, // Load
+            solarMode: 0,
+        }];
+        (fetchActions as any).mockResolvedValue(actions);
+
+        renderWithRouter(<ActionList />);
+
+        await waitFor(() => {
+            expect(screen.getByText('Battery is sufficient. Using battery normally.')).toBeInTheDocument();
+        });
+    });
+
+    it('renders arbitrage charge reason text', async () => {
+        const actions = [{
+            reason: 'arbitrageCharge',
+            description: 'Charging Optimized: Arbitrage...',
+            timestamp: new Date().toISOString(),
+            batteryMode: 2, // ChargeAny
+            solarMode: 0,
+            currentPrice: { dollarsPerKWH: 0.10, tsStart: '', tsEnd: '' },
+            futurePrice: { dollarsPerKWH: 0.50, tsStart: '', tsEnd: '' },
+        }];
+        (fetchActions as any).mockResolvedValue(actions);
+
+        renderWithRouter(<ActionList />);
+
+        await waitFor(() => {
+            expect(screen.getByText(/Arbitrage opportunity.*charging at.*\$0.100/)).toBeInTheDocument();
+            expect(screen.getByText(/peak later at.*\$0.500/)).toBeInTheDocument();
         });
     });
 });

@@ -1,9 +1,10 @@
-module github.com/jameshartig/autoenergy
+module github.com/jameshartig/raterudder
 
 go 1.25.1
 
 require (
 	cloud.google.com/go/firestore v1.21.0
+	github.com/NYTimes/gziphandler v1.1.1
 	github.com/levenlabs/go-lflag v1.0.2
 	github.com/levenlabs/go-llog v1.0.0
 	github.com/stretchr/testify v1.11.1

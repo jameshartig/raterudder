@@ -1,17 +1,21 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/jameshartig/autoenergy/pkg/controller"
-	"github.com/jameshartig/autoenergy/pkg/types"
+	"github.com/jameshartig/raterudder/pkg/controller"
+	"github.com/jameshartig/raterudder/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/jameshartig/raterudder/pkg/ess"
+	"github.com/jameshartig/raterudder/pkg/utility"
 )
 
 func TestHandleModeling(t *testing.T) {
@@ -21,34 +25,45 @@ func TestHandleModeling(t *testing.T) {
 		mockU.On("GetFuturePrices", mock.Anything).Return([]types.Price{}, nil)
 
 		mockS := &mockStorage{}
-		mockS.On("GetSettings", mock.Anything).Return(types.Settings{
-			MinBatterySOC: 5.0,
+		mockS.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{
+			MinBatterySOC:   5.0,
+			UtilityProvider: "comed_hourly",
 		}, types.CurrentSettingsVersion, nil)
-		mockS.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
+		mockS.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
 
 		mockES := &mockESS{}
+		mockES.On("ApplySettings", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		mockES.On("GetStatus", mock.Anything).Return(types.SystemStatus{
 			BatterySOC:         50,
 			BatteryCapacityKWH: 10.0,
 			Timestamp:          time.Now(),
 		}, nil)
 
+		mockP := ess.NewMap()
+		mockP.SetSystem(types.SiteIDNone, mockES)
+
+		mockUMap := utility.NewMap()
+		mockUMap.SetProvider("comed_hourly", mockU)
+
 		srv := &Server{
-			utilityProvider: mockU,
-			essSystem:       mockES,
-			storage:         mockS,
-			controller:      controller.NewController(),
-			bypassAuth:      true,
+			utilities:  mockUMap,
+			ess:        mockP,
+			storage:    mockS,
+			controller: controller.NewController(),
+			bypassAuth: true,
 		}
 
 		req := httptest.NewRequest("GET", "/api/modeling", nil)
+		// Inject siteID
+		ctx := context.WithValue(req.Context(), siteIDContextKey, types.SiteIDNone)
+		req = req.WithContext(ctx)
 		w := httptest.NewRecorder()
 
 		srv.handleModeling(w, req)
 
 		resp := w.Result()
 		require.Equal(t, http.StatusOK, resp.StatusCode)
-		assert.Equal(t, "public, max-age=300", resp.Header.Get("Cache-Control"))
+		assert.Equal(t, "private, max-age=300", resp.Header.Get("Cache-Control"))
 
 		var hours []controller.SimHour
 		err := json.NewDecoder(resp.Body).Decode(&hours)
@@ -59,13 +74,13 @@ func TestHandleModeling(t *testing.T) {
 		mockU.AssertCalled(t, "GetCurrentPrice", mock.Anything)
 		mockU.AssertCalled(t, "GetFuturePrices", mock.Anything)
 		mockES.AssertCalled(t, "GetStatus", mock.Anything)
-		mockS.AssertCalled(t, "GetSettings", mock.Anything)
-		mockS.AssertCalled(t, "GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything)
+		mockS.AssertCalled(t, "GetSettings", mock.Anything, mock.Anything)
+		mockS.AssertCalled(t, "GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	})
 
 	t.Run("Settings Error Returns 500", func(t *testing.T) {
 		mockS := &mockStorage{}
-		mockS.On("GetSettings", mock.Anything).Return(types.Settings{}, 0, assert.AnError)
+		mockS.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{}, 0, assert.AnError)
 
 		srv := &Server{
 			storage:    mockS,
@@ -73,6 +88,8 @@ func TestHandleModeling(t *testing.T) {
 		}
 
 		req := httptest.NewRequest("GET", "/api/modeling", nil)
+		// Inject siteID
+		req = req.WithContext(context.WithValue(req.Context(), siteIDContextKey, types.SiteIDNone))
 		w := httptest.NewRecorder()
 
 		srv.handleModeling(w, req)
@@ -83,18 +100,24 @@ func TestHandleModeling(t *testing.T) {
 
 	t.Run("ESS Status Error Returns 500", func(t *testing.T) {
 		mockS := &mockStorage{}
-		mockS.On("GetSettings", mock.Anything).Return(types.Settings{}, types.CurrentSettingsVersion, nil)
+		mockS.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{UtilityProvider: "comed_hourly"}, types.CurrentSettingsVersion, nil)
 
 		mockES := &mockESS{}
+		mockES.On("ApplySettings", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		mockES.On("GetStatus", mock.Anything).Return(types.SystemStatus{}, assert.AnError)
+
+		mockP := ess.NewMap()
+		mockP.SetSystem(types.SiteIDNone, mockES)
 
 		srv := &Server{
 			storage:    mockS,
-			essSystem:  mockES,
+			ess:        mockP,
 			bypassAuth: true,
 		}
 
 		req := httptest.NewRequest("GET", "/api/modeling", nil)
+		// Inject siteID
+		req = req.WithContext(context.WithValue(req.Context(), siteIDContextKey, types.SiteIDNone))
 		w := httptest.NewRecorder()
 
 		srv.handleModeling(w, req)
@@ -105,22 +128,31 @@ func TestHandleModeling(t *testing.T) {
 
 	t.Run("Price Error Returns 500", func(t *testing.T) {
 		mockS := &mockStorage{}
-		mockS.On("GetSettings", mock.Anything).Return(types.Settings{}, types.CurrentSettingsVersion, nil)
+		mockS.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{UtilityProvider: "comed_hourly"}, types.CurrentSettingsVersion, nil)
 
 		mockES := &mockESS{}
+		mockES.On("ApplySettings", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		mockES.On("GetStatus", mock.Anything).Return(types.SystemStatus{Timestamp: time.Now()}, nil)
 
 		mockU := &mockUtility{}
 		mockU.On("GetCurrentPrice", mock.Anything).Return(types.Price{}, assert.AnError)
 
+		mockP := ess.NewMap()
+		mockP.SetSystem(types.SiteIDNone, mockES)
+
+		mockUMap := utility.NewMap()
+		mockUMap.SetProvider("comed_hourly", mockU)
+
 		srv := &Server{
-			storage:         mockS,
-			essSystem:       mockES,
-			utilityProvider: mockU,
-			bypassAuth:      true,
+			storage:    mockS,
+			ess:        mockP,
+			utilities:  mockUMap,
+			bypassAuth: true,
 		}
 
 		req := httptest.NewRequest("GET", "/api/modeling", nil)
+		// Inject siteID
+		req = req.WithContext(context.WithValue(req.Context(), siteIDContextKey, types.SiteIDNone))
 		w := httptest.NewRecorder()
 
 		srv.handleModeling(w, req)
@@ -135,27 +167,37 @@ func TestHandleModeling(t *testing.T) {
 		mockU.On("GetFuturePrices", mock.Anything).Return([]types.Price{}, nil)
 
 		mockS := &mockStorage{}
-		mockS.On("GetSettings", mock.Anything).Return(types.Settings{
-			MinBatterySOC: 5.0,
+		mockS.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{
+			MinBatterySOC:   5.0,
+			UtilityProvider: "comed_hourly",
 		}, types.CurrentSettingsVersion, nil)
-		mockS.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
+		mockS.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
 
 		mockES := &mockESS{}
+		mockES.On("ApplySettings", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		mockES.On("GetStatus", mock.Anything).Return(types.SystemStatus{
 			BatterySOC:         80,
 			BatteryCapacityKWH: 10.0,
 			Timestamp:          time.Now(),
 		}, nil)
 
+		mockP := ess.NewMap()
+		mockP.SetSystem(types.SiteIDNone, mockES)
+
+		mockUMap := utility.NewMap()
+		mockUMap.SetProvider("comed_hourly", mockU)
+
 		srv := &Server{
-			utilityProvider: mockU,
-			essSystem:       mockES,
-			storage:         mockS,
-			controller:      controller.NewController(),
-			bypassAuth:      true,
+			utilities:  mockUMap,
+			ess:        mockP,
+			storage:    mockS,
+			controller: controller.NewController(),
+			bypassAuth: true,
 		}
 
 		req := httptest.NewRequest("GET", "/api/modeling", nil)
+		// Inject siteID
+		req = req.WithContext(context.WithValue(req.Context(), siteIDContextKey, types.SiteIDNone))
 		w := httptest.NewRecorder()
 
 		srv.handleModeling(w, req)

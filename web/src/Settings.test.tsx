@@ -55,6 +55,7 @@ describe('App & Settings', () => {
             additionalFeesDollarsPerKWH: 0.02,
             minArbitrageDifferenceDollarsPerKWH: 0.03,
             minDeficitPriceDifferenceDollarsPerKWH: 0.02,
+            utilityProvider: 'comed_hourly',
         });
     });
 
@@ -63,7 +64,8 @@ describe('App & Settings', () => {
         loggedIn: true,
         authRequired: true,
         clientID: 'test-client-id',
-        email: 'user@example.com'
+        email: 'user@example.com',
+        siteIDs: ['site1']
     };
 
     it('shows login button when auth required and not logged in', async () => {
@@ -73,6 +75,9 @@ describe('App & Settings', () => {
         });
 
         render(<App />);
+
+        // On LandingPage, click Login link in header
+        fireEvent.click(screen.getByText('Login'));
 
         await waitFor(() => {
             expect(screen.getByText('Google Sign In')).toBeInTheDocument();
@@ -91,6 +96,7 @@ describe('App & Settings', () => {
         (login as any).mockResolvedValue(undefined);
 
         render(<App />);
+        fireEvent.click(screen.getByText('Login'));
 
         await waitFor(() => {
             expect(screen.getByText('Google Sign In')).toBeInTheDocument();
@@ -108,12 +114,13 @@ describe('App & Settings', () => {
         (logout as any).mockResolvedValue(undefined);
 
         render(<App />);
+        fireEvent.click(screen.getByText('Login'));
 
         await waitFor(() => {
-            expect(screen.getByText('Logout')).toBeInTheDocument();
+            expect(screen.getByText('Log Out')).toBeInTheDocument();
         });
 
-        fireEvent.click(screen.getByText('Logout'));
+        fireEvent.click(screen.getByText('Log Out'));
 
         await waitFor(() => {
             expect(logout).toHaveBeenCalled();
@@ -124,6 +131,7 @@ describe('App & Settings', () => {
         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: false });
 
         render(<App />);
+        fireEvent.click(screen.getByText('Login'));
 
         await waitFor(() => {
             expect(screen.getByText('Settings')).toBeInTheDocument();
@@ -133,6 +141,7 @@ describe('App & Settings', () => {
     it('settings page is read-only when not admin', async () => {
         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: false });
         render(<App />);
+        fireEvent.click(screen.getByText('Login'));
 
         // Navigate
         await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
@@ -150,6 +159,7 @@ describe('App & Settings', () => {
         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: true });
 
         render(<App />);
+        fireEvent.click(screen.getByText('Login'));
 
         await waitFor(() => {
             expect(screen.getByText('Settings')).toBeInTheDocument();
@@ -160,6 +170,7 @@ describe('App & Settings', () => {
         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: true });
 
         render(<App />);
+        fireEvent.click(screen.getByText('Login'));
 
         // Wait for link to appear
         await waitFor(() => {
@@ -179,6 +190,7 @@ describe('App & Settings', () => {
     it('can update settings', async () => {
          (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: true });
          render(<App />);
+         fireEvent.click(screen.getByText('Login'));
 
          // Navigate
          await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
@@ -200,13 +212,14 @@ describe('App & Settings', () => {
              expect(screen.getByText('Settings saved successfully')).toBeInTheDocument();
              expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
                  minBatterySOC: 20
-             }));
+             }), expect.any(String), undefined);
          });
     });
 
     it('can toggle pause setting', async () => {
          (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: true });
          render(<App />);
+         fireEvent.click(screen.getByText('Login'));
 
          // Navigate
          await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
@@ -228,13 +241,14 @@ describe('App & Settings', () => {
              expect(screen.getByText('Settings saved successfully')).toBeInTheDocument();
              expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
                  pause: true
-             }));
+             }), expect.any(String), undefined);
          });
     });
 
     it('renders solar settings inputs on settings page', async () => {
         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: true });
         render(<App />);
+        fireEvent.click(screen.getByText('Login'));
 
         await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
         fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
@@ -250,6 +264,7 @@ describe('App & Settings', () => {
     it('can update solar bell curve multiplier', async () => {
         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: true });
         render(<App />);
+        fireEvent.click(screen.getByText('Login'));
 
         await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
         fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
@@ -264,7 +279,7 @@ describe('App & Settings', () => {
         await waitFor(() => {
             expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
                 solarBellCurveMultiplier: 0.5
-            }));
+            }), expect.any(String), undefined);
         });
     });
 
@@ -282,9 +297,11 @@ describe('App & Settings', () => {
             additionalFeesDollarsPerKWH: 0.02,
             minArbitrageDifferenceDollarsPerKWH: 0.03,
             minDeficitPriceDifferenceDollarsPerKWH: 0.02,
+            utilityProvider: 'comed_hourly',
         });
         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: true });
         render(<App />);
+        fireEvent.click(screen.getByText('Login'));
 
         await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
         fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
@@ -308,9 +325,11 @@ describe('App & Settings', () => {
             additionalFeesDollarsPerKWH: 0.02,
             minArbitrageDifferenceDollarsPerKWH: 0.03,
             minDeficitPriceDifferenceDollarsPerKWH: 0.02,
+            utilityProvider: 'comed_hourly',
         });
         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: true });
         render(<App />);
+        fireEvent.click(screen.getByText('Login'));
 
         await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
         fireEvent.click(screen.getByRole('link', { name: 'Settings' }));

@@ -8,10 +8,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/jameshartig/autoenergy/pkg/ess"
-	"github.com/jameshartig/autoenergy/pkg/server"
-	"github.com/jameshartig/autoenergy/pkg/storage"
-	"github.com/jameshartig/autoenergy/pkg/utility"
+	"github.com/jameshartig/raterudder/pkg/ess"
+	"github.com/jameshartig/raterudder/pkg/log"
+	"github.com/jameshartig/raterudder/pkg/server"
+	"github.com/jameshartig/raterudder/pkg/storage"
+	"github.com/jameshartig/raterudder/pkg/utility"
 
 	"github.com/levenlabs/go-lflag"
 	"github.com/levenlabs/go-llog"
@@ -57,15 +58,15 @@ func main() {
 	// If initialization inside lflag.Do failed, we wouldn't be here (panic).
 	defer func() {
 		if err := s.Close(); err != nil {
-			slog.Error("failed to close storage", "error", err)
+			log.Ctx(ctx).ErrorContext(ctx, "failed to close storage", "error", err)
 		}
 	}()
 
 	// 5. Start Server
 	// Run will block until context is canceled or error happens
 	if err := srv.Run(ctx); err != nil {
-		slog.Error("server failed", "error", err)
+		log.Ctx(ctx).ErrorContext(ctx, "server failed", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("server exited cleanly")
+	log.Ctx(ctx).InfoContext(ctx, "server exited cleanly")
 }

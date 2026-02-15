@@ -13,33 +13,37 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/api/idtoken"
-
-	"github.com/jameshartig/autoenergy/pkg/controller"
-	"github.com/jameshartig/autoenergy/pkg/ess"
-	"github.com/jameshartig/autoenergy/pkg/storage"
-	"github.com/jameshartig/autoenergy/pkg/utility"
-	"github.com/jameshartig/autoenergy/web"
-
+	"github.com/NYTimes/gziphandler"
+	"github.com/jameshartig/raterudder/pkg/controller"
+	"github.com/jameshartig/raterudder/pkg/ess"
+	"github.com/jameshartig/raterudder/pkg/log"
+	"github.com/jameshartig/raterudder/pkg/storage"
+	"github.com/jameshartig/raterudder/pkg/utility"
+	"github.com/jameshartig/raterudder/web"
 	"github.com/levenlabs/go-lflag"
+	"google.golang.org/api/idtoken"
 )
 
 const authTokenCookie = "auth_token"
 
 type contextKey string
 
-const emailContextKey contextKey = "email"
+const (
+	siteIDContextKey         contextKey = "siteID"
+	userContextKey           contextKey = "user"
+	userToRegisterContextKey contextKey = "userToRegister"
+)
 
 // TokenValidator is a function that validates a Google ID Token.
 type TokenValidator func(ctx context.Context, idToken string, audience string) (*idtoken.Payload, error)
 
-// Server handles the HTTP API and control logic for the AutoEnergy system.
+// Server handles the HTTP API and control logic for the Raterudder system.
 // It orchestrates interactions between the utility provider, ESS, and storage.
 type Server struct {
-	utilityProvider utility.Provider
-	essSystem       ess.System
-	storage         storage.Provider
-	controller      *controller.Controller
+	utilities  *utility.Map
+	ess        *ess.Map
+	storage    storage.Database
+	controller *controller.Controller
 
 	listenAddr             string
 	devProxy               string
@@ -48,20 +52,22 @@ type Server struct {
 	tokenValidator         TokenValidator
 	httpServer             *http.Server
 
-	adminEmails  []string
-	oidcAudience string
-	bypassAuth   bool
+	adminEmails   []string
+	oidcAudience  string
+	bypassAuth    bool
+	singleSite    bool
+	encryptionKey string
 }
 
 // Configured initializes the Server with dependencies.
 // It uses lflag to register command-line flags for configuration.
-func Configured(u utility.Provider, e ess.System, s storage.Provider) *Server {
+func Configured(u *utility.Map, e *ess.Map, s storage.Database) *Server {
 	srv := &Server{
-		utilityProvider: u,
-		essSystem:       e,
-		storage:         s,
-		controller:      controller.NewController(),
-		tokenValidator:  idtoken.Validate,
+		utilities:      u,
+		ess:            e,
+		storage:        s,
+		controller:     controller.NewController(),
+		tokenValidator: idtoken.Validate,
 	}
 
 	// get the port from PORT when running in cloud run
@@ -77,6 +83,8 @@ func Configured(u utility.Provider, e ess.System, s storage.Provider) *Server {
 	adminEmails := lflag.String("admin-emails", "", "comma-delimited list of email addresses allowed to update settings via IAP")
 	oidcAudience := lflag.String("oidc-audience", "", "token to use for id tokens audience to validate")
 	updateSpecificAudience := lflag.String("update-specific-audience", "", "audience to validate for /api/update")
+	singleSite := lflag.Bool("single-site", false, "Enable single-site mode (disables siteID requirement)")
+	encryptionKey := lflag.String("credentials-encryption-key", "", "Key for encrypting credentials (optional)")
 
 	lflag.Do(func() {
 		srv.listenAddr = *listenAddr
@@ -90,6 +98,8 @@ func Configured(u utility.Provider, e ess.System, s storage.Provider) *Server {
 		}
 		srv.oidcAudience = *oidcAudience
 		srv.updateSpecificAudience = *updateSpecificAudience
+		srv.singleSite = *singleSite
+		srv.encryptionKey = *encryptionKey
 
 		if *devProxy != "" && *oidcAudience == "" && *adminEmails == "" {
 			srv.bypassAuth = true
@@ -100,17 +110,22 @@ func Configured(u utility.Provider, e ess.System, s storage.Provider) *Server {
 }
 
 func (s *Server) setupHandler() http.Handler {
+	apiMux := http.NewServeMux()
+	apiMux.HandleFunc("POST /api/update", s.handleUpdate)
+	apiMux.HandleFunc("POST /api/updateSites", s.handleUpdateSites)
+	apiMux.HandleFunc("GET /api/history/prices", s.handleHistoryPrices)
+	apiMux.HandleFunc("GET /api/history/actions", s.handleHistoryActions)
+	apiMux.HandleFunc("GET /api/history/savings", s.handleHistorySavings)
+	apiMux.HandleFunc("GET /api/settings", s.handleGetSettings)
+	apiMux.HandleFunc("POST /api/settings", s.handleUpdateSettings)
+	apiMux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
+	apiMux.HandleFunc("POST /api/auth/login", s.handleLogin)
+	apiMux.HandleFunc("POST /api/auth/logout", s.handleLogout)
+	apiMux.HandleFunc("GET /api/modeling", s.handleModeling)
+	apiMux.HandleFunc("POST /api/join", s.handleJoin)
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/update", s.handleUpdate)
-	mux.HandleFunc("GET /api/history/prices", s.handleHistoryPrices)
-	mux.HandleFunc("GET /api/history/actions", s.handleHistoryActions)
-	mux.HandleFunc("GET /api/history/savings", s.handleHistorySavings)
-	mux.HandleFunc("GET /api/settings", s.handleGetSettings)
-	mux.HandleFunc("POST /api/settings", s.handleUpdateSettings)
-	mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
-	mux.HandleFunc("POST /api/auth/login", s.handleLogin)
-	mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
-	mux.HandleFunc("GET /api/modeling", s.handleModeling)
+	mux.Handle("/api/", s.authMiddleware(apiMux))
 
 	// serve the web frontend, either from the embedded filesystem or from the dev server
 	if s.devProxy != "" {
@@ -127,10 +142,16 @@ func (s *Server) setupHandler() http.Handler {
 		fileServer := http.FileServer(http.FS(distFS))
 		mux.Handle("/", s.spaHandler(distFS, fileServer))
 	}
-
 	mux.HandleFunc("/healthz", s.handleHealthz)
+	return gziphandler.GzipHandler(s.securityHeadersMiddleware(mux))
+}
 
-	return s.authMiddleware(mux)
+func (s *Server) getSiteID(r *http.Request) string {
+	if siteID, ok := r.Context().Value(siteIDContextKey).(string); ok {
+		return siteID
+	}
+	// we want to have a stack trace when this happens
+	panic("no siteID in context")
 }
 
 // Run starts the HTTP server and blocks until the context is canceled or an error occurs.
@@ -148,7 +169,7 @@ func (s *Server) Run(ctx context.Context) error {
 	errChan := make(chan error, 1)
 
 	go func() {
-		slog.InfoContext(ctx, "starting server", slog.String("addr", s.listenAddr))
+		log.Ctx(ctx).InfoContext(ctx, "starting server", slog.String("addr", s.listenAddr))
 		if err := s.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errChan <- err
 		}
@@ -158,7 +179,7 @@ func (s *Server) Run(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		// Context canceled, shut down gracefully
-		slog.InfoContext(ctx, "shutting down server")
+		log.Ctx(ctx).InfoContext(ctx, "shutting down server")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
@@ -179,20 +200,28 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) spaHandler(dir fs.FS, h http.Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Default to serving index.html for unknown paths (SPA)
 		if r.URL.Path != "/" {
 			// Check if the file exists in the filesystem
 			f, err := dir.Open(strings.TrimPrefix(r.URL.Path, "/"))
 			if err == nil {
 				f.Close()
 			} else if errors.Is(err, fs.ErrNotExist) {
+				// Don't fallback to index.html for .well-known
+				if strings.HasPrefix(r.URL.Path, "/.well-known/") {
+					http.Error(w, "not found", http.StatusNotFound)
+					return
+				}
 				// If file doesn't exist, serve index.html
 				r.URL.Path = "/"
 			} else {
-				slog.ErrorContext(r.Context(), "failed to open file", "error", err)
+				log.Ctx(r.Context()).ErrorContext(r.Context(), "failed to open file", "error", err)
 				http.Error(w, "internal server error", http.StatusInternalServerError)
 				return
 			}
 		}
+		// cache SPA files for an hour
+		w.Header().Set("Cache-Control", "public, max-age=3600")
 
 		h.ServeHTTP(w, r)
 	}

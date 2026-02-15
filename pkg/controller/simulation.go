@@ -6,25 +6,26 @@ import (
 	"math"
 	"time"
 
-	"github.com/jameshartig/autoenergy/pkg/types"
+	"github.com/jameshartig/raterudder/pkg/types"
 )
 
 // SimHour represents one hour of simulated energy state.
 type SimHour struct {
-	TS                      time.Time `json:"ts"`
-	Hour                    int       `json:"hour"`
-	NetLoadSolarKWH         float64   `json:"netLoadSolarKWH"`
-	GridChargeDollarsPerKWH float64   `json:"gridChargeDollarsPerKWH"`
-	SolarOppDollarsPerKWH   float64   `json:"solarOppDollarsPerKWH"`
-	AvgHomeLoadKWH          float64   `json:"avgHomeLoadKWH"`
-	PredictedSolarKWH       float64   `json:"predictedSolarKWH"`
-	BatteryKWH              float64   `json:"batteryKWH"`
-	BatteryCapacityKWH      float64   `json:"batteryCapacityKWH"`
-	BatteryReserveKWH       float64   `json:"batteryReserveKWH"`
-	BatteryDeficitKWH       float64   `json:"batteryDeficitKWH"`
-	TodaySolarTrend         float64   `json:"todaySolarTrend"`
-	HitCapacity             bool      `json:"hitCapacity"`
-	HitDeficit              bool      `json:"hitDeficit"`
+	TS                      time.Time   `json:"ts"`
+	Hour                    int         `json:"hour"`
+	NetLoadSolarKWH         float64     `json:"netLoadSolarKWH"`
+	GridChargeDollarsPerKWH float64     `json:"gridChargeDollarsPerKWH"`
+	SolarOppDollarsPerKWH   float64     `json:"solarOppDollarsPerKWH"`
+	AvgHomeLoadKWH          float64     `json:"avgHomeLoadKWH"`
+	PredictedSolarKWH       float64     `json:"predictedSolarKWH"`
+	BatteryKWH              float64     `json:"batteryKWH"`
+	BatteryCapacityKWH      float64     `json:"batteryCapacityKWH"`
+	BatteryReserveKWH       float64     `json:"batteryReserveKWH"`
+	BatteryDeficitKWH       float64     `json:"batteryDeficitKWH"`
+	TodaySolarTrend         float64     `json:"todaySolarTrend"`
+	HitCapacity             bool        `json:"hitCapacity"`
+	HitDeficit              bool        `json:"hitDeficit"`
+	Price                   types.Price `json:"price"`
 }
 
 // SimulateState builds a 24-hour simulation of energy state and prices.
@@ -52,14 +53,20 @@ func (c *Controller) SimulateState(
 	simData := make([]SimHour, 0, 24)
 
 	// helper to find price at time t
-	getPriceAt := func(t time.Time) float64 {
+	getPriceAt := func(t time.Time) types.Price {
 		for _, fp := range futurePrices {
 			if fp.TSStart.Truncate(time.Hour).Equal(t.Truncate(time.Hour)) {
-				return fp.DollarsPerKWH
+				return fp
 			}
 		}
-		// default to current price if no future price found
-		return currentPrice.DollarsPerKWH
+		// default to current price if no future price found but adjust it to fit
+		// the timestamp
+		return types.Price{
+			TSStart: t,
+			// TODO: should we assume 1 hour?
+			TSEnd:         t.Add(1 * time.Hour),
+			DollarsPerKWH: currentPrice.DollarsPerKWH,
+		}
 	}
 
 	// build our simulation timeline
@@ -72,7 +79,7 @@ func (c *Controller) SimulateState(
 	for i := 0; i < 24; i++ {
 		h := simTime.Hour()
 		price := getPriceAt(simTime)
-		solarOppCost := price
+		solarOppCost := price.DollarsPerKWH
 		if !settings.GridExportSolar {
 			solarOppCost = 0
 		}
@@ -124,7 +131,7 @@ func (c *Controller) SimulateState(
 			TS:                      simTime,
 			Hour:                    h,
 			NetLoadSolarKWH:         netLoadSolar,
-			GridChargeDollarsPerKWH: price + settings.AdditionalFeesDollarsPerKWH,
+			GridChargeDollarsPerKWH: price.DollarsPerKWH + settings.AdditionalFeesDollarsPerKWH,
 			SolarOppDollarsPerKWH:   solarOppCost,
 			AvgHomeLoadKWH:          profile.avgHomeLoadKWH,
 			PredictedSolarKWH:       predictedAvgSolar,
@@ -135,6 +142,7 @@ func (c *Controller) SimulateState(
 			TodaySolarTrend:         currentSolarTrend,
 			HitCapacity:             hitCapacity,
 			HitDeficit:              hitDeficit,
+			Price:                   price,
 		})
 		simTime = simTime.Add(1 * time.Hour)
 	}

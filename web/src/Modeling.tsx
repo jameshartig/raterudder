@@ -162,29 +162,39 @@ function ModelingChart({ data, config }: { data: ProcessedModelingHour[]; config
     );
 }
 
-export default function Modeling() {
+const Modeling: React.FC<{ siteID?: string }> = ({ siteID }) => {
     const [data, setData] = useState<ProcessedModelingHour[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        fetchModeling()
-            .then((res) => {
+        const loadData = async () => {
+            try {
+                setLoading(true);
+                const modelingData = await fetchModeling(siteID);
                 // Pre-process data
-                const processed = res.map((h) => ({
+                const processed = modelingData.map((h) => ({
                     ...h,
                     batterySOC: (h.batteryKWH / h.batteryCapacityKWH) * 100,
                     batteryReserveSOC: (h.batteryReserveKWH / h.batteryCapacityKWH) * 100,
-                    // If trend is 0, raw is 0 (avoid division by zero)
+                    // Avoid division by zero
                     rawSolarKWH: h.todaySolarTrend > 0.001
                         ? h.predictedSolarKWH / h.todaySolarTrend
                         : 0,
+                    solarTrendRatio: h.todaySolarTrend > 0 && h.todaySolarTrend !== 1.0
+                        ? h.todaySolarTrend
+                        : 0,
                 }));
                 setData(processed);
-            })
-            .catch((err) => setError(err.message))
-            .finally(() => setLoading(false));
-    }, []);
+            } catch (err: any) {
+                setError(err.message || 'Unknown error');
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        loadData();
+    }, [siteID]);
 
     if (loading) return <div className="modeling-loading">Loading simulation…</div>;
     if (error) return <div className="error">Error: {error}</div>;
@@ -209,3 +219,5 @@ export default function Modeling() {
         </div>
     );
 }
+
+export default Modeling;

@@ -3,14 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"math"
 	"math/rand"
 	"os"
 	"time"
 
-	"github.com/jameshartig/autoenergy/pkg/storage"
-	"github.com/jameshartig/autoenergy/pkg/types"
+	"github.com/jameshartig/raterudder/pkg/log"
+	"github.com/jameshartig/raterudder/pkg/storage"
+	"github.com/jameshartig/raterudder/pkg/types"
 	"github.com/levenlabs/go-lflag"
 )
 
@@ -21,7 +21,7 @@ func main() {
 
 	ctx := context.Background()
 
-	slog.InfoContext(ctx, "seeding mock data")
+	log.Ctx(ctx).InfoContext(ctx, "seeding mock data")
 
 	// Use a new random source
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -162,14 +162,14 @@ func main() {
 
 		action.SystemStatus = stat
 
-		if err := s.InsertAction(ctx, action); err != nil {
-			slog.ErrorContext(ctx, "failed to seed action", "error", err)
+		if err := s.InsertAction(ctx, types.SiteIDNone, action); err != nil {
+			log.Ctx(ctx).ErrorContext(ctx, "failed to seed action", "error", err)
 			os.Exit(1)
 		}
 
 		// Seed Price
 		if err := s.UpsertPrice(ctx, action.CurrentPrice, types.CurrentPriceHistoryVersion); err != nil {
-			slog.ErrorContext(ctx, "failed to seed price", "error", err)
+			log.Ctx(ctx).ErrorContext(ctx, "failed to seed price", "error", err)
 			os.Exit(1)
 		}
 
@@ -205,8 +205,8 @@ func main() {
 			eStat.GridExportKWH = -stat.GridKW * 1.0
 		}
 
-		if err := s.UpsertEnergyHistory(ctx, eStat, types.CurrentEnergyStatsVersion); err != nil {
-			slog.ErrorContext(ctx, "failed to seed energy stats", "error", err)
+		if err := s.UpsertEnergyHistory(ctx, types.SiteIDNone, eStat, types.CurrentEnergyStatsVersion); err != nil {
+			log.Ctx(ctx).ErrorContext(ctx, "failed to seed energy stats", "error", err)
 			os.Exit(1)
 		}
 
@@ -214,5 +214,5 @@ func main() {
 			t.Format(time.Kitchen), action.Description, action.CurrentPrice.DollarsPerKWH, currentSOC)
 	}
 
-	slog.Info("seeded mock data successfully")
+	log.Ctx(ctx).InfoContext(ctx, "seeded mock data successfully")
 }

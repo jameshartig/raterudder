@@ -9,8 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jameshartig/autoenergy/pkg/controller"
-	"github.com/jameshartig/autoenergy/pkg/types"
+	"github.com/jameshartig/raterudder/pkg/controller"
+	"github.com/jameshartig/raterudder/pkg/ess"
+	"github.com/jameshartig/raterudder/pkg/types"
+	"github.com/jameshartig/raterudder/pkg/utility"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -27,13 +29,13 @@ type historyMockStorage struct {
 	lastEnd   time.Time
 }
 
-func (m *historyMockStorage) GetActionHistory(ctx context.Context, start, end time.Time) ([]types.Action, error) {
+func (m *historyMockStorage) GetActionHistory(ctx context.Context, siteID string, start, end time.Time) ([]types.Action, error) {
 	m.lastStart = start
 	m.lastEnd = end
 	return m.actions, m.err
 }
 
-func (m *historyMockStorage) GetPriceHistory(ctx context.Context, start, end time.Time) ([]types.Price, error) {
+func (m *historyMockStorage) GetPriceHistory(ctx context.Context, provider string, start, end time.Time) ([]types.Price, error) {
 	m.lastStart = start
 	m.lastEnd = end
 	return m.prices, m.err
@@ -45,18 +47,27 @@ func TestHistory(t *testing.T) {
 	// But we need to use historyMockStorage to override methods.
 	mockSBase := &mockStorage{}
 	// We need to set expectations on the base mock if it's called
-	mockSBase.On("GetSettings", mock.Anything).Return(types.Settings{}, types.CurrentSettingsVersion, nil)
+	mockSBase.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{UtilityProvider: "comed_hourly"}, types.CurrentSettingsVersion, nil)
 
 	mockS := &historyMockStorage{
 		mockStorage: mockSBase,
 	}
 
+	mockE := &mockESS{}
+	mockP := ess.NewMap()
+	mockP.SetSystem(types.SiteIDNone, mockE)
+
+	mockUMap := utility.NewMap()
+	mockUMap.SetProvider("comed_hourly", mockU)
+
 	srv := &Server{
-		utilityProvider: mockU,
-		essSystem:       &mockESS{},
-		storage:         mockS,
-		listenAddr:      ":8080",
-		controller:      controller.NewController(),
+		utilities:  mockUMap,
+		ess:        mockP,
+		storage:    mockS,
+		listenAddr: ":8080",
+		controller: controller.NewController(),
+		bypassAuth: true,
+		singleSite: true,
 	}
 
 	handler := srv.setupHandler()
@@ -163,6 +174,7 @@ func TestHistory(t *testing.T) {
 		assert.Equal(t, expectedActions[0].Description, actions[0].Description)
 
 		// Verify storage call
+		// GetActionHistory should be called with siteID as well
 		assert.WithinDuration(t, start, mockS.lastStart, time.Second)
 		assert.WithinDuration(t, end, mockS.lastEnd, time.Second)
 	})
@@ -222,7 +234,7 @@ func TestHistory(t *testing.T) {
 
 		resp := w.Result()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
-		assert.Equal(t, "public, max-age=60", resp.Header.Get("Cache-Control"))
+		assert.Equal(t, "private, max-age=60", resp.Header.Get("Cache-Control"))
 	})
 
 	t.Run("Cache Control Past", func(t *testing.T) {
@@ -242,6 +254,6 @@ func TestHistory(t *testing.T) {
 
 		resp := w.Result()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
-		assert.Equal(t, "public, max-age=86400", resp.Header.Get("Cache-Control"))
+		assert.Equal(t, "private, max-age=86400", resp.Header.Get("Cache-Control"))
 	})
 }

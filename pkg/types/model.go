@@ -4,6 +4,7 @@ import "time"
 
 // Price represents the cost of electricity in a time interval.
 type Price struct {
+	Provider      string    `json:"provider"`
 	TSStart       time.Time `json:"tsStart"`
 	TSEnd         time.Time `json:"tsEnd"`
 	DollarsPerKWH float64   `json:"dollarsPerKWH"`
@@ -13,27 +14,60 @@ type Price struct {
 const (
 	CurrentEnergyStatsVersion  = 1
 	CurrentPriceHistoryVersion = 1
+
+	SiteIDNone = "none"
 )
 
-// ActionType represents the type of action taken by the system.
-type ActionType string
+// Site represents a household or location that has a battery and solar panels.
+type Site struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	InviteCode  string            `json:"inviteCode"`
+	Permissions []SitePermissions `json:"permissions"`
+}
+
+// SitePermissions represents the permissions for a user on a site.
+type SitePermissions struct {
+	UserID string `json:"userID"`
+}
+
+// User represents a user of the system.
+type User struct {
+	ID      string   `json:"id"`
+	Email   string   `json:"email"`
+	SiteIDs []string `json:"siteIDs"`
+	Admin   bool     `json:"-"`
+	// TODO: add global admin field?
+}
+
+// ActionReason represents the type of action taken by the system.
+type ActionReason string
 
 const (
-	ActionTypeCharge    ActionType = "charge"
-	ActionTypeDischarge ActionType = "discharge"
-	ActionTypeIdle      ActionType = "idle"
+	ActionReasonAlwaysChargeBelowThreshold ActionReason = "alwaysChargeBelowThreshold"
+	ActionReasonMissingBattery             ActionReason = "missingBattery"
+	ActionReasonDeficitChargeNow           ActionReason = "deficitCharge"
+	ActionReasonArbitrageChargeNow         ActionReason = "arbitrageCharge"
+	ActionReasonDischargeBeforeCapacityNow ActionReason = "dischargeBeforeCapacity"
+	ActionReasonDeficitSave                ActionReason = "deficitSave"
+	ActionReasonArbitrageSave              ActionReason = "dischargeAtPeak"
+	ActionReasonNoChange                   ActionReason = "sufficientBattery"
 )
 
 // Action represents a control decision made by the system.
 type Action struct {
-	Timestamp    time.Time    `json:"timestamp"`
-	BatteryMode  BatteryMode  `json:"batteryMode"`
-	SolarMode    SolarMode    `json:"solarMode"`
-	Description  string       `json:"description"`
-	CurrentPrice Price        `json:"currentPrice"`
-	SystemStatus SystemStatus `json:"systemStatus"`
-	DryRun       bool         `json:"dryRun,omitempty"`
-	Fault        bool         `json:"fault,omitempty"`
+	Timestamp     time.Time    `json:"timestamp"`
+	BatteryMode   BatteryMode  `json:"batteryMode"`
+	SolarMode     SolarMode    `json:"solarMode"`
+	Reason        ActionReason `json:"reason"`
+	Description   string       `json:"description"`
+	CurrentPrice  Price        `json:"currentPrice"`
+	SystemStatus  SystemStatus `json:"systemStatus"`
+	FuturePrice   Price        `json:"futurePrice"`
+	HitDeficitAt  time.Time    `json:"deficitAt"`
+	HitCapacityAt time.Time    `json:"capacityAt"`
+	DryRun        bool         `json:"dryRun,omitempty"`
+	Fault         bool         `json:"fault,omitempty"`
 }
 
 // EnergyStats represents aggregated energy statistics for an hourly period.
@@ -93,7 +127,7 @@ type SystemStatus struct {
 	Alarms                []SystemAlarm `json:"alarms"`
 }
 
-// 0: standby, 1: charge, -1: discharge
+// BatteryMode represents the mode of the battery.
 type BatteryMode int
 
 const (
@@ -104,6 +138,7 @@ const (
 	BatteryModeLoad        BatteryMode = -1
 )
 
+// SolarMode represents the mode of the solar panels.
 type SolarMode int
 
 const (
@@ -112,9 +147,3 @@ const (
 	SolarModeAny      SolarMode = 2
 	// TODO: SolarModeExportOnly SolarMode = 2
 )
-
-type PowerControlConfig struct {
-	GridChargeEnabled bool    `json:"gridChargeEnabled"`
-	GridExportEnabled bool    `json:"gridExportEnabled"`
-	GridExportMax     float64 `json:"gridExportMax"`
-}

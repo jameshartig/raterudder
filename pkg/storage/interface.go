@@ -2,29 +2,42 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"time"
 
-	"github.com/jameshartig/autoenergy/pkg/types"
+	"github.com/jameshartig/raterudder/pkg/types"
 )
 
-// Provider defines the interface for persisting data and retrieving settings.
-type Provider interface {
+var (
+	ErrUserNotFound = errors.New("user not found")
+)
+
+// Database defines the interface for persisting data and retrieving settings.
+type Database interface {
 	// Settings
-	GetSettings(ctx context.Context) (types.Settings, int, error)
-	SetSettings(ctx context.Context, settings types.Settings, version int) error
+	GetSettings(ctx context.Context, siteID string) (types.Settings, int, error)
+	SetSettings(ctx context.Context, siteID string, settings types.Settings, version int) error
 
 	// Data Persistence
 	// UpsertPrice adds or updates a price record.
 	UpsertPrice(ctx context.Context, price types.Price, version int) error
-	InsertAction(ctx context.Context, action types.Action) error
-	UpsertEnergyHistory(ctx context.Context, stats types.EnergyStats, version int) error
+	InsertAction(ctx context.Context, siteID string, action types.Action) error
+	UpsertEnergyHistory(ctx context.Context, siteID string, stats types.EnergyStats, version int) error
 
 	// History
-	GetPriceHistory(ctx context.Context, start, end time.Time) ([]types.Price, error)
-	GetActionHistory(ctx context.Context, start, end time.Time) ([]types.Action, error)
-	GetEnergyHistory(ctx context.Context, start, end time.Time) ([]types.EnergyStats, error)
-	GetLatestEnergyHistoryTime(ctx context.Context) (time.Time, int, error)
-	GetLatestPriceHistoryTime(ctx context.Context) (time.Time, int, error)
+	GetPriceHistory(ctx context.Context, provider string, start, end time.Time) ([]types.Price, error)
+	GetActionHistory(ctx context.Context, siteID string, start, end time.Time) ([]types.Action, error)
+	GetEnergyHistory(ctx context.Context, siteID string, start, end time.Time) ([]types.EnergyStats, error)
+	GetLatestEnergyHistoryTime(ctx context.Context, siteID string) (time.Time, int, error)
+	GetLatestPriceHistoryTime(ctx context.Context, provider string) (time.Time, int, error)
+
+	// Sites & Users
+	GetSite(ctx context.Context, siteID string) (types.Site, error)
+	ListSites(ctx context.Context) ([]types.Site, error)
+	UpdateSite(ctx context.Context, siteID string, site types.Site) error
+	GetUser(ctx context.Context, userID string) (types.User, error)
+	CreateUser(ctx context.Context, user types.User) error
+	UpdateUser(ctx context.Context, user types.User) error
 
 	// Lifecycle
 	Close() error
