@@ -49,7 +49,7 @@ resource "google_cloudbuild_trigger" "github" {
   service_account = google_service_account.raterudder_build.id
 
   repository_event_config {
-    repository = "projects/${var.project_id}/locations/us-central1/connections/github-jameshartig/repositories/jameshartig-raterudder"
+    repository = "projects/${var.project_id}/locations/us-central1/connections/github-raterudder/repositories/raterudder-raterudder"
     push {
       branch = "^(main|wip)$"
     }
@@ -172,6 +172,11 @@ resource "google_cloud_run_v2_service" "raterudder" {
       env {
         name  = "SINGLE_SITE"
         value = "false"
+      }
+
+      env {
+        name  = "STORAGE_PROVIDER"
+        value = "firestore"
       }
 
       env {

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { joinSite } from './api';
+import { Link } from 'wouter';
+import { joinSite } from '../api';
 import './JoinPage.css';
 
 interface JoinPageProps {
@@ -66,6 +67,12 @@ const JoinPage: React.FC<JoinPageProps> = ({ onJoinSuccess }) => {
                     </div>
 
                     {error && <div className="join-error">{error}</div>}
+
+                    <p className="join-consent">
+                        By joining, you agree to our{' '}
+                        <Link to="/terms">Terms of Service</Link> and{' '}
+                        <Link to="/privacy">Privacy Policy</Link>.
+                    </p>
 
                     <button
                         type="submit"

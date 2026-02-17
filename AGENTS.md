@@ -23,3 +23,4 @@ Code Style
 - Struct fields should have json Go tags with their name headless camelcase
 - Tests should live in a file with the same name as the file they test, with suffix _test
 - Tests should be named Test<FunctionName> and all related tests should live as subtests in that function with t.Run()
+- Use assert.ErrorContains for error messages

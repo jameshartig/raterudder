@@ -1,0 +1,224 @@
+/* ============================================
+   Header
+   ============================================ */
+
+.raterudder-header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  height: 64px;
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  backdrop-filter: blur(12px);
+  background: rgba(255, 255, 255, 0.95);
+  width: 100%;
+}
+
+.header-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 100%;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.brand-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  text-decoration: none;
+  margin-right: 2rem;
+  letter-spacing: -0.02em;
+}
+
+.header-logo-img {
+  height: 32px;
+  width: auto;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  /* Allows it to take up available space */
+}
+
+.site-selector-header {
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.site-selector-header:hover {
+  border-color: var(--border-focus);
+}
+
+.site-name-header {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-left: 0.5rem;
+}
+
+.header-nav {
+  flex: 2;
+  /* Center navigation */
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.nav-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+}
+
+.nav-link:hover {
+  color: var(--primary);
+  background: var(--surface-subtle);
+}
+
+.header-right {
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.login-link,
+.logout-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 600;
+  background: none;
+  border: 1px solid var(--border);
+  padding: 0.4rem 1.25rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+.login-link:hover,
+.logout-link:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--surface-subtle);
+}
+
+/* Hamburger */
+.mobile-menu-toggle {
+  display: none;
+  flex-direction: column;
+  justify-content: space-around;
+  width: 26px;
+  height: 20px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  z-index: 1001;
+}
+
+.hamburger-line {
+  width: 100%;
+  height: 2px;
+  background-color: var(--text-secondary);
+  border-radius: 2px;
+  transition: all 0.2s ease;
+}
+
+.header-content {
+  display: contents;
+}
+
+/* ============================================
+   Mobile
+   ============================================ */
+@media (max-width: 768px) {
+  .raterudder-header {
+    height: 60px;
+    z-index: 1100;
+  }
+
+  /* CRITICAL FIX: Override position: relative from content-container so that absolute children position relative to the header (sticky) instead */
+  .header-inner {
+    position: static;
+  }
+
+  .brand-logo {
+    margin-right: 1rem;
+    font-size: 1.1rem;
+  }
+
+  .header-left,
+  .header-nav,
+  .header-right {
+    min-width: 0;
+  }
+
+  .mobile-menu-toggle {
+    display: flex;
+    margin-left: auto;
+  }
+
+  /* When menu is open, we need to show the dropdown */
+  .raterudder-header.logged-in .header-content {
+    display: none;
+    flex-direction: column;
+    position: absolute;
+    top: 60px;
+    left: 0;
+    right: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 1rem;
+    box-shadow: var(--shadow-lg);
+    z-index: 1000;
+  }
+
+  .raterudder-header.logged-in .header-content.open {
+    display: flex;
+  }
+
+  .header-nav {
+    flex-direction: column;
+    width: 100%;
+    margin-bottom: 1rem;
+  }
+
+  .header-right {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .nav-link {
+    text-align: center;
+    width: 100%;
+    display: block;
+    box-sizing: border-box;
+  }
+
+  .logout-link,
+  .login-link {
+    width: 100%;
+    text-align: center;
+    display: block;
+  }
+}

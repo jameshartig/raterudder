@@ -2,18 +2,19 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/jameshartig/raterudder/pkg/controller"
-
 	"github.com/jameshartig/raterudder/pkg/ess"
 	"github.com/jameshartig/raterudder/pkg/types"
 	"github.com/jameshartig/raterudder/pkg/utility"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSettings(t *testing.T) {
@@ -68,8 +69,11 @@ func TestSettings(t *testing.T) {
 
 		srv.handleGetSettings(w, req)
 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-		// Check body contains verifiable setting
-		assert.Contains(t, w.Body.String(), `"minBatterySOC":10`)
+
+		var settings types.Settings
+		err := json.NewDecoder(w.Body).Decode(&settings)
+		require.NoError(t, err)
+		assert.Equal(t, 10.0, settings.MinBatterySOC)
 	})
 
 	t.Run("Update Settings - Disabled (No Admin)", func(t *testing.T) {
@@ -144,42 +148,6 @@ func TestSettings(t *testing.T) {
 		mockS.AssertExpectations(t)
 	})
 
-	t.Run("Auth Status - Is Admin", func(t *testing.T) {
-		srv := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
-		mockS.On("GetUser", mock.Anything, "admin@example.com").Return(types.User{
-			ID:      "admin@example.com",
-			SiteIDs: []string{"site1"},
-		}, nil).Maybe() // Maybe because logic might vary
-
-		req := httptest.NewRequest("GET", "/api/auth/status", nil)
-		req = withUser(req, "admin@example.com", true)
-		w := httptest.NewRecorder()
-
-		srv.handleAuthStatus(w, req)
-		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-		assert.Contains(t, w.Body.String(), `"isAdmin":true`)
-		assert.Contains(t, w.Body.String(), `"loggedIn":true`)
-	})
-
-	t.Run("Auth Status - Not Admin (Wrong Email)", func(t *testing.T) {
-		srv := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
-
-		// Expect GetUser to return valid user
-		mockS.On("GetUser", mock.Anything, "user@example.com").Return(types.User{
-			ID:      "user@example.com",
-			SiteIDs: []string{"site1"},
-		}, nil).Maybe()
-
-		req := httptest.NewRequest("GET", "/api/auth/status", nil)
-		req = withUser(req, "user@example.com", false)
-		w := httptest.NewRecorder()
-
-		srv.handleAuthStatus(w, req)
-		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-		assert.Contains(t, w.Body.String(), `"isAdmin":false`)
-		assert.Contains(t, w.Body.String(), `"loggedIn":true`)
-	})
-
 	t.Run("Auth Status - Not Logged In", func(t *testing.T) {
 		srv := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
 
@@ -188,7 +156,10 @@ func TestSettings(t *testing.T) {
 
 		srv.handleAuthStatus(w, req)
 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-		assert.Contains(t, w.Body.String(), `"isAdmin":false`)
-		assert.Contains(t, w.Body.String(), `"loggedIn":false`)
+
+		var resp authStatusResponse
+		err := json.NewDecoder(w.Body).Decode(&resp)
+		require.NoError(t, err)
+		assert.False(t, resp.LoggedIn)
 	})
 }

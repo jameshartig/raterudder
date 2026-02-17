@@ -1,10 +1,10 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import App from './App';
-import { fetchActions, fetchAuthStatus, fetchSettings, updateSettings, login, logout } from './api';
+import App from '../App';
+import { fetchActions, fetchSavings, fetchAuthStatus, fetchSettings, updateSettings, login, logout } from '../api';
 
 // Mock the API
-vi.mock('./api', () => ({
+vi.mock('../api', () => ({
     fetchActions: vi.fn(),
     fetchSavings: vi.fn(),
     fetchAuthStatus: vi.fn(),
@@ -42,6 +42,26 @@ describe('App & Settings', () => {
         vi.resetAllMocks();
         // Default mocks
         (fetchActions as any).mockResolvedValue([]);
+        (fetchSavings as any).mockResolvedValue({
+            batterySavings: 0,
+            solarSavings: 0,
+            cost: 0,
+            credit: 0,
+            avoidedCost: 0,
+            chargingCost: 0,
+            solarGenerated: 0,
+            gridImported: 0,
+            gridExported: 0,
+            homeUsed: 0,
+            batteryUsed: 0,
+        });
+        (fetchAuthStatus as any).mockResolvedValue({
+            loggedIn: true,
+            authRequired: true,
+            clientID: 'test-client-id',
+            email: 'user@example.com',
+            siteIDs: ['site1']
+        });
         (fetchSettings as any).mockResolvedValue({
             dryRun: false,
             pause: false,
@@ -60,7 +80,6 @@ describe('App & Settings', () => {
     });
 
     const defaultAuthStatus = {
-        isAdmin: false,
         loggedIn: true,
         authRequired: true,
         clientID: 'test-client-id',
@@ -127,36 +146,8 @@ describe('App & Settings', () => {
         });
     });
 
-    it('shows settings link when not admin', async () => {
-        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: false });
-
-        render(<App />);
-        fireEvent.click(screen.getByText('Login'));
-
-        await waitFor(() => {
-            expect(screen.getByText('Settings')).toBeInTheDocument();
-        });
-    });
-
-    it('settings page is read-only when not admin', async () => {
-        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: false });
-        render(<App />);
-        fireEvent.click(screen.getByText('Login'));
-
-        // Navigate
-        await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
-        fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
-
-        // Check button
-        await waitFor(() => {
-            const btn = screen.getByText('Read Only');
-            expect(btn).toBeInTheDocument();
-            expect(btn).toBeDisabled();
-        });
-    });
-
-    it('shows settings link when admin', async () => {
-        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: true });
+    it('shows settings link when logged in', async () => {
+        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
 
         render(<App />);
         fireEvent.click(screen.getByText('Login'));
@@ -167,7 +158,7 @@ describe('App & Settings', () => {
     });
 
     it('navigates to settings and loads data', async () => {
-        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: true });
+        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
 
         render(<App />);
         fireEvent.click(screen.getByText('Login'));
@@ -188,7 +179,7 @@ describe('App & Settings', () => {
     });
 
     it('can update settings', async () => {
-         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: true });
+         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
          render(<App />);
          fireEvent.click(screen.getByText('Login'));
 
@@ -217,7 +208,7 @@ describe('App & Settings', () => {
     });
 
     it('can toggle pause setting', async () => {
-         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: true });
+         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
          render(<App />);
          fireEvent.click(screen.getByText('Login'));
 
@@ -246,7 +237,7 @@ describe('App & Settings', () => {
     });
 
     it('renders solar settings inputs on settings page', async () => {
-        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: true });
+        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
         render(<App />);
         fireEvent.click(screen.getByText('Login'));
 
@@ -262,7 +253,7 @@ describe('App & Settings', () => {
     });
 
     it('can update solar bell curve multiplier', async () => {
-        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: true });
+        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
         render(<App />);
         fireEvent.click(screen.getByText('Login'));
 
@@ -299,7 +290,7 @@ describe('App & Settings', () => {
             minDeficitPriceDifferenceDollarsPerKWH: 0.02,
             utilityProvider: 'comed_hourly',
         });
-        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: true });
+        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
         render(<App />);
         fireEvent.click(screen.getByText('Login'));
 
@@ -327,7 +318,7 @@ describe('App & Settings', () => {
             minDeficitPriceDifferenceDollarsPerKWH: 0.02,
             utilityProvider: 'comed_hourly',
         });
-        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus, isAdmin: true });
+        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
         render(<App />);
         fireEvent.click(screen.getByText('Login'));
 

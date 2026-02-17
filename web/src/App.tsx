@@ -1,17 +1,20 @@
 
-
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { GoogleOAuthProvider } from '@react-oauth/google';
-import ActionList from './ActionList';
-import Settings from './Settings';
-import Modeling from './Modeling';
-import LandingPage from './LandingPage';
-import LoginPage from './LoginPage';
-import JoinPage from './JoinPage';
-import Header from './Header'; // Renamed import
-import './App.css';
 import React, { useEffect, useState } from 'react';
+import { Route, Switch, Redirect, useLocation, Router } from 'wouter';
+import { GoogleOAuthProvider } from '@react-oauth/google';
+import Header from './components/Header';
+import Footer from './components/Footer';
+import './App.css';
 import { fetchAuthStatus, login, logout } from './api';
+
+import LandingPage from './pages/LandingPage';
+import Dashboard from './pages/Dashboard';
+import Settings from './pages/Settings';
+import Forecast from './pages/Forecast';
+import LoginPage from './pages/LoginPage';
+import JoinPage from './pages/JoinPage';
+import PrivacyPolicy from './pages/PrivacyPolicy';
+import TermsOfService from './pages/TermsOfService';
 
 // Protected Route Wrapper
 const ProtectedRoute = ({ children, loggedIn, loading }: { children: React.ReactElement, loggedIn: boolean, loading: boolean }) => {
@@ -22,15 +25,14 @@ const ProtectedRoute = ({ children, loggedIn, loading }: { children: React.React
 
     if (!loggedIn) {
          // Redirect them to the login page, but save the current location they were trying to go to
-        const location = useLocation();
-        return <Navigate to="/login" state={{ from: location }} replace />;
+        const [location] = useLocation();
+        return <Redirect to={`/login?from=${encodeURIComponent(location)}`} replace />;
     }
 
     return children;
 };
 
 function AppContent() {
-    const [isAdmin, setIsAdmin] = useState(false);
     const [authRequired, setAuthRequired] = useState(false);
     const [loggedIn, setLoggedIn] = useState(false);
     const [clientID, setClientID] = useState("");
@@ -40,13 +42,12 @@ function AppContent() {
     const [hasAttemptedFetch, setHasAttemptedFetch] = useState(false);
 
     // const location = useLocation();
-    const navigate = useNavigate();
+    const [, navigate] = useLocation();
 
     const checkStatus = (redirectOnLogin = false) => {
         setLoading(true);
         fetchAuthStatus()
             .then(status => {
-                setIsAdmin(status.isAdmin);
                 setAuthRequired(status.authRequired);
                 setLoggedIn(status.loggedIn);
                 setClientID(status.clientID);
@@ -73,16 +74,17 @@ function AppContent() {
             });
     };
 
-    const location = useLocation();
+    const [location] = useLocation();
+    const isHome = location === '/';
 
     useEffect(() => {
-        if (location.pathname === '/') {
+        if (isHome) {
             setLoading(false);
             return;
         }
         setLoading(true);
         checkStatus();
-    }, [location.pathname]);
+    }, [location, isHome]);
 
     const handleLoginSuccess = async (credentialResponse: any) => {
         try {
@@ -107,25 +109,11 @@ function AppContent() {
         }
     };
 
-     // Wrapper to provide GoogleOAuth context only when we have a ClientID
-     const AuthWrapper = ({ children }: { children: React.ReactNode }) => {
-        if (clientID) {
-            return (
-                <GoogleOAuthProvider clientId={clientID}>
-                    {children}
-                </GoogleOAuthProvider>
-            );
-        }
-        return <>{children}</>;
-    };
-
-    const isHome = location.pathname === '/';
     const showLoading = (loading || (!isHome && !hasAttemptedFetch)) && !isHome;
 
     return (
-        <AuthWrapper>
-            <div className="app-container">
-                {/* Header is always visible, but adapts based on login state */}
+        <AuthWrapper clientID={clientID}>
+            <div className={isHome ? "app-container-home" : "app-container"}>
                 <Header
                     loggedIn={loggedIn}
                     siteIDs={siteIDs}
@@ -138,56 +126,74 @@ function AppContent() {
                     {showLoading ? (
                         <div className="loading-screen">Loading...</div>
                     ) : (
-                        <Routes>
-                            <Route path="/" element={<LandingPage />} />
-                            <Route path="/login" element={
-                                loggedIn ? <Navigate to="/dashboard" replace /> :
+                        <Switch>
+                            <Route path="/" component={LandingPage} />
+                            <Route path="/privacy" component={PrivacyPolicy} />
+                            <Route path="/terms" component={TermsOfService} />
+                            <Route path="/login">
+                                {loggedIn ? <Redirect to="/dashboard" replace /> :
                                 <LoginPage
                                     onLoginSuccess={handleLoginSuccess}
                                     onLoginError={() => console.log('Login Failed')}
                                     authEnabled={authRequired}
                                     clientID={clientID}
-                                />
-                            } />
+                                />}
+                            </Route>
 
                             {/* Protected Routes */}
-                            <Route path="/dashboard" element={
+                            <Route path="/dashboard">
                                 <ProtectedRoute loggedIn={loggedIn} loading={loading}>
                                     {siteIDs.length === 0 ? (
                                         <JoinPage onJoinSuccess={() => checkStatus(true)} />
                                     ) : (
-                                        <ActionList siteID={selectedSiteID} />
+                                        <Dashboard siteID={selectedSiteID} />
                                     )}
                                 </ProtectedRoute>
-                            } />
-                            <Route path="/modeling" element={
+                            </Route>
+                            <Route path="/forecast">
                                 <ProtectedRoute loggedIn={loggedIn} loading={loading}>
                                     {siteIDs.length === 0 ? (
                                         <JoinPage onJoinSuccess={() => checkStatus(true)} />
                                     ) : (
-                                        <Modeling siteID={selectedSiteID} />
+                                        <Forecast siteID={selectedSiteID} />
                                     )}
                                 </ProtectedRoute>
-                            } />
-                            <Route path="/settings" element={
+                            </Route>
+                            <Route path="/settings">
                                 <ProtectedRoute loggedIn={loggedIn} loading={loading}>
                                     {siteIDs.length === 0 ? (
                                         <JoinPage onJoinSuccess={() => checkStatus(true)} />
                                     ) : (
-                                        <Settings isAdmin={isAdmin} siteID={selectedSiteID} />
+                                        <Settings siteID={selectedSiteID} />
                                     )}
                                 </ProtectedRoute>
-                            } />
+                            </Route>
 
                             {/* Fallback */}
-                            <Route path="*" element={<Navigate to="/" replace />} />
-                        </Routes>
+                            <Route>
+                                <Redirect to="/" replace />
+                            </Route>
+                        </Switch>
                     )}
                 </main>
+
+                <Footer />
             </div>
         </AuthWrapper>
     );
 }
+
+// Wrapper to provide GoogleOAuth context only when we have a ClientID
+const AuthWrapper = ({ children, clientID }: { children: React.ReactNode, clientID: string }) => {
+    if (clientID) {
+        return (
+            <GoogleOAuthProvider clientId={clientID}>
+                {children}
+            </GoogleOAuthProvider>
+        );
+    }
+    return <>{children}</>;
+};
 
 function App() {
   return (

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { fetchModeling } from './api';
-import type { ModelingHour } from './api';
+import { fetchModeling } from '../api';
+import type { ModelingHour } from '../api';
 import {
     ResponsiveContainer,
     AreaChart,
@@ -12,7 +12,7 @@ import {
     ReferenceLine,
     Line,
 } from 'recharts';
-import './Modeling.css';
+import './Forecast.css';
 
 type ChartConfig = {
     title: string;
@@ -71,17 +71,17 @@ interface ProcessedModelingHour extends ModelingHour {
     rawSolarKWH: number;
 }
 
-function ModelingChart({ data, config }: { data: ProcessedModelingHour[]; config: ChartConfig }) {
+function ForecastChart({ data, config, isMobile }: { data: ProcessedModelingHour[]; config: ChartConfig; isMobile: boolean }) {
     // Compute reference value if applicable
     const refValue = config.referenceLine
         ? (data[0]?.[config.referenceLine.dataKey as keyof ProcessedModelingHour] as number)
         : undefined;
 
     return (
-        <div className="modeling-chart-card">
+        <div className="forecast-chart-card">
             <h3>{config.title}</h3>
             <ResponsiveContainer width="100%" height={200}>
-                <AreaChart data={data} syncId="modeling" margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                <AreaChart data={data} syncId="forecast" margin={{ top: 5, right: isMobile ? 0 : 20, left: 0, bottom: 5 }}>
                     <defs>
                         <linearGradient id={config.gradientId} x1="0" y1="0" x2="0" y2="1">
                             <stop offset="5%" stopColor={config.color} stopOpacity={0.3} />
@@ -92,13 +92,13 @@ function ModelingChart({ data, config }: { data: ProcessedModelingHour[]; config
                     <XAxis
                         dataKey="ts"
                         tickFormatter={formatHour}
-                        tick={{ fontSize: 12 }}
+                        tick={{ fontSize: isMobile ? 10 : 12 }}
                         stroke="#9ca3af"
                     />
                     <YAxis
-                        tick={{ fontSize: 12 }}
+                        tick={{ fontSize: isMobile ? 10 : 12 }}
                         stroke="#9ca3af"
-                        width={50}
+                        width={isMobile ? 35 : 50}
                         tickFormatter={(v: number) =>
                             config.unit.includes('$') ? `$${v.toFixed(2)}` : v.toFixed(1)
                         }
@@ -162,10 +162,17 @@ function ModelingChart({ data, config }: { data: ProcessedModelingHour[]; config
     );
 }
 
-const Modeling: React.FC<{ siteID?: string }> = ({ siteID }) => {
+const Forecast: React.FC<{ siteID?: string }> = ({ siteID }) => {
     const [data, setData] = useState<ProcessedModelingHour[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+    useEffect(() => {
+        const handleResize = () => setIsMobile(window.innerWidth < 768);
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
 
     useEffect(() => {
         const loadData = async () => {
@@ -196,14 +203,14 @@ const Modeling: React.FC<{ siteID?: string }> = ({ siteID }) => {
         loadData();
     }, [siteID]);
 
-    if (loading) return <div className="modeling-loading">Loading simulation…</div>;
+    if (loading) return <div className="forecast-loading">Loading simulation…</div>;
     if (error) return <div className="error">Error: {error}</div>;
     if (!data.length) return <div className="no-actions">No simulation data available.</div>;
 
     return (
-        <div className="modeling-page">
+        <div className="content-container forecast-page">
             <h2>24-Hour Simulation</h2>
-            <p className="modeling-subtitle">
+            <p className="forecast-subtitle">
                 Predicted energy state starting from{' '}
                 {new Date(data[0].ts).toLocaleTimeString([], {
                     hour: 'numeric',
@@ -213,11 +220,11 @@ const Modeling: React.FC<{ siteID?: string }> = ({ siteID }) => {
             </p>
             <div className="modeling-charts">
                 {charts.map((c) => (
-                    <ModelingChart key={c.dataKey} data={data} config={c} />
+                    <ForecastChart key={c.dataKey} data={data} config={c} isMobile={isMobile} />
                 ))}
             </div>
         </div>
     );
 }
 
-export default Modeling;
+export default Forecast;

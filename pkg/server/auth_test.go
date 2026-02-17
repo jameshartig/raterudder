@@ -227,6 +227,23 @@ func TestAuthMiddleware(t *testing.T) {
 		assert.Equal(t, "site1", w.Header().Get("X-Site-ID"))
 	})
 
+	t.Run("Multi Site Mode - Logout No SiteID", func(t *testing.T) {
+		server.singleSite = false
+		w := httptest.NewRecorder()
+		cookie := &http.Cookie{Name: authTokenCookie, Value: "valid-token"}
+		req := createReq("POST", "/api/auth/logout", nil, cookie)
+
+		mockStorage.On("GetUser", mock.Anything, "user@example.com").Return(types.User{
+			ID:      "user@example.com",
+			Email:   "user@example.com",
+			SiteIDs: []string{"site1", "site2"},
+		}, nil).Once()
+
+		server.authMiddleware(testHandler).ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
 	t.Run("Update Specific Auth", func(t *testing.T) {
 		// Test special update logic
 		server.singleSite = false

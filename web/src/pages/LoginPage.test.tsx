@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import { Router } from 'wouter';
 import LoginPage from './LoginPage';
 import { describe, it, expect, vi } from 'vitest';
 
@@ -9,7 +10,7 @@ vi.mock('@react-oauth/google', () => ({
 
 describe('LoginPage Component', () => {
     it('renders correctly', () => {
-        render(<LoginPage onLoginSuccess={vi.fn()} onLoginError={vi.fn()} authEnabled={true} clientID="test-id" />);
+        render(<Router><LoginPage onLoginSuccess={vi.fn()} onLoginError={vi.fn()} authEnabled={true} clientID="test-id" /></Router>);
 
         expect(screen.getByText('Raterudder')).toBeInTheDocument();
         expect(screen.getByText('Sign in to manage your home energy.')).toBeInTheDocument();
@@ -17,7 +18,7 @@ describe('LoginPage Component', () => {
     });
 
     it('renders disabled message when auth is disabled', () => {
-        render(<LoginPage onLoginSuccess={vi.fn()} onLoginError={vi.fn()} authEnabled={false} clientID="" />);
+        render(<Router><LoginPage onLoginSuccess={vi.fn()} onLoginError={vi.fn()} authEnabled={false} clientID="" /></Router>);
         expect(screen.getByText('Authentication is currently disabled.')).toBeInTheDocument();
     });
 });

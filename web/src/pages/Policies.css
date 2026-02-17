@@ -1,0 +1,74 @@
+/* ============================================
+   Privacy & Terms Pages
+   ============================================ */
+
+.policy-container {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 0;
+  font-family: inherit;
+  line-height: 1.7;
+  color: var(--text-primary);
+  background-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.policy-container h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.75rem;
+}
+
+.policy-container h2 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+  color: var(--text-primary);
+}
+
+.policy-container h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  color: var(--text-secondary);
+}
+
+.policy-container p {
+  margin-bottom: 0.75rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.policy-container ul {
+  margin-bottom: 0.75rem;
+  padding-left: 1.5rem;
+}
+
+.policy-container li {
+  margin-bottom: 0.4rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.policy-container a {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.policy-container a:hover {
+  text-decoration: underline;
+}
+
+.last-updated {
+  font-style: italic;
+  color: var(--text-muted);
+  margin-bottom: 1.5rem;
+  font-size: 0.85rem;
+}

@@ -1,16 +1,16 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { BrowserRouter } from 'react-router-dom';
-import Modeling from './Modeling';
-import { fetchModeling } from './api';
-import type { ModelingHour } from './api';
+import { Router } from 'wouter';
+import Forecast from './Forecast';
+import { fetchModeling } from '../api';
+import type { ModelingHour } from '../api';
 
 // Mock the API
-vi.mock('./api', () => ({
+vi.mock('../api', () => ({
     fetchModeling: vi.fn(),
     fetchActions: vi.fn().mockResolvedValue([]),
     fetchSavings: vi.fn().mockResolvedValue({}),
-    fetchAuthStatus: vi.fn().mockResolvedValue({ isAdmin: false, loggedIn: false, authRequired: false, clientID: '' }),
+    fetchAuthStatus: vi.fn().mockResolvedValue({ loggedIn: false, authRequired: false, clientID: '' }),
     fetchSettings: vi.fn().mockResolvedValue({}),
     updateSettings: vi.fn(),
     login: vi.fn(),
@@ -50,16 +50,16 @@ function makeSimHours(): ModelingHour[] {
     return hours;
 }
 
-const renderModeling = () => render(<BrowserRouter><Modeling /></BrowserRouter>);
+const renderForecast = () => render(<Router><Forecast /></Router>);
 
-describe('Modeling Page', () => {
+describe('Forecast Page', () => {
     beforeEach(() => {
         vi.resetAllMocks();
     });
 
     it('shows loading state initially', () => {
         (fetchModeling as any).mockReturnValue(new Promise(() => {}));
-        renderModeling();
+        renderForecast();
         expect(screen.getByText(/Loading simulation/)).toBeInTheDocument();
     });
 
@@ -67,7 +67,7 @@ describe('Modeling Page', () => {
         const data = makeSimHours();
         (fetchModeling as any).mockResolvedValue(data);
 
-        renderModeling();
+        renderForecast();
 
         await waitFor(() => {
             expect(fetchModeling).toHaveBeenCalledTimes(1);
@@ -84,7 +84,7 @@ describe('Modeling Page', () => {
     it('shows page heading and subtitle', async () => {
         (fetchModeling as any).mockResolvedValue(makeSimHours());
 
-        renderModeling();
+        renderForecast();
 
         await waitFor(() => {
             expect(screen.getByText('24-Hour Simulation')).toBeInTheDocument();
@@ -95,7 +95,7 @@ describe('Modeling Page', () => {
     it('shows error state when fetch fails', async () => {
         (fetchModeling as any).mockRejectedValue(new Error('Network error'));
 
-        renderModeling();
+        renderForecast();
 
         await waitFor(() => {
             expect(screen.getByText(/Error: Network error/)).toBeInTheDocument();
@@ -105,7 +105,7 @@ describe('Modeling Page', () => {
     it('shows empty state when no data', async () => {
         (fetchModeling as any).mockResolvedValue([]);
 
-        renderModeling();
+        renderForecast();
 
         await waitFor(() => {
             expect(screen.getByText('No simulation data available.')).toBeInTheDocument();

@@ -1,7 +1,6 @@
-
 import React, { useEffect, useState, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { fetchActions, fetchSavings, type Action, type SavingsStats, BatteryMode, SolarMode, ActionReason } from './api';
+import { useLocation, useSearch } from 'wouter';
+import { fetchActions, fetchSavings, type Action, type SavingsStats, BatteryMode, SolarMode, ActionReason } from '../api';
 
 const getBatteryModeLabel = (mode: number) => {
     switch (mode) {
@@ -85,8 +84,17 @@ const getReasonText = (action: Action): string => {
     }
 };
 
-const ActionList: React.FC<{ siteID?: string }> = ({ siteID }) => {
-    const [searchParams, setSearchParams] = useSearchParams();
+const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
+    const [location, navigate] = useLocation();
+    const search = useSearch();
+    const searchParams = useMemo(() => new URLSearchParams(search), [search]);
+
+    const setSearchParams = (params: Record<string, string>) => {
+        const p = new URLSearchParams(search);
+        Object.entries(params).forEach(([k, v]) => p.set(k, v));
+        navigate(location + "?" + p.toString());
+    };
+
     const dateQuery = searchParams.get('date');
     const [actions, setActions] = useState<Action[]>([]);
     const [savings, setSavings] = useState<SavingsStats | null>(null);
@@ -257,7 +265,7 @@ const ActionList: React.FC<{ siteID?: string }> = ({ siteID }) => {
     }, [actions]);
 
     return (
-        <div className="action-list-container">
+        <div className="content-container action-list-container">
             <header className="header">
                 <div className="date-controls">
                     <button onClick={() => handleDateChange(-1)} disabled={loading}>&lt; Prev</button>
@@ -393,4 +401,4 @@ const ActionList: React.FC<{ siteID?: string }> = ({ siteID }) => {
     );
 };
 
-export default ActionList;
+export default Dashboard;

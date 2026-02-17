@@ -24,4 +24,4 @@ resource "google_cloud_scheduler_job" "raterudder_update_sites" {
   }
 }
 
-// TODO: separate endpoint to update utilit
+// TODO: separate endpoint to update utilities

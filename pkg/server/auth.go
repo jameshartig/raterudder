@@ -25,6 +25,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		allowNoLogin := r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/join"
 		ignoreUserNotFound := r.URL.Path == "/api/join" || r.URL.Path == "/api/auth/status"
 		isUpdatePath := r.URL.Path == "/api/update" || r.URL.Path == "/api/updateSites"
+		ignoreSiteID := r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/logout"
 
 		// extract SiteID
 		var siteID string
@@ -172,7 +173,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 					} else {
 						userFound = true
 						// User found, proceed with normal logic
-						if siteID == "" && !ignoreUserNotFound {
+						if siteID == "" && !ignoreUserNotFound && r.URL.Path != "/api/auth/logout" {
 							if len(user.SiteIDs) == 1 {
 								siteID = user.SiteIDs[0]
 							} else {
@@ -221,7 +222,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		if siteID == "" {
 			if s.singleSite {
 				siteID = types.SiteIDNone
-			} else if !allowNoLogin && !isUpdatePath {
+			} else if !allowNoLogin && !isUpdatePath && !ignoreSiteID {
 				log.Ctx(ctx).WarnContext(ctx, "siteID required", slog.String("userID", userID))
 				http.Error(w, "siteID required", http.StatusBadRequest)
 				return
@@ -307,7 +308,6 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 type authStatusResponse struct {
 	LoggedIn     bool     `json:"loggedIn"`
-	IsAdmin      bool     `json:"isAdmin"`
 	Email        string   `json:"email"`
 	AuthRequired bool     `json:"authRequired"`
 	ClientID     string   `json:"clientID"`
@@ -325,7 +325,6 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 
 	err := json.NewEncoder(w).Encode(authStatusResponse{
 		LoggedIn:     loggedIn,
-		IsAdmin:      user.Admin,
 		Email:        user.Email,
 		AuthRequired: s.oidcAudience != "",
 		ClientID:     s.oidcAudience,

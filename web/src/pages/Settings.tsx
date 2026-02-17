@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { fetchSettings, updateSettings, type Settings as SettingsType } from './api';
+import { fetchSettings, updateSettings, type Settings as SettingsType } from '../api';
 import './Settings.css';
 import SparkMD5 from 'spark-md5';
 
-const Settings = ({ isAdmin, siteID }: { isAdmin: boolean, siteID?: string }) => {
+const Settings = ({ siteID }: { siteID?: string }) => {
     const [settings, setSettings] = useState<SettingsType | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -23,14 +23,6 @@ const Settings = ({ isAdmin, siteID }: { isAdmin: boolean, siteID?: string }) =>
             setLoading(true);
             const data = await fetchSettings(siteID);
             setSettings(data);
-
-            // We don't load existing credentials for security/simplicity (they are write-only effectively or masked)
-            // But if we wanted to show them, we'd need them in the API.
-            // For now, assume fields are blank unless user wants to update them.
-            setFranklinUsername("");
-            setFranklinPassword("");
-            setFranklinGatewayID("");
-
             setError(null);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to load settings');
@@ -82,7 +74,7 @@ const Settings = ({ isAdmin, siteID }: { isAdmin: boolean, siteID?: string }) =>
     if (!settings) return <div>Error loading settings</div>;
 
     return (
-        <div className="settings-container">
+        <div className="content-container settings-container">
             <h2>Settings</h2>
             {error && <div className="error-message">{error}</div>}
             {successMessage && <div className="success-message">{successMessage}</div>}
@@ -294,8 +286,8 @@ const Settings = ({ isAdmin, siteID }: { isAdmin: boolean, siteID?: string }) =>
                     />
                 </div>
 
-                <button type="submit" className="save-button" disabled={!isAdmin}>
-                    {isAdmin ? 'Save Settings' : 'Read Only'}
+                <button type="submit" className="save-button">
+                    Save Settings
                 </button>
             </form>
         </div>

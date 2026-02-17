@@ -1,9 +1,9 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import JoinPage from './JoinPage';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import * as api from './api';
+import * as api from '../api';
 
-vi.mock('./api', () => ({
+vi.mock('../api', () => ({
     joinSite: vi.fn(),
 }));
 

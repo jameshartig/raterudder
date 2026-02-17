@@ -1,0 +1,61 @@
+/* ============================================
+   Footer
+   ============================================ */
+
+.app-footer {
+  margin-top: auto;
+  padding: 2rem 0 1.5rem;
+  text-align: center;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.footer-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.footer-links {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.footer-links a {
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.footer-links a:hover {
+  color: var(--primary);
+}
+
+.separator {
+  color: var(--border);
+}
+
+.opensource-link {
+  margin-bottom: 0.25rem;
+  color: var(--text-muted);
+}
+
+.opensource-link a {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-weight: 600;
+  transition: color 0.15s ease;
+}
+
+.opensource-link a:hover {
+  color: var(--primary);
+}
+
+.copyright {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}

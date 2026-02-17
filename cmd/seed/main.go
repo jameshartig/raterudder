@@ -103,6 +103,7 @@ func main() {
 			price = 0.01
 		}
 		action.CurrentPrice = types.Price{
+			Provider:      "comed_hourly",
 			DollarsPerKWH: price,
 			TSStart:       t,
 			TSEnd:         t.Add(time.Hour),

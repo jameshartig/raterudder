@@ -179,7 +179,6 @@ export const updateSettings = async (settings: Settings, siteID?: string, frankl
 };
 
 export interface AuthStatus {
-    isAdmin: boolean;
     loggedIn: boolean;
     email: string;
     authRequired: boolean;

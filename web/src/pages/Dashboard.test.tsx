@@ -1,12 +1,12 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import userEvent from '@testing-library/user-event';
-import ActionList from './ActionList';
-import { BrowserRouter } from 'react-router-dom';
-import { fetchActions, fetchSavings } from './api';
+import Dashboard from './Dashboard';
+import { Router } from 'wouter';
+import { fetchActions, fetchSavings } from '../api';
 
 // Mock the API
-vi.mock('./api', () => ({
+vi.mock('../api', () => ({
     fetchActions: vi.fn(),
     fetchSavings: vi.fn(),
     fetchAuthStatus: vi.fn(),
@@ -40,20 +40,20 @@ vi.mock('./api', () => ({
 
 const renderWithRouter = (component: React.ReactNode) => {
     return render(
-        <BrowserRouter>
+        <Router>
             {component}
-        </BrowserRouter>
+        </Router>
     );
 };
 
-describe('ActionList', () => {
+describe('Dashboard', () => {
     beforeEach(() => {
         vi.resetAllMocks();
     });
 
     it('renders loading state initially', () => {
         (fetchActions as any).mockReturnValueOnce(new Promise(() => {}));
-        renderWithRouter(<ActionList />);
+        renderWithRouter(<Dashboard />);
         expect(screen.getByText('Loading day...')).toBeInTheDocument();
     });
 
@@ -68,7 +68,7 @@ describe('ActionList', () => {
         }];
         (fetchActions as any).mockResolvedValue(actions);
 
-        renderWithRouter(<ActionList />);
+        renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
             // Should show reason-based text, not description
@@ -87,7 +87,7 @@ describe('ActionList', () => {
         }];
         (fetchActions as any).mockResolvedValue(actions);
 
-        renderWithRouter(<ActionList />);
+        renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
             const standbyElements = screen.getAllByText('Hold Battery');
@@ -98,7 +98,7 @@ describe('ActionList', () => {
 
     it('renders no actions message when empty', async () => {
         (fetchActions as any).mockResolvedValue([]);
-        renderWithRouter(<ActionList />);
+        renderWithRouter(<Dashboard />);
         await waitFor(() => {
             expect(screen.getByText('No actions recorded for this day.')).toBeInTheDocument();
         });
@@ -107,7 +107,7 @@ describe('ActionList', () => {
     it('navigates to previous day', async () => {
          const user = userEvent.setup();
          (fetchActions as any).mockResolvedValue([]);
-         renderWithRouter(<ActionList />);
+         renderWithRouter(<Dashboard />);
 
          await waitFor(() => {
              expect(screen.getByText(/Prev/)).toBeInTheDocument();
@@ -141,7 +141,7 @@ describe('ActionList', () => {
         }];
         (fetchActions as any).mockResolvedValue(actions);
 
-        renderWithRouter(<ActionList />);
+        renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
             expect(screen.getByText('Dry Run')).toBeInTheDocument();
@@ -158,14 +158,15 @@ describe('ActionList', () => {
         }];
         (fetchActions as any).mockResolvedValue(actions);
 
-        renderWithRouter(<ActionList />);
+        renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
             // Solar mode should be visible
             expect(screen.getByText('No Export')).toBeInTheDocument();
             // Battery mode (NoChange) should NOT be visible as a badge/tag
             // However, the label might be used elsewhere?
-            // In ActionList.tsx: <h3>{getBatteryModeLabel(action.batteryMode)}</h3> renders the label in h3.
+            // In Dashboard.tsx:
+            // <h3>{getBatteryModeLabel(action.batteryMode)}</h3> renders the label in h3.
             // But the badges are in .tags span.
 
             // Let's check specifically for the badge
@@ -203,7 +204,7 @@ describe('ActionList', () => {
         ];
         (fetchActions as any).mockResolvedValue(actions);
 
-        renderWithRouter(<ActionList />);
+        renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
             // Should show "System Fault" title/header
@@ -236,7 +237,7 @@ describe('ActionList', () => {
         ];
         (fetchActions as any).mockResolvedValue(actions);
 
-        renderWithRouter(<ActionList />);
+        renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
             // Should show "No Change" title/header
@@ -267,7 +268,7 @@ describe('ActionList', () => {
             batteryUsed: 10
         });
 
-        renderWithRouter(<ActionList />);
+        renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
             expect(screen.getByText('Daily Overview')).toBeInTheDocument();
@@ -294,7 +295,7 @@ describe('ActionList', () => {
         }];
         (fetchActions as any).mockResolvedValue(actions);
 
-        renderWithRouter(<ActionList />);
+        renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
             // Should show the templatized deficit charge text
@@ -316,7 +317,7 @@ describe('ActionList', () => {
         }];
         (fetchActions as any).mockResolvedValue(actions);
 
-        renderWithRouter(<ActionList />);
+        renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
             expect(screen.getByText('Battery is sufficient. Using battery normally.')).toBeInTheDocument();
@@ -335,7 +336,7 @@ describe('ActionList', () => {
         }];
         (fetchActions as any).mockResolvedValue(actions);
 
-        renderWithRouter(<ActionList />);
+        renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
             expect(screen.getByText(/Arbitrage opportunity.*charging at.*\$0.100/)).toBeInTheDocument();
