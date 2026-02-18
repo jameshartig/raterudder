@@ -5,8 +5,15 @@ export interface SystemAlarm {
     code: string;
 }
 
+export interface SystemStorm {
+    description: string;
+    tsStart: string;
+    tsEnd: string;
+}
+
 export interface SystemStatus {
     alarms?: SystemAlarm[];
+    storms?: SystemStorm[];
     // Add other fields from backend if useful, but alarms is what we need now
     [key: string]: any;
 }
@@ -17,9 +24,14 @@ export const ActionReason = {
     DeficitCharge: 'deficitCharge',
     ArbitrageCharge: 'arbitrageCharge',
     DischargeBeforeCapacity: 'dischargeBeforeCapacity',
-    DeficitSave: 'deficitSave',
+    DeficitSaveForPeak: 'deficitSaveForPeak',
     ArbitrageSave: 'dischargeAtPeak',
     NoChange: 'sufficientBattery',
+    EmergencyMode: 'emergencyMode',
+    HasAlarms: 'hasAlarms',
+    WaitingToCharge: 'waitingToCharge',
+    // deprecated
+    DeficitSave: 'deficitSave',
 } as const;
 
 export type ActionReason = typeof ActionReason[keyof typeof ActionReason];
@@ -34,7 +46,7 @@ export interface Action {
     timestamp: string;
     batteryMode: number;
     solarMode: number;
-    reason?: string;
+    reason?: ActionReason;
     description: string;
     currentPrice?: PriceInfo;
     futurePrice?: PriceInfo;
@@ -63,6 +75,16 @@ export const SolarMode = {
 
 export type SolarMode = typeof SolarMode[keyof typeof SolarMode];
 
+async function extractError(response: Response, fallback: string): Promise<string> {
+    try {
+        const body = await response.json();
+        if (body && typeof body.error === 'string') {
+            return body.error;
+        }
+    } catch { /* ignore parse failures */ }
+    return fallback;
+}
+
 export const fetchActions = async (start: Date, end: Date, siteID?: string): Promise<Action[]|null> => {
     const startStr = start.toISOString();
     const endStr = end.toISOString();
@@ -75,7 +97,7 @@ export const fetchActions = async (start: Date, end: Date, siteID?: string): Pro
     }
     const response = await fetch(`/api/history/actions?${query.toString()}`);
     if (!response.ok) {
-        throw new Error('Failed to fetch actions');
+        throw new Error(await extractError(response, 'Failed to fetch actions'));
     }
     return response.json();
 };
@@ -107,16 +129,20 @@ export const fetchSavings = async (start: Date, end: Date, siteID?: string): Pro
     }
     const response = await fetch(`/api/history/savings?${query.toString()}`);
     if (!response.ok) {
-        throw new Error('Failed to fetch savings');
+        throw new Error(await extractError(response, 'Failed to fetch savings'));
     }
     return response.json();
 };
+
+export interface UtilityRateOptions {
+    rateClass: string;
+    variableDeliveryRate: boolean;
+}
 
 export interface Settings {
     dryRun: boolean;
     pause: boolean;
     alwaysChargeUnderDollarsPerKWH: number;
-    additionalFeesDollarsPerKWH: number;
     minArbitrageDifferenceDollarsPerKWH: number;
     minDeficitPriceDifferenceDollarsPerKWH: number;
     minBatterySOC: number;
@@ -126,6 +152,10 @@ export interface Settings {
     solarTrendRatioMax: number;
     solarBellCurveMultiplier: number;
     utilityProvider: string;
+    utilityRateOptions: UtilityRateOptions;
+    hasCredentials: {
+        franklin: boolean;
+    };
 }
 
 export interface FranklinCredentials {
@@ -147,7 +177,7 @@ export const fetchSettings = async (siteID?: string): Promise<Settings> => {
     }
     const response = await fetch(`/api/settings?${query.toString()}`);
     if (!response.ok) {
-        throw new Error('Failed to fetch settings');
+        throw new Error(await extractError(response, 'Failed to fetch settings'));
     }
     return response.json();
 };
@@ -174,7 +204,7 @@ export const updateSettings = async (settings: Settings, siteID?: string, frankl
         body: JSON.stringify(payload),
     });
     if (!response.ok) {
-        throw new Error('Failed to update settings');
+        throw new Error(await extractError(response, 'Failed to update settings'));
     }
 };
 
@@ -189,7 +219,7 @@ export interface AuthStatus {
 export const fetchAuthStatus = async (): Promise<AuthStatus> => {
     const response = await fetch('/api/auth/status');
     if (!response.ok) {
-        throw new Error('Failed to fetch auth status');
+        throw new Error(await extractError(response, 'Failed to fetch auth status'));
     }
     return response.json();
 };
@@ -203,7 +233,7 @@ export const login = async (token: string): Promise<void> => {
         body: JSON.stringify({ token }),
     });
     if (!response.ok) {
-        throw new Error('Login failed');
+        throw new Error(await extractError(response, 'Login failed'));
     }
 };
 
@@ -212,7 +242,7 @@ export const logout = async (): Promise<void> => {
         method: 'POST',
     });
     if (!response.ok) {
-        throw new Error('Logout failed');
+        throw new Error(await extractError(response, 'Logout failed'));
     }
 };
 
@@ -237,7 +267,7 @@ export const fetchModeling = async (siteID?: string): Promise<ModelingHour[]> =>
     }
     const response = await fetch(`/api/modeling?${query.toString()}`);
     if (!response.ok) {
-        throw new Error('Failed to fetch modeling data');
+        throw new Error(await extractError(response, 'Failed to fetch modeling data'));
     }
     return response.json();
 };
@@ -251,7 +281,6 @@ export const joinSite = async (joinSiteID: string, inviteCode: string): Promise<
         body: JSON.stringify({ joinSiteID, inviteCode }),
     });
     if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text.trim() || 'Failed to join site');
+        throw new Error(await extractError(response, 'Failed to join site'));
     }
 };

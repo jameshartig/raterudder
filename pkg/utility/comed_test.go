@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/raterudder/raterudder/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,9 +30,10 @@ func TestComEd(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		c := &ComEd{
-			apiURL: ts.URL,
-			client: ts.Client(),
+		c := &BaseComEd{
+			apiURL:           ts.URL,
+			client:           ts.Client(),
+			historicalPrices: make(map[int64]types.Price),
 		}
 
 		ctx := context.Background()
@@ -56,26 +58,28 @@ func TestComEd(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		c := &ComEd{
-			apiURL: ts.URL,
-			client: ts.Client(),
+		c := &BaseComEd{
+			apiURL:           ts.URL,
+			client:           ts.Client(),
+			historicalPrices: make(map[int64]types.Price),
 		}
 
 		// First call
-		_, err := c.fetchPrices(context.Background())
+		_, err := c.getCachedCurrentPrices(context.Background())
 		require.NoError(t, err)
 		assert.Equal(t, 1, requests)
 
 		// Second call (immediate)
-		_, err = c.fetchPrices(context.Background())
+		_, err = c.getCachedCurrentPrices(context.Background())
 		require.NoError(t, err)
 		assert.Equal(t, 1, requests, "expected cached response")
 	})
 
 	t.Run("GetFuturePrices_NoPJM", func(t *testing.T) {
-		c := &ComEd{
-			apiURL: "http://example.com", // irrelevant
-			client: &http.Client{},
+		c := &BaseComEd{
+			apiURL:           "http://example.com", // irrelevant
+			client:           &http.Client{},
+			historicalPrices: make(map[int64]types.Price),
 		}
 
 		prices, err := c.GetFuturePrices(context.Background())
@@ -108,10 +112,11 @@ func TestComEd(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		c := &ComEd{
-			pjmAPIKey: "test-key",
-			pjmAPIURL: ts.URL + "/api/v1/da_hrl_lmps", // Mock server address
-			client:    ts.Client(),
+		c := &BaseComEd{
+			pjmAPIKey:        "test-key",
+			pjmAPIURL:        ts.URL + "/api/v1/da_hrl_lmps", // Mock server address
+			client:           ts.Client(),
+			historicalPrices: make(map[int64]types.Price),
 		}
 
 		prices, err := c.GetFuturePrices(context.Background())
@@ -120,7 +125,8 @@ func TestComEd(t *testing.T) {
 
 		// Verification
 		// Item 1: 00:00 EPT. 34.999970 $/MWh -> 0.03499997 $/kWh
-		assert.InDelta(t, 0.03499997, prices[0].DollarsPerKWH, 0.0000001)
+		// 0.03499997 $/kWh x (1.0124 * 1.0002 * 1.047) -> 0.0371067860737561 $/kWh
+		assert.InDelta(t, 0.0371067860737561, prices[0].DollarsPerKWH, 0.0000001)
 
 		// Time check
 		// 2026-02-02 00:00:00 EPT (America/New_York)
@@ -132,9 +138,10 @@ func TestComEd(t *testing.T) {
 	})
 
 	t.Run("Integration_RealAPI", func(t *testing.T) {
-		c := &ComEd{
-			apiURL: "https://hourlypricing.comed.com/api?",
-			client: &http.Client{Timeout: 10 * time.Second},
+		c := &BaseComEd{
+			apiURL:           "https://hourlypricing.comed.com/api?",
+			client:           &http.Client{Timeout: 10 * time.Second},
+			historicalPrices: make(map[int64]types.Price),
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -190,9 +197,10 @@ func TestComEd(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		c := &ComEd{
-			apiURL: ts.URL,
-			client: ts.Client(),
+		c := &BaseComEd{
+			apiURL:           ts.URL,
+			client:           ts.Client(),
+			historicalPrices: make(map[int64]types.Price),
 		}
 
 		ctx := context.Background()
@@ -210,6 +218,96 @@ func TestComEd(t *testing.T) {
 			assert.InDelta(t, 0.02, prices[0].DollarsPerKWH, 0.0001) // 2.0 cents = 0.02 dollars
 			// Ensure it's the valid hour
 			assert.Equal(t, now.Add(-2*time.Hour).Truncate(time.Hour).Unix(), prices[0].TSStart.Unix())
+		}
+	})
+
+	t.Run("ApplyFees", func(t *testing.T) {
+		baseTime := time.Date(2023, 10, 27, 10, 0, 0, 0, time.UTC)
+
+		tests := []struct {
+			name     string
+			settings types.Settings
+			price    types.Price
+			want     types.Price
+		}{
+			{
+				name: "time based fee - match",
+				settings: types.Settings{
+					AdditionalFeesPeriods: []types.UtilityAdditionalFeesPeriod{
+						{
+							HourStart:      9,
+							HourEnd:        17,
+							DollarsPerKWH:  0.03,
+							GridAdditional: true,
+						},
+					},
+				},
+				price: types.Price{
+					DollarsPerKWH: 0.05,
+					TSStart:       baseTime.Add(6 * time.Hour), // 16:00 UTC => 11:00 CDT (Window 09-17)
+				},
+				want: types.Price{
+					DollarsPerKWH:         0.05,
+					GridAddlDollarsPerKWH: 0.03, // just fees
+					TSStart:               baseTime,
+				},
+			},
+			{
+				name: "time based fee - no match",
+				settings: types.Settings{
+					AdditionalFeesPeriods: []types.UtilityAdditionalFeesPeriod{
+						{
+							HourStart:      12,
+							HourEnd:        17,
+							DollarsPerKWH:  0.03,
+							GridAdditional: true,
+						},
+					},
+				},
+				price: types.Price{
+					DollarsPerKWH: 0.05,
+					TSStart:       baseTime, // 10:00 UTC
+				},
+				want: types.Price{
+					DollarsPerKWH:         0.05,
+					GridAddlDollarsPerKWH: 0.00,
+					TSStart:               baseTime,
+				},
+			},
+			{
+				name: "base price modification",
+				settings: types.Settings{
+					AdditionalFeesPeriods: []types.UtilityAdditionalFeesPeriod{
+						{
+							HourStart:      0,
+							HourEnd:        24,
+							DollarsPerKWH:  0.01,
+							GridAdditional: false, // Modifies base price
+						},
+					},
+				},
+				price: types.Price{
+					DollarsPerKWH: 0.05,
+					TSStart:       baseTime,
+				},
+				want: types.Price{
+					DollarsPerKWH:         0.06,
+					GridAddlDollarsPerKWH: 0.00,
+					TSStart:               baseTime,
+				},
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				s := &SiteComEd{
+					settings: tt.settings,
+				}
+				got, err := s.applyFees(tt.price)
+				require.NoError(t, err)
+				assert.InDelta(t, tt.want.DollarsPerKWH, got.DollarsPerKWH, 0.0001)
+				assert.InDelta(t, tt.want.GridAddlDollarsPerKWH, got.GridAddlDollarsPerKWH, 0.0001)
+			})
 		}
 	})
 }

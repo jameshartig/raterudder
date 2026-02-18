@@ -8,11 +8,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/jameshartig/raterudder/pkg/ess"
-	"github.com/jameshartig/raterudder/pkg/log"
-	"github.com/jameshartig/raterudder/pkg/server"
-	"github.com/jameshartig/raterudder/pkg/storage"
-	"github.com/jameshartig/raterudder/pkg/utility"
+	"github.com/raterudder/raterudder/pkg/ess"
+	"github.com/raterudder/raterudder/pkg/log"
+	"github.com/raterudder/raterudder/pkg/server"
+	"github.com/raterudder/raterudder/pkg/storage"
+	"github.com/raterudder/raterudder/pkg/utility"
 
 	"github.com/levenlabs/go-lflag"
 	"github.com/levenlabs/go-llog"
@@ -44,12 +44,7 @@ func main() {
 	default:
 		panic(fmt.Errorf("unknown log level: %s", llog.GetLevel().String()))
 	}
-
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: level,
-	}))
-	slog.SetDefault(logger)
-	slog.Debug("logger configured", slog.String("level", level.String()))
+	log.SetDefaultLogLevel(level)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

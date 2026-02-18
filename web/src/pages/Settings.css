@@ -44,7 +44,8 @@
 .form-group input[type="number"],
 .form-group input[type="text"],
 .form-group input[type="email"],
-.form-group input[type="password"] {
+.form-group input[type="password"],
+.form-group select {
   width: 100%;
   padding: 0.75rem 1rem;
   font-family: inherit;
@@ -155,4 +156,61 @@
 
 .save-button:active {
   transform: translateY(0);
+}
+
+
+/* Advanced Settings Section */
+details {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.5rem;
+  margin-top: 2rem;
+  background: var(--surface-subtle);
+}
+
+details[open] {
+  padding-bottom: 1rem;
+}
+
+summary {
+  cursor: pointer;
+  padding: 0.5rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  list-style: none;
+  /* Hide default triangle */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+summary::-webkit-details-marker {
+  display: none;
+}
+
+summary::after {
+  content: '▼';
+  font-size: 0.75rem;
+  transition: transform 0.2s;
+}
+
+details[open] summary>span::after {
+  transform: rotate(180deg);
+}
+
+/* Rotate the arrow which is actually ::after on summary */
+details[open] summary::after {
+  transform: rotate(180deg);
+}
+
+details h3 {
+  margin-top: 1.5rem;
+  padding-left: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.5rem;
+  font-size: 0.8rem;
+}
+
+details .form-group {
+  padding: 0 0.5rem;
 }

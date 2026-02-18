@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jameshartig/raterudder/pkg/log"
+	"github.com/raterudder/raterudder/pkg/log"
 )
 
 func (s *Server) handleModeling(w http.ResponseWriter, r *http.Request) {
@@ -17,15 +17,14 @@ func (s *Server) handleModeling(w http.ResponseWriter, r *http.Request) {
 	settings, creds, err := s.getSettingsWithMigration(ctx, siteID)
 	if err != nil {
 		log.Ctx(ctx).ErrorContext(ctx, "failed to get settings", slog.Any("error", err))
-		http.Error(w, "failed to get settings", http.StatusInternalServerError)
+		writeJSONError(w, "failed to get settings", http.StatusInternalServerError)
 		return
 	}
 
-	essSystem := s.ess.Site(siteID)
-	err = essSystem.ApplySettings(ctx, settings, creds)
+	essSystem, err := s.getESSSystem(ctx, siteID, settings, creds)
 	if err != nil {
-		log.Ctx(ctx).ErrorContext(ctx, "failed to apply settings", slog.Any("error", err))
-		http.Error(w, "failed to apply settings", http.StatusInternalServerError)
+		log.Ctx(ctx).ErrorContext(ctx, "failed to get ess system", slog.Any("error", err))
+		writeJSONError(w, "failed to get ess system", http.StatusInternalServerError)
 		return
 	}
 
@@ -33,15 +32,15 @@ func (s *Server) handleModeling(w http.ResponseWriter, r *http.Request) {
 	status, err := essSystem.GetStatus(ctx)
 	if err != nil {
 		log.Ctx(ctx).ErrorContext(ctx, "failed to get ess status", slog.Any("error", err))
-		http.Error(w, "failed to get ess status", http.StatusInternalServerError)
+		writeJSONError(w, "failed to get ess status", http.StatusInternalServerError)
 		return
 	}
 
 	// get utility
-	utility, err := s.utilities.Provider(settings.UtilityProvider)
+	utility, err := s.utilities.Site(ctx, siteID, settings.Settings)
 	if err != nil {
 		log.Ctx(ctx).ErrorContext(ctx, "failed to get utility system", slog.String("utility", settings.UtilityProvider))
-		http.Error(w, "failed to get utility system", http.StatusInternalServerError)
+		writeJSONError(w, "failed to get utility system", http.StatusInternalServerError)
 		return
 	}
 
@@ -49,7 +48,7 @@ func (s *Server) handleModeling(w http.ResponseWriter, r *http.Request) {
 	currentPrice, err := utility.GetCurrentPrice(ctx)
 	if err != nil {
 		log.Ctx(ctx).ErrorContext(ctx, "failed to get price", slog.Any("error", err))
-		http.Error(w, "failed to get price", http.StatusInternalServerError)
+		writeJSONError(w, "failed to get current price", http.StatusInternalServerError)
 		return
 	}
 
@@ -65,14 +64,14 @@ func (s *Server) handleModeling(w http.ResponseWriter, r *http.Request) {
 	historyEnd := time.Now()
 	energyHistory, err := s.storage.GetEnergyHistory(ctx, siteID, historyStart, historyEnd)
 	if err != nil {
-		log.Ctx(ctx).WarnContext(ctx, "failed to get energy history from storage", slog.Any("error", err))
-		http.Error(w, "failed to get energy history", http.StatusInternalServerError)
+		log.Ctx(ctx).ErrorContext(ctx, "failed to get energy history from storage", slog.Any("error", err))
+		writeJSONError(w, "failed to get energy history", http.StatusInternalServerError)
 		return
 	}
 
 	// 6. Run Simulation
 	now := time.Now().In(status.Timestamp.Location())
-	simHours := s.controller.SimulateState(ctx, now, status, currentPrice, futurePrices, energyHistory, settings)
+	simHours := s.controller.SimulateState(ctx, now, status, currentPrice, futurePrices, energyHistory, settings.Settings)
 
 	w.Header().Set("Cache-Control", "private, max-age=300")
 	w.Header().Set("Content-Type", "application/json")

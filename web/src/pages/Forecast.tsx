@@ -211,7 +211,7 @@ const Forecast: React.FC<{ siteID?: string }> = ({ siteID }) => {
         <div className="content-container forecast-page">
             <h2>24-Hour Simulation</h2>
             <p className="forecast-subtitle">
-                Predicted energy state starting from{' '}
+                Predicted energy state <strong>assuming no action is taken</strong> starting from{' '}
                 {new Date(data[0].ts).toLocaleTimeString([], {
                     hour: 'numeric',
                     minute: '2-digit',

@@ -11,8 +11,8 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/jameshartig/raterudder/pkg/log"
-	"github.com/jameshartig/raterudder/pkg/types"
+	"github.com/raterudder/raterudder/pkg/log"
+	"github.com/raterudder/raterudder/pkg/types"
 )
 
 func (s *Server) decryptCredentials(ctx context.Context, encrypted []byte) (types.Credentials, error) {

@@ -4,11 +4,18 @@ import "time"
 
 // Price represents the cost of electricity in a time interval.
 type Price struct {
-	Provider      string    `json:"provider"`
-	TSStart       time.Time `json:"tsStart"`
-	TSEnd         time.Time `json:"tsEnd"`
-	DollarsPerKWH float64   `json:"dollarsPerKWH"`
-	SampleCount   int       `json:"-"`
+	Provider string    `json:"provider"`
+	TSStart  time.Time `json:"tsStart"`
+	TSEnd    time.Time `json:"tsEnd"`
+
+	// DollarsPerKWH is the base cost of electricity in the time interval.
+	DollarsPerKWH float64 `json:"dollarsPerKWH"`
+
+	// GridAddlDollarsPerKWH is the cost of electricity delivered to the home in the time interval.
+	// This is added to the base price for grid use.
+	GridAddlDollarsPerKWH float64 `json:"gridUseDollarsPerKWH"`
+
+	SampleCount int `json:"-"`
 }
 
 const (
@@ -49,9 +56,12 @@ const (
 	ActionReasonDeficitChargeNow           ActionReason = "deficitCharge"
 	ActionReasonArbitrageChargeNow         ActionReason = "arbitrageCharge"
 	ActionReasonDischargeBeforeCapacityNow ActionReason = "dischargeBeforeCapacity"
-	ActionReasonDeficitSave                ActionReason = "deficitSave"
+	ActionReasonDeficitSaveForPeak         ActionReason = "deficitSaveForPeak"
 	ActionReasonArbitrageSave              ActionReason = "dischargeAtPeak"
 	ActionReasonNoChange                   ActionReason = "sufficientBattery"
+	ActionReasonEmergencyMode              ActionReason = "emergencyMode"
+	ActionReasonHasAlarms                  ActionReason = "hasAlarms"
+	ActionReasonWaitingToCharge            ActionReason = "waitingToCharge"
 )
 
 // Action represents a control decision made by the system.
@@ -61,13 +71,15 @@ type Action struct {
 	SolarMode     SolarMode    `json:"solarMode"`
 	Reason        ActionReason `json:"reason"`
 	Description   string       `json:"description"`
-	CurrentPrice  Price        `json:"currentPrice"`
+	CurrentPrice  *Price       `json:"currentPrice,omitempty"`
+	FuturePrice   *Price       `json:"futurePrice,omitempty"`
 	SystemStatus  SystemStatus `json:"systemStatus"`
-	FuturePrice   Price        `json:"futurePrice"`
 	HitDeficitAt  time.Time    `json:"deficitAt"`
 	HitCapacityAt time.Time    `json:"capacityAt"`
 	DryRun        bool         `json:"dryRun,omitempty"`
 	Fault         bool         `json:"fault,omitempty"`
+	Failed        bool         `json:"failed,omitempty"`
+	Error         string       `json:"error,omitempty"`
 }
 
 // EnergyStats represents aggregated energy statistics for an hourly period.
@@ -105,6 +117,13 @@ type SystemAlarm struct {
 	Code        string    `json:"code"`
 }
 
+// Storm represents a storm warning.
+type Storm struct {
+	Description string    `json:"description"`
+	TSStart     time.Time `json:"tsStart"`
+	TSEnd       time.Time `json:"tsEnd"`
+}
+
 // SystemStatus represents the current system status.
 type SystemStatus struct {
 	Timestamp             time.Time     `json:"timestamp"`
@@ -125,6 +144,7 @@ type SystemStatus struct {
 	BatteryAboveMinSOC    bool          `json:"batteryAboveMinSOC"`    // True if the battery SOC is above the minimum SOC
 	EmergencyMode         bool          `json:"emergencyMode"`
 	Alarms                []SystemAlarm `json:"alarms"`
+	Storms                []Storm       `json:"storms"`
 }
 
 // BatteryMode represents the mode of the battery.

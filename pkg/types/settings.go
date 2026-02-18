@@ -1,10 +1,30 @@
 package types
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // CurrentSettingsVersion is the current version of the settings struct.
 // Increment this value when adding new fields that require default values.
-const CurrentSettingsVersion = 4
+const CurrentSettingsVersion = 5
+
+// UtilityRateOptions represents the options for the utility rate.
+type UtilityRateOptions struct {
+	RateClass            string `json:"rateClass"`
+	VariableDeliveryRate bool   `json:"variableDeliveryRate"`
+}
+
+// UtilityAdditionalFeesPeriod represents a period of time with an additional fee.
+type UtilityAdditionalFeesPeriod struct {
+	Start          time.Time `json:"start"`
+	End            time.Time `json:"end"`
+	HourStart      int       `json:"hourStart"`
+	HourEnd        int       `json:"hourEnd"`
+	DollarsPerKWH  float64   `json:"dollarsPerKWH"`
+	GridAdditional bool      `json:"gridAdditional"`
+	Description    string    `json:"description"`
+}
 
 // Settings represents the configuration stored in the database.
 // These are dynamic settings that can be changed without redeploying.
@@ -17,14 +37,16 @@ type Settings struct {
 	// What multiple over previous days to ignore when calculating power usage
 	IgnoreHourUsageOverMultiple float64 `json:"ignoreHourUsageOverMultiple"`
 
+	// Utility Provider
+	UtilityProvider    string             `json:"utilityProvider"`
+	UtilityRateOptions UtilityRateOptions `json:"utilityRateOptions"`
+
 	// Price Settings
-	UtilityProvider string `json:"utilityProvider"`
 	// Always charge when the price is under this amount (in $/kWh)
-	AlwaysChargeUnderDollarsPerKWH float64 `json:"alwaysChargeUnderDollarsPerKWH"`
-	// Additional fees to add to the price when charging (in $/kWh)
-	AdditionalFeesDollarsPerKWH            float64 `json:"additionalFeesDollarsPerKWH"`
-	MinArbitrageDifferenceDollarsPerKWH    float64 `json:"minArbitrageDifferenceDollarsPerKWH"`
-	MinDeficitPriceDifferenceDollarsPerKWH float64 `json:"minDeficitPriceDifferenceDollarsPerKWH"`
+	AlwaysChargeUnderDollarsPerKWH         float64                       `json:"alwaysChargeUnderDollarsPerKWH"`
+	MinArbitrageDifferenceDollarsPerKWH    float64                       `json:"minArbitrageDifferenceDollarsPerKWH"`
+	MinDeficitPriceDifferenceDollarsPerKWH float64                       `json:"minDeficitPriceDifferenceDollarsPerKWH"`
+	AdditionalFeesPeriods                  []UtilityAdditionalFeesPeriod `json:"additionalFeesPeriods"`
 	// TODO: add a setting for solar credit value (in $/kWh)
 
 	// The minimum battery SOC should be charged to at all times.
@@ -63,7 +85,7 @@ type Credentials struct {
 type FranklinCredentials struct {
 	Username    string `json:"username"`
 	MD5Password string `json:"md5Password"`
-	GatewayID   string `json:"gatewayID"`
+	GatewayID   string `json:"gatewayID,omitempty"`
 }
 
 // MigrateSettings migrates the settings to the current version.
@@ -114,8 +136,11 @@ func MigrateSettings(s Settings, currentVersion int) (Settings, bool, error) {
 			}
 		case 4:
 			// version 4: add utility provider
-			if s.UtilityProvider == "" {
-				s.UtilityProvider = "comed_hourly"
+			// we no longer default this
+		case 5:
+			// version 5: add additional fees schedule
+			if s.UtilityProvider == "comed_hourly" {
+				s.UtilityProvider = "comed_besh"
 				migrated = true
 			}
 		default:

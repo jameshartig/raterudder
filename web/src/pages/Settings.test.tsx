@@ -40,6 +40,13 @@ vi.mock('@react-oauth/google', () => ({
 describe('App & Settings', () => {
     beforeEach(() => {
         vi.resetAllMocks();
+
+        const originalError = console.error;
+        vi.spyOn(console, 'error').mockImplementation((msg, ...args) => {
+            if (typeof msg === 'string' && msg.includes('was not wrapped in act')) return;
+            originalError(msg, ...args);
+        });
+
         // Default mocks
         (fetchActions as any).mockResolvedValue([]);
         (fetchSavings as any).mockResolvedValue({
@@ -72,12 +79,22 @@ describe('App & Settings', () => {
             solarBellCurveMultiplier: 1.0,
             ignoreHourUsageOverMultiple: 2,
             alwaysChargeUnderDollarsPerKWH: 0.05,
-            additionalFeesDollarsPerKWH: 0.02,
             minArbitrageDifferenceDollarsPerKWH: 0.03,
             minDeficitPriceDifferenceDollarsPerKWH: 0.02,
-            utilityProvider: 'comed_hourly',
+            utilityProvider: 'comed_besh',
+            utilityRateOptions: {
+                singleFamilyResidence: true,
+                multiFamilyResidence: false,
+                electricHeating: false,
+                flatRateDelivery: false,
+            },
+            hasCredentials: {
+                franklin: false
+            }
         });
     });
+
+
 
     const defaultAuthStatus = {
         loggedIn: true,
@@ -285,10 +302,13 @@ describe('App & Settings', () => {
             solarBellCurveMultiplier: 1.0,
             ignoreHourUsageOverMultiple: 2,
             alwaysChargeUnderDollarsPerKWH: 0.05,
-            additionalFeesDollarsPerKWH: 0.02,
             minArbitrageDifferenceDollarsPerKWH: 0.03,
             minDeficitPriceDifferenceDollarsPerKWH: 0.02,
-            utilityProvider: 'comed_hourly',
+            utilityProvider: 'comed_besh',
+            utilityRateOptions: {},
+            hasCredentials: {
+                franklin: false
+            }
         });
         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
         render(<App />);
@@ -313,10 +333,13 @@ describe('App & Settings', () => {
             solarBellCurveMultiplier: 0.3,
             ignoreHourUsageOverMultiple: 2,
             alwaysChargeUnderDollarsPerKWH: 0.05,
-            additionalFeesDollarsPerKWH: 0.02,
             minArbitrageDifferenceDollarsPerKWH: 0.03,
             minDeficitPriceDifferenceDollarsPerKWH: 0.02,
-            utilityProvider: 'comed_hourly',
+            utilityProvider: 'comed_besh',
+            utilityRateOptions: {},
+            hasCredentials: {
+                franklin: false
+            }
         });
         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
         render(<App />);
@@ -327,6 +350,74 @@ describe('App & Settings', () => {
 
         await waitFor(() => {
             expect(screen.getByText(/Solar export is disabled but the bell curve multiplier is low/)).toBeInTheDocument();
+        });
+    });
+
+    it('can update ComEd rate options', async () => {
+        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
+        render(<App />);
+        fireEvent.click(screen.getByText('Login'));
+
+        // Navigate
+        await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
+        fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
+
+        // Wait for ComEd section
+        await waitFor(() => expect(screen.getByText('ComEd Rate Options')).toBeInTheDocument());
+
+        // Change Rate Class
+        const rateSelect = screen.getByLabelText('Rate Class');
+        fireEvent.change(rateSelect, { target: { value: 'multiFamilyWithoutElectricHeat' } });
+
+        // Toggle Delivery Time-of-Day
+        const dtodCheckbox = screen.getByLabelText(/Delivery Time-of-Day/i);
+        fireEvent.click(dtodCheckbox);
+
+        // Save
+        const saveBtn = screen.getByText('Save Settings');
+        fireEvent.click(saveBtn);
+
+        await waitFor(() => {
+            expect(screen.getByText('Settings saved successfully')).toBeInTheDocument();
+            expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+                utilityRateOptions: expect.objectContaining({
+                    rateClass: 'multiFamilyWithoutElectricHeat',
+                    variableDeliveryRate: true
+                })
+            }), expect.any(String), undefined);
+        });
+    });
+
+    it('can expand advanced settings and update fields', async () => {
+        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
+        render(<App />);
+        fireEvent.click(screen.getByText('Login'));
+
+        // Navigate
+        await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
+        fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
+
+        // Find details element
+        const advancedSummary = await screen.findByText('Advanced Settings');
+        const advancedDetails = advancedSummary.closest('details');
+        expect(advancedDetails).not.toHaveAttribute('open');
+
+        // Click summary to open
+        fireEvent.click(advancedSummary);
+
+        // Check fields inside are accessible (though they exist in DOM anyway, this confirms finding them)
+        const priceInput = screen.getByLabelText(/Always Charge Under/i);
+        fireEvent.change(priceInput, { target: { value: '0.10' } });
+
+        // Save
+        const saveBtn = screen.getByText('Save Settings');
+        fireEvent.click(saveBtn);
+
+        await waitFor(() => {
+            expect(screen.getByText('Settings saved successfully')).toBeInTheDocument();
+            expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+                alwaysChargeUnderDollarsPerKWH: 0.10
+            }), expect.any(String), undefined);
         });
     });
 });

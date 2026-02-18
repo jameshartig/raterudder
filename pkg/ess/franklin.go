@@ -3,8 +3,6 @@ package ess
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,10 +17,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jameshartig/raterudder/pkg/log"
-	"github.com/jameshartig/raterudder/pkg/types"
-	"github.com/levenlabs/go-lflag"
+	"github.com/raterudder/raterudder/pkg/common"
+	"github.com/raterudder/raterudder/pkg/log"
+	"github.com/raterudder/raterudder/pkg/types"
 )
+
+const franklinLoginPath = "hes-gateway/terminal/initialize/appUserOrInstallerLogin"
 
 // Franklin implements the System interface for FranklinWH.
 // It interacts with the FranklinWH API to monitor and control the energy storage system.
@@ -50,37 +50,53 @@ type franklinMode struct {
 	CanEditReserveSOC bool
 }
 
-// configuredFranklin sets up the FranklinWH system.
-func configuredFranklin() *Franklin {
-	f := newFranklin()
-
-	username := lflag.String("franklin-username", "", "FranklinWH Email/Username")
-	password := lflag.String("franklin-password", "", "FranklinWH Password")
-	md5Password := lflag.String("franklin-md5-password", "", "FranklinWH MD5 Password")
-	gatewayID := lflag.String("franklin-gateway-id", "", "FranklinWH Gateway ID (from app)")
-	token := lflag.String("franklin-token", "", "FranklinWH Access Token (optional override)")
-
-	lflag.Do(func() {
-		f.username = *username
-		if *password != "" && *md5Password == "" {
-			hasher := md5.New()
-			hasher.Write([]byte(*password))
-			f.md5Password = hex.EncodeToString(hasher.Sum(nil))
-		} else {
-			f.md5Password = *md5Password
-		}
-		f.gatewayID = *gatewayID
-		f.tokenStr = *token
-	})
-
-	return f
-}
-
 func newFranklin() *Franklin {
 	return &Franklin{
-		client:  &http.Client{Timeout: 30 * time.Second},
+		client:  common.HTTPClient(time.Minute),
 		baseURL: "https://energy.franklinwh.com",
 	}
+}
+
+// ApplySettings applies the given settings to the Franklin struct.
+func (f *Franklin) ApplySettings(ctx context.Context, settings types.Settings) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.settings = settings
+	return nil
+}
+
+// Authenticate logs into franklin andfetches the default gateway if its not
+// filled in.
+func (f *Franklin) Authenticate(ctx context.Context, creds types.Credentials) (types.Credentials, bool, error) {
+	if creds.Franklin == nil {
+		return creds, false, errors.New("missing franklin credentials")
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.username != creds.Franklin.Username || f.md5Password != creds.Franklin.MD5Password {
+		token, tokenExpiry, err := f.login(ctx, creds.Franklin.Username, creds.Franklin.MD5Password)
+		if err != nil {
+			return creds, false, err
+		}
+		f.username = creds.Franklin.Username
+		f.md5Password = creds.Franklin.MD5Password
+		f.tokenStr = token
+		f.tokenExpiry = tokenExpiry
+	}
+
+	var changed bool
+	if creds.Franklin.GatewayID == "" {
+		id, err := f.getDefaultGatewayID(ctx)
+		if err != nil {
+			return creds, false, err
+		}
+		log.Ctx(ctx).InfoContext(ctx, "automatically selected gateway", slog.String("gatewayID", id))
+		creds.Franklin.GatewayID = id
+		changed = true
+	}
+	f.gatewayID = creds.Franklin.GatewayID
+	return creds, changed, nil
 }
 
 type loginResult struct {
@@ -89,42 +105,16 @@ type loginResult struct {
 	Version string `json:"version"`
 }
 
-// login handles authentication using MD5 hashed password.
-func (f *Franklin) login(ctx context.Context) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	if f.tokenStr != "" && time.Now().Before(f.tokenExpiry) {
-		return nil
+// ensureLogin will not login again if the token we have cached is still valid
+func (f *Franklin) ensureLogin(ctx context.Context) error {
+	if f.tokenStr == "" || !time.Now().Before(f.tokenExpiry) {
+		token, tokenExpiry, err := f.login(ctx, f.username, f.md5Password)
+		if err != nil {
+			return fmt.Errorf("failed to login: %w", err)
+		}
+		f.tokenStr = token
+		f.tokenExpiry = tokenExpiry
 	}
-
-	if f.username == "" {
-		return errors.New("missing username")
-	}
-	if f.md5Password == "" {
-		return errors.New("missing password")
-	}
-
-	data := url.Values{}
-	data.Set("account", f.username)
-	data.Set("password", f.md5Password)
-	data.Set("type", "0")
-
-	req, err := f.newPostFormRequest(ctx, "hes-gateway/terminal/initialize/appUserOrInstallerLogin", data)
-	if err != nil {
-		return err
-	}
-
-	var res loginResult
-	if err := f.doRequest(req, &res); err != nil {
-		log.Ctx(ctx).ErrorContext(ctx, "franklin login failed", slog.Any("error", err))
-		return fmt.Errorf("login failed: %w", err)
-	}
-	log.Ctx(ctx).DebugContext(ctx, "franklin login success")
-
-	f.tokenStr = res.Token
-	// TODO: what is the actual expiry of the token?
-	f.tokenExpiry = time.Now().Add(1 * time.Hour) // Token expiry assumption
 
 	if f.gatewayID == "" {
 		id, err := f.getDefaultGatewayID(ctx)
@@ -134,8 +124,36 @@ func (f *Franklin) login(ctx context.Context) error {
 		f.gatewayID = id
 		log.Ctx(ctx).InfoContext(ctx, "automatically selected gateway", slog.String("gatewayID", f.gatewayID))
 	}
-
 	return nil
+}
+
+func (f *Franklin) login(ctx context.Context, username, md5Password string) (string, time.Time, error) {
+	if username == "" {
+		return "", time.Time{}, errors.New("missing username")
+	}
+	if md5Password == "" {
+		return "", time.Time{}, errors.New("missing password")
+	}
+
+	data := url.Values{}
+	data.Set("account", username)
+	data.Set("password", md5Password)
+	data.Set("type", "0")
+
+	req, err := f.newPostFormRequest(ctx, franklinLoginPath, data)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	var res loginResult
+	if err := f.doRequest(req, &res); err != nil {
+		log.Ctx(ctx).ErrorContext(ctx, "franklin login failed", slog.Any("error", err))
+		return "", time.Time{}, fmt.Errorf("login failed: %w", err)
+	}
+	log.Ctx(ctx).DebugContext(ctx, "franklin login success", slog.String("username", username))
+
+	// TODO: what is the actual expiry of the token?
+	return res.Token, time.Now().Add(24 * time.Hour), nil
 }
 
 func (f *Franklin) newPostFormRequest(ctx context.Context, endpoint string, data url.Values) (*http.Request, error) {
@@ -215,50 +233,66 @@ type franklinResponse struct {
 }
 
 func (f *Franklin) doRequest(req *http.Request, dest interface{}) error {
-	req.Header.Set("logintoken", f.tokenStr)
+	isLogin := strings.HasSuffix(req.URL.Path, franklinLoginPath)
 
-	// TODO: should we set user-agent, softwareversion, lang, optsystemversion, opttime, optdevicename, optsource, optdevice
-
-	resp, err := f.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		// TODO: handle token expiry and automatically renew
-		return fmt.Errorf("status %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-
-	var fr franklinResponse
-	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&fr); err != nil {
-		log.Ctx(req.Context()).ErrorContext(req.Context(), "failed to decode franklin response", slog.Any("error", err), slog.String("body", string(body)))
-		return err
-	}
-
-	if !fr.Success && fr.Code != 200 {
-		if fr.Message == "" {
-			log.Ctx(req.Context()).ErrorContext(req.Context(), "franklin api unknown error", slog.String("body", string(body)))
-			return fmt.Errorf("franklin unknown error")
+	// we try up to 2 times because we might have an expired token
+	for i := 0; i < 2; i++ {
+		if !isLogin {
+			req.Header.Set("logintoken", f.tokenStr)
 		}
-		log.Ctx(req.Context()).ErrorContext(req.Context(), "franklin api error", slog.String("message", fr.Message))
-		return fmt.Errorf("franklin api error: %s", fr.Message)
-	}
 
-	if dest != nil {
-		if err := json.Unmarshal(fr.Result, dest); err != nil {
-			log.Ctx(req.Context()).ErrorContext(req.Context(), "failed to decode franklin result", slog.Any("error", err))
-			return fmt.Errorf("failed to decode franklin result: %w", err)
+		// TODO: should we set softwareversion, lang, optsystemversion, opttime, optdevicename, optsource, optdevice
+
+		resp, err := f.client.Do(req)
+		if err != nil {
+			return err
 		}
-	} else {
-		log.Ctx(req.Context()).DebugContext(req.Context(), "franklin request success (no destination)", slog.String("url", req.URL.String()))
-	}
+		defer resp.Body.Close()
 
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("status %d", resp.StatusCode)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+
+		var fr franklinResponse
+		if err := json.NewDecoder(bytes.NewReader(body)).Decode(&fr); err != nil {
+			log.Ctx(req.Context()).ErrorContext(req.Context(), "failed to decode franklin response", slog.Any("error", err), slog.String("body", string(body)))
+			return err
+		}
+
+		if !fr.Success && fr.Code != 200 {
+			// if we got a 401 error, it wasn't a login, and we sent a token then we
+			// need to get another token
+			if fr.Code == 401 && !isLogin && f.tokenStr != "" {
+				log.Ctx(req.Context()).DebugContext(req.Context(), "franklin token expired", slog.String("message", fr.Message))
+				f.tokenExpiry = time.Now().Add(-time.Second)
+				if err := f.ensureLogin(req.Context()); err != nil {
+					return err
+				}
+				continue
+			}
+			if fr.Message == "" {
+				log.Ctx(req.Context()).ErrorContext(req.Context(), "franklin api unknown error", slog.String("body", string(body)))
+				return fmt.Errorf("franklin unknown error")
+			}
+			log.Ctx(req.Context()).ErrorContext(req.Context(), "franklin api error", slog.String("message", fr.Message))
+			return fmt.Errorf("franklin api error: %s", fr.Message)
+		}
+
+		if dest != nil {
+			if err := json.Unmarshal(fr.Result, dest); err != nil {
+				log.Ctx(req.Context()).ErrorContext(req.Context(), "failed to decode franklin result", slog.Any("error", err))
+				return fmt.Errorf("failed to decode franklin result: %w", err)
+			}
+		} else {
+			log.Ctx(req.Context()).DebugContext(req.Context(), "franklin request success (no destination)", slog.String("url", req.URL.String()))
+		}
+		return nil
+	}
 	return nil
 }
 
@@ -290,6 +324,7 @@ func (f *Franklin) getRuntimeData(ctx context.Context) (deviceCompositeInfoResul
 		slog.Float64("loadKW", res.RuntimeData.PowerLoad),
 		slog.Float64("batteryKW", res.RuntimeData.PowerBattery),
 		slog.Int("alarms", len(res.CurrentAlarmList)),
+		slog.Int("mode", res.RuntimeData.TOUID),
 	)
 
 	return res, nil
@@ -340,12 +375,12 @@ func (f *Franklin) getDeviceInfo(ctx context.Context) (deviceInfoV2Result, error
 // GetStatus returns the status of the franklin system
 func (f *Franklin) GetStatus(ctx context.Context) (types.SystemStatus, error) {
 	log.Ctx(ctx).DebugContext(ctx, "getting franklin system status")
-	if err := f.login(ctx); err != nil {
-		return types.SystemStatus{}, err
-	}
-
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
+	if err := f.ensureLogin(ctx); err != nil {
+		return types.SystemStatus{}, err
+	}
 
 	rd, err := f.getRuntimeData(ctx)
 	if err != nil {
@@ -396,6 +431,39 @@ func (f *Franklin) GetStatus(ctx context.Context) (types.SystemStatus, error) {
 		})
 	}
 
+	stormHedge := rd.RuntimeData.TOUID == 6
+
+	var storms []types.Storm
+	if stormHedge {
+		sres, err := f.getStormList(ctx)
+		if err != nil {
+			return types.SystemStatus{}, err
+		}
+		for _, storm := range sres {
+			t, err := time.ParseInLocation("2006-01-02 15:04:05", storm.Onset, di.location)
+			if err != nil {
+				log.Ctx(ctx).WarnContext(ctx, "failed to parse storm onset time", slog.String("time", storm.Onset), slog.Any("error", err))
+			}
+			log.Ctx(ctx).DebugContext(
+				ctx,
+				"franklin reporting storm",
+				slog.String("severity", storm.Severity),
+				slog.Time("onset", t),
+				slog.Int("durationMins", storm.DurationMins),
+			)
+			storms = append(storms, types.Storm{
+				Description: storm.Severity,
+				TSStart:     t,
+				TSEnd:       t.Add(time.Duration(storm.DurationMins) * time.Minute),
+			})
+		}
+		log.Ctx(ctx).DebugContext(
+			ctx,
+			"franklin in storm hedge mode",
+			slog.Int("count", len(storms)),
+		)
+	}
+
 	return types.SystemStatus{
 		Timestamp:             time.Now().In(di.location),
 		BatterySOC:            rd.RuntimeData.SOC,
@@ -406,7 +474,7 @@ func (f *Franklin) GetStatus(ctx context.Context) (types.SystemStatus, error) {
 		GridKW:                rd.RuntimeData.PowerGrid,
 		HomeKW:                rd.RuntimeData.PowerLoad,
 		BatteryCapacityKWH:    di.TotalBatteryCapacityKWH,
-		EmergencyMode:         modes.currentMode.WorkMode == 3,
+		EmergencyMode:         stormHedge || modes.currentMode.WorkMode == 3,
 		CanExportSolar:        pc.GridFeedMaxFlag == GridFeedMaxFlagSolarOnly || pc.GridFeedMaxFlag == GridFeedMaxFlagBatteryAndSolar,
 		CanExportBattery:      pc.GridFeedMaxFlag == GridFeedMaxFlagBatteryAndSolar,
 		CanImportBattery:      pc.GridMaxFlag == GridMaxFlagChargeFromGrid,
@@ -418,6 +486,7 @@ func (f *Franklin) GetStatus(ctx context.Context) (types.SystemStatus, error) {
 		MaxBatteryDischargeKW: 10 * float64(len(rd.RuntimeData.EachSOC)),
 
 		Alarms: alarms,
+		Storms: storms,
 	}, nil
 }
 
@@ -505,6 +574,7 @@ func (f *Franklin) getAvailableModes(ctx context.Context) (availableModes, error
 
 	var sc franklinMode
 	var current franklinMode
+	foundIDs := make([]string, len(res.List))
 	modes := make([]franklinMode, len(res.List))
 	for i, item := range res.List {
 		m := franklinMode{
@@ -544,6 +614,16 @@ func (f *Franklin) getAvailableModes(ctx context.Context) (availableModes, error
 				ReserveSOC:      item.ReserveSOC,
 			}
 		}
+		foundIDs[i] = fmt.Sprintf("%d", item.ID)
+	}
+
+	if current.ID == 0 {
+		log.Ctx(ctx).WarnContext(
+			ctx,
+			"franklin current tou id not found",
+			slog.Int("currentTouID", res.CurrentID),
+			slog.String("foundIDs", strings.Join(foundIDs, ",")),
+		)
 	}
 
 	return availableModes{
@@ -554,40 +634,29 @@ func (f *Franklin) getAvailableModes(ctx context.Context) (availableModes, error
 	}, nil
 }
 
-// ApplySettings applies the given settings to the Franklin struct.
-func (f *Franklin) ApplySettings(ctx context.Context, settings types.Settings, creds types.Credentials) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.settings = settings
-
-	if creds.Franklin != nil {
-		if f.username != creds.Franklin.Username || f.md5Password != creds.Franklin.MD5Password {
-			f.tokenStr = ""
-		}
-
-		f.username = creds.Franklin.Username
-		f.md5Password = creds.Franklin.MD5Password
-		f.gatewayID = creds.Franklin.GatewayID
-	}
-	if f.username == "" || f.md5Password == "" {
-		return errors.New("franklin credentials not set")
-	}
-	// TODO: should we login?
-	return nil
-}
-
 // SetModes sets the battery and solar modes for the franklin system
 func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol types.SolarMode) error {
 	log.Ctx(ctx).DebugContext(ctx, "SetModes called", slog.Any("batteryMode", bat), slog.Any("solarMode", sol))
-	if err := f.login(ctx); err != nil {
-		return err
-	}
-
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	if err := f.ensureLogin(ctx); err != nil {
+		return err
+	}
+
 	if bat == types.BatteryModeNoChange && sol == types.SolarModeNoChange {
 		return nil
+	}
+
+	rd, err := f.getRuntimeData(ctx)
+	if err != nil {
+		return err
+	}
+
+	// 6 means storm hedge
+	if rd.RuntimeData.TOUID == 6 {
+		log.Ctx(ctx).InfoContext(ctx, "device is in storm hedge mode, skipping set modes")
+		return errors.New("device is in storm hedge mode")
 	}
 
 	modes, err := f.getAvailableModes(ctx)
@@ -637,7 +706,7 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 		// note: since we're not setting emergency backup mode solar will still be
 		// used to power the home first then spill over into the battery
 		if !sc.CanEditReserveSOC {
-			slog.WarnContext(ctx, "cannot edit reserve SOC")
+			log.Ctx(ctx).WarnContext(ctx, "cannot edit reserve SOC")
 			return errors.New("cannot edit reserve SOC")
 		}
 		soc = 100
@@ -659,7 +728,7 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 		// note: since we're not setting emergency backup mode solar will still be
 		// used to power the home first then spill over into the battery
 		if !sc.CanEditReserveSOC {
-			slog.WarnContext(ctx, "cannot edit reserve SOC")
+			log.Ctx(ctx).WarnContext(ctx, "cannot edit reserve SOC")
 			return errors.New("cannot edit reserve SOC")
 		}
 		soc = 100
@@ -801,7 +870,7 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 
 	if updatedPC {
 		if f.settings.DryRun {
-			slog.DebugContext(
+			log.Ctx(ctx).DebugContext(
 				ctx,
 				"dry run: would've set power control",
 				slog.Float64("gridMax", pc.GridMax),
@@ -824,12 +893,13 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 // GetEnergyHistory retrieves energy history for the specified period.
 // It aggregates 5-minute intervals into hourly EnergyStats.
 func (f *Franklin) GetEnergyHistory(ctx context.Context, start, end time.Time) ([]types.EnergyStats, error) {
-	if err := f.login(ctx); err != nil {
-		return nil, err
-	}
-
+	log.Ctx(ctx).DebugContext(ctx, "getting franklin energy history", slog.String("start", start.String()), slog.String("end", end.String()))
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
+	if err := f.ensureLogin(ctx); err != nil {
+		return nil, err
+	}
 
 	var di deviceInfoV2Result
 	if time.Now().Before(f.deviceInfoExpiry) {
@@ -872,6 +942,23 @@ func (f *Franklin) GetEnergyHistory(ctx context.Context, start, end time.Time) (
 	}
 
 	return allStats, nil
+}
+
+func (f *Franklin) getStormList(ctx context.Context) ([]stormListResult, error) {
+	params := url.Values{}
+	params.Set("equipNo", f.gatewayID)
+
+	req, err := f.newGetRequest(ctx, "hes-gateway/terminal/weather/getProgressingStormList", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var res []stormListResult
+	if err := f.doRequest(req, &res); err != nil {
+		return nil, err
+	}
+
+	return res, nil
 }
 
 func (f *Franklin) getEnergyStatsForDay(ctx context.Context, day time.Time, loc *time.Location) ([]types.EnergyStats, error) {
@@ -1169,4 +1256,11 @@ type homeGateway struct {
 	Name     string `json:"name"`
 	Version  string `json:"version"`
 	ZoneInfo string `json:"zoneInfo"`
+}
+
+type stormListResult struct {
+	ID           int    `json:"id"`
+	Onset        string `json:"onset"`
+	Severity     string `json:"severity"`
+	DurationMins int    `json:"durationTime"`
 }

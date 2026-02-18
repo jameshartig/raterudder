@@ -12,9 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jameshartig/raterudder/pkg/log"
-	"github.com/jameshartig/raterudder/pkg/types"
 	"github.com/levenlabs/go-lflag"
+	"github.com/raterudder/raterudder/pkg/common"
+	"github.com/raterudder/raterudder/pkg/log"
+	"github.com/raterudder/raterudder/pkg/types"
 )
 
 var (
@@ -37,26 +38,37 @@ var (
 	}()
 )
 
+const (
+	ComEdRateClassSingleFamilyResidenceWithoutElectricSpaceHeat = "singleFamilyWithoutElectricHeat"
+	ComEdRateClassMultiFamilyResidenceWithoutElectricSpaceHeat  = "multiFamilyWithoutElectricHeat"
+	ComEdRateClassSingleFamilyResidenceWithElectricSpaceHeat    = "singleFamilyElectricHeat"
+	ComEdRateClassMultiFamilyResidenceWithElectricSpaceHeat     = "multiFamilyElectricHeat"
+)
+
 const pjmComedPNodeID = "33092371"
 
-// ComEd implements the Provider interface for ComEd (Commonwealth Edison) hourly pricing API.
+// BaseComEd implements the Provider interface for ComEd (Commonwealth Edison) hourly pricing API.
 // It retrieves real-time and predicted electricity prices.
-type ComEd struct {
+type BaseComEd struct {
 	apiURL    string
 	pjmAPIKey string
 	pjmAPIURL string
 	client    *http.Client
 
-	mu            sync.Mutex
-	lastFetchTime time.Time
-	cachedPrices  []types.Price
+	mu               sync.Mutex
+	lastFetchTime    time.Time
+	cachedPrices     []types.Price
+	lastFutureFetch  time.Time
+	cachedFuture     []types.Price
+	historicalPrices map[int64]types.Price // Cache for historical prices (key: unix timestamp of start)
 }
 
 // configuredComEd sets up flags for ComEd and returns the instance.
 // It uses lflag to register command-line flags for configuration.
-func configuredComEd() *ComEd {
-	c := &ComEd{
-		client: &http.Client{Timeout: 10 * time.Second},
+func configuredComEd() *BaseComEd {
+	c := &BaseComEd{
+		client:           common.HTTPClient(time.Minute),
+		historicalPrices: make(map[int64]types.Price),
 	}
 	apiURL := lflag.String("comed-api-url", "https://hourlypricing.comed.com/api", "URL for the ComEd Hourly Pricing API")
 	pjmURL := lflag.String("pjm-api-url", "https://api.pjm.com/api/v1/da_hrl_lmps", "URL for the PJM API")
@@ -72,7 +84,7 @@ func configuredComEd() *ComEd {
 }
 
 // Validate ensures the configuration is valid.
-func (c *ComEd) Validate() error {
+func (c *BaseComEd) Validate() error {
 	if c.apiURL == "" {
 		return fmt.Errorf("comed-api-url is required")
 	}
@@ -95,7 +107,7 @@ type comedPriceEntry struct {
 
 // fetchPrices retrieves prices from the ComEd API with specific parameters.
 // It caches the result for 5 minutes.
-func (c *ComEd) fetchPrices(ctx context.Context) ([]types.Price, error) {
+func (c *BaseComEd) getCachedCurrentPrices(ctx context.Context) ([]types.Price, error) {
 	now := time.Now().In(ctLocation)
 
 	c.mu.Lock()
@@ -125,13 +137,33 @@ func (c *ComEd) fetchPrices(ctx context.Context) ([]types.Price, error) {
 
 // GetConfirmedPrices returns confirmed prices for a specific time range.
 // This requests 5-minute feed data and averages it into hourly buckets.
-func (c *ComEd) GetConfirmedPrices(ctx context.Context, start, end time.Time) ([]types.Price, error) {
-	log.Ctx(ctx).DebugContext(
-		ctx,
-		"getting comed confirmed price history",
-		slog.Time("start", start),
-		slog.Time("end", end),
-	)
+func (c *BaseComEd) GetConfirmedPrices(ctx context.Context, start, end time.Time) ([]types.Price, error) {
+	ctx = log.With(ctx, log.Ctx(ctx).With(slog.Time("start", start), slog.Time("end", end)))
+
+	// Check if all needed hours are in cache
+	c.mu.Lock()
+	var cached []types.Price
+
+	// iterate hourly
+	curr := start.Truncate(time.Hour)
+	allCached := true
+	for curr.Before(end) {
+		// key is unixtimestamp of start of hour
+		if p, ok := c.historicalPrices[curr.Unix()]; ok {
+			cached = append(cached, p)
+		} else {
+			allCached = false
+		}
+		curr = curr.Add(time.Hour)
+	}
+	c.mu.Unlock()
+
+	if allCached {
+		log.Ctx(ctx).DebugContext(ctx, "confirmed prices found in cache")
+		return cached, nil
+	}
+
+	log.Ctx(ctx).DebugContext(ctx, "fetching confirmed price history from api")
 	prices, err := c.fetchPricesRange(ctx, start, end)
 	if err != nil {
 		return nil, err
@@ -185,12 +217,18 @@ func (c *ComEd) GetConfirmedPrices(ctx context.Context, start, end time.Time) ([
 		slog.Int("count", len(confirmedPrices)),
 	)
 
+	// Update cache with confirmed prices
+	c.mu.Lock()
+	for _, p := range confirmedPrices {
+		c.historicalPrices[p.TSStart.Unix()] = p
+	}
+	c.mu.Unlock()
+
 	return confirmedPrices, nil
 }
 
 // fetchPricesRange retrieves prices from the ComEd API for a specific range.
-// useCache determines if we should look at/update the cache.
-func (c *ComEd) fetchPricesRange(ctx context.Context, start, end time.Time) ([]types.Price, error) {
+func (c *BaseComEd) fetchPricesRange(ctx context.Context, start, end time.Time) ([]types.Price, error) {
 	start = start.In(ctLocation)
 	end = end.In(ctLocation)
 
@@ -277,7 +315,7 @@ func (c *ComEd) fetchPricesRange(ctx context.Context, start, end time.Time) ([]t
 	for _, h := range hours {
 		avgCents := h.sum / float64(h.count)
 		prices = append(prices, types.Price{
-			Provider:      "comed_hourly",
+			Provider:      "comed_besh",
 			TSStart:       h.start,
 			TSEnd:         h.lastTime.Add(4*time.Minute + 59*time.Second),
 			DollarsPerKWH: avgCents / 100, // Cents to Dollars
@@ -294,11 +332,10 @@ func (c *ComEd) fetchPricesRange(ctx context.Context, start, end time.Time) ([]t
 }
 
 // GetCurrentPrice returns the latest hourly-averaged price.
-// Note: This may be an incomplete average if the current hour is not yet finished.
-func (c *ComEd) GetCurrentPrice(ctx context.Context) (types.Price, error) {
+func (c *BaseComEd) GetCurrentPrice(ctx context.Context) (types.Price, error) {
 	log.Ctx(ctx).DebugContext(ctx, "getting current price")
 
-	prices, err := c.fetchPrices(ctx)
+	prices, err := c.getCachedCurrentPrices(ctx)
 	if err != nil {
 		return types.Price{}, err
 	}
@@ -320,12 +357,33 @@ func (c *ComEd) GetCurrentPrice(ctx context.Context) (types.Price, error) {
 
 // GetFuturePrices returns predicted or day-ahead prices.
 // Prefers PJM API if configured, otherwise returns nothing
-func (c *ComEd) GetFuturePrices(ctx context.Context) ([]types.Price, error) {
-	if c.pjmAPIKey != "" {
-		log.Ctx(ctx).DebugContext(ctx, "fetching pjm day ahead prices for comed")
-		return c.fetchPJMDayAhead(ctx, pjmComedPNodeID)
+func (c *BaseComEd) GetFuturePrices(ctx context.Context) ([]types.Price, error) {
+	if c.pjmAPIKey == "" {
+		return nil, nil
 	}
-	return nil, nil
+
+	c.mu.Lock()
+	// TODO: instead we should only update if we're running out of future prices
+	// but what if they change?
+	if !c.lastFutureFetch.IsZero() && time.Since(c.lastFutureFetch) < 15*time.Minute {
+		prices := c.cachedFuture
+		c.mu.Unlock()
+		return prices, nil
+	}
+	c.mu.Unlock()
+
+	log.Ctx(ctx).DebugContext(ctx, "fetching pjm day ahead prices for comed")
+	prices, err := c.fetchPJMDayAhead(ctx, pjmComedPNodeID)
+	if err != nil {
+		return nil, err
+	}
+
+	c.mu.Lock()
+	c.cachedFuture = prices
+	c.lastFutureFetch = time.Now()
+	c.mu.Unlock()
+
+	return prices, nil
 }
 
 // PJM API Support
@@ -335,7 +393,7 @@ type pjmItem struct {
 	TotalLMPDA           float64 `json:"total_lmp_da"`
 }
 
-func (c *ComEd) fetchPJMDayAhead(ctx context.Context, pnodeID string) ([]types.Price, error) {
+func (c *BaseComEd) fetchPJMDayAhead(ctx context.Context, pnodeID string) ([]types.Price, error) {
 	now := time.Now().In(etLocation)
 	today := now.Format("2006-01-02")
 	tomorrow := now.AddDate(0, 0, 1).Format("2006-01-02")
@@ -398,13 +456,20 @@ func (c *ComEd) fetchPJMDayAhead(ctx context.Context, pnodeID string) ([]types.P
 		t = t.Truncate(time.Hour)
 
 		// Convert $/MWh to $/kWh
-		price := item.TotalLMPDA / 1000.0
+
+		// HEC = LMP x (1 MWh/ 1000 kWh) x BUF x ISUF x (1 + DLF)
+		// Residential Single Family Without Electric Space Heat 0.0517 0.0459
+		// Residential Multi Family Without Electric Space Heat 0.0532 0.0468
+		// Residential Single Family With Electric Space Heat 0.0554 0.0473
+		// Residential Multi Family With Electric Space Heat 0.0567 0.0497
+		// TODO: how to apply PJM service charge
+		hec := (item.TotalLMPDA / 1000) * 1.0124 * 1.0002 * (1.0 + .047)
 
 		prices = append(prices, types.Price{
-			Provider:      "comed_hourly",
+			Provider:      "comed_besh",
 			TSStart:       t,
 			TSEnd:         t.Add(time.Hour),
-			DollarsPerKWH: price,
+			DollarsPerKWH: hec,
 		})
 		if earliest.IsZero() || t.Before(earliest) {
 			earliest = t
@@ -423,4 +488,299 @@ func (c *ComEd) fetchPJMDayAhead(ctx context.Context, pnodeID string) ([]types.P
 		slog.Time("latest", latest),
 	)
 	return prices, nil
+}
+
+// SiteComEd wraps BaseComEd to apply site-specific settings and fees.
+type SiteComEd struct {
+	base     *BaseComEd
+	mu       sync.Mutex
+	siteID   string
+	settings types.Settings
+}
+
+// ApplySettings implements the Utility interface
+func (s *SiteComEd) ApplySettings(ctx context.Context, settings types.Settings) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if settings.UtilityProvider != "comed_besh" {
+		return fmt.Errorf("invalid utility provider for ComEd: %s", settings.UtilityProvider)
+	}
+
+	switch settings.UtilityRateOptions.RateClass {
+	case ComEdRateClassSingleFamilyResidenceWithoutElectricSpaceHeat,
+		ComEdRateClassMultiFamilyResidenceWithoutElectricSpaceHeat,
+		ComEdRateClassSingleFamilyResidenceWithElectricSpaceHeat,
+		ComEdRateClassMultiFamilyResidenceWithElectricSpaceHeat:
+		break
+	default:
+		return fmt.Errorf("invalid rate class for ComEd: %s", settings.UtilityRateOptions.RateClass)
+	}
+
+	s.settings = settings
+	return nil
+}
+
+func (s *SiteComEd) getDefaultAdditionalFees(ts time.Time, ro types.UtilityRateOptions) ([]types.UtilityAdditionalFeesPeriod, error) {
+	// TODO: use the ts to decide to use 2026 or 2027 prices
+
+	// The incremental distribution uncollectible cost factor applicable for residential
+	// retail customers (IDUFR) equals the applicable IDUFR listed in Informational
+	// Sheet No. 20.
+	iduf := 1.0090 // for 2026
+
+	// The applicable Delivery Reconciliation Adjustment Factor listed in Informational
+	// Sheet No. 9.
+	draf := 0.0 // for 2026
+
+	// The applicable Excess Deferred Income Tax Factor listed in Informational Sheet No. 62.
+	edaf := 0.0 // for 2026
+
+	// The applicable Total Plan Adjustment Factor listed in Informational Sheet No. 65.
+	tpaf := 0.06551 // for 2026
+
+	// The applicable Revenue Balancing Adjustment Factor for a Delivery Class D listed in
+	// Informational Sheet No. 18.
+	var rbafd float64
+	switch ro.RateClass {
+	case ComEdRateClassSingleFamilyResidenceWithoutElectricSpaceHeat, "":
+		rbafd = 0.007668
+	case ComEdRateClassMultiFamilyResidenceWithoutElectricSpaceHeat:
+		rbafd = 0.011682
+	case ComEdRateClassSingleFamilyResidenceWithElectricSpaceHeat:
+		rbafd = 0.069810
+	case ComEdRateClassMultiFamilyResidenceWithElectricSpaceHeat:
+		rbafd = 0.064486
+	default:
+		return nil, fmt.Errorf("unknown rate class: %s", ro.RateClass)
+	}
+
+	// DGRAD = The applicable Distributed Generation (DG) Rebate Adjustment listed in Informational
+	// Sheet No. 56.
+	// provided in cents per kWh
+	dgrad := 0.062 / 100 // for 2026
+
+	var iedt float64
+	switch ro.RateClass {
+	case ComEdRateClassSingleFamilyResidenceWithoutElectricSpaceHeat, "":
+		iedt = 0.00124
+	case ComEdRateClassMultiFamilyResidenceWithoutElectricSpaceHeat:
+		iedt = 0.00124
+	case ComEdRateClassSingleFamilyResidenceWithElectricSpaceHeat:
+		iedt = 0.00124
+	case ComEdRateClassMultiFamilyResidenceWithElectricSpaceHeat:
+		iedt = 0.00124
+	default:
+		return nil, fmt.Errorf("unknown rate class: %s", ro.RateClass)
+	}
+	// IEDT & ADJ = IEDT x (IDUF + RBAFD)
+	//1.082178
+	iedtAdj := iedt * (iduf + rbafd)
+
+	fees := []types.UtilityAdditionalFeesPeriod{
+		{
+			Start:          time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
+			End:            time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+			HourStart:      0,
+			HourEnd:        24,
+			GridAdditional: true,
+			DollarsPerKWH:  iedtAdj,
+			Description:    "IL Electricity Distribution Charge - IEDT & ADJ",
+		},
+	}
+
+	if !ro.VariableDeliveryRate {
+		var dfc float64
+		switch ro.RateClass {
+		case ComEdRateClassSingleFamilyResidenceWithoutElectricSpaceHeat, "":
+			dfc = 0.05698
+		case ComEdRateClassMultiFamilyResidenceWithoutElectricSpaceHeat:
+			dfc = 0.04354
+		case ComEdRateClassSingleFamilyResidenceWithElectricSpaceHeat:
+			dfc = 0.02712
+		case ComEdRateClassMultiFamilyResidenceWithElectricSpaceHeat:
+			dfc = 0.02576
+		default:
+			return nil, fmt.Errorf("unknown rate class: %s", ro.RateClass)
+		}
+		// DFC & ADJ = DFC x (IDUF + DRAF + EDAF + TPAF + RBAFD) + DGRAD
+		dfcAdj := dfc*(iduf+draf+edaf+tpaf+rbafd) + dgrad
+
+		return append(fees, types.UtilityAdditionalFeesPeriod{
+			Start:          time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
+			End:            time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+			HourStart:      0,
+			HourEnd:        24,
+			GridAdditional: true,
+			DollarsPerKWH:  dfcAdj,
+			Description:    "Distribution Facilities Charge - DFC & ADJ",
+		}), nil
+	} else {
+		// time of use distribution facilities charges
+		var morningDFC float64
+		var midDayDFC float64
+		var eveningDFC float64
+		var nightDFC float64
+		switch ro.RateClass {
+		case ComEdRateClassSingleFamilyResidenceWithoutElectricSpaceHeat, "":
+			// we default to single family non-electric heating
+			morningDFC = 0.04009
+			midDayDFC = 0.10712
+			eveningDFC = 0.03747
+			nightDFC = 0.02984
+		case ComEdRateClassMultiFamilyResidenceWithoutElectricSpaceHeat:
+			morningDFC = 0.03073
+			midDayDFC = 0.08689
+			eveningDFC = 0.02856
+			nightDFC = 0.02251
+		case ComEdRateClassSingleFamilyResidenceWithElectricSpaceHeat:
+			morningDFC = 0.01999
+			midDayDFC = 0.05329
+			eveningDFC = 0.01890
+			nightDFC = 0.01550
+		case ComEdRateClassMultiFamilyResidenceWithElectricSpaceHeat:
+			morningDFC = 0.01925
+			midDayDFC = 0.04975
+			eveningDFC = 0.01823
+			nightDFC = 0.01512
+		default:
+			return nil, fmt.Errorf("unknown rate class: %s", ro.RateClass)
+		}
+		// DFC & ADJ = DFC x (IDUF + DRAF + EDAF + TPAF + RBAFD) + DGRAD
+		morningDFCAdj := morningDFC*(iduf+draf+edaf+tpaf+rbafd) + dgrad
+		midDayDFCAdj := midDayDFC*(iduf+draf+edaf+tpaf+rbafd) + dgrad
+		eveningDFCAdj := eveningDFC*(iduf+draf+edaf+tpaf+rbafd) + dgrad
+		nightDFCAdj := nightDFC*(iduf+draf+edaf+tpaf+rbafd) + dgrad
+		return append(fees, []types.UtilityAdditionalFeesPeriod{
+			// night (midnight - 6am)
+			{
+				Start:          time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
+				End:            time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+				HourStart:      0,
+				HourEnd:        6,
+				GridAdditional: true,
+				DollarsPerKWH:  nightDFCAdj,
+				Description:    "TOU Distribution Facilities Charge (Night) - DFC & ADJ",
+			},
+			// morning (6am - 1pm)
+			{
+				Start:          time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
+				End:            time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+				HourStart:      6,
+				HourEnd:        13,
+				GridAdditional: true,
+				DollarsPerKWH:  morningDFCAdj,
+				Description:    "TOU Distribution Facilities Charge (Morning) - DFC & ADJ",
+			},
+			// mid day (1pm - 7pm)
+			{
+				Start:          time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
+				End:            time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+				HourStart:      13,
+				HourEnd:        19,
+				GridAdditional: true,
+				DollarsPerKWH:  midDayDFCAdj,
+				Description:    "TOU Distribution Facilities Charge (Mid Day) - DFC & ADJ",
+			},
+			// evening (7pm - 9pm)
+			{
+				Start:          time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
+				End:            time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+				HourStart:      19,
+				HourEnd:        21,
+				GridAdditional: true,
+				DollarsPerKWH:  eveningDFCAdj,
+				Description:    "TOU Distribution Facilities Charge (Evening) - DFC & ADJ",
+			},
+			// night (9pm - midnight)
+			{
+				Start:          time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
+				End:            time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+				HourStart:      21,
+				HourEnd:        24,
+				GridAdditional: true,
+				DollarsPerKWH:  nightDFCAdj,
+				Description:    "TOU Distribution Facilities Charge (Night) - DFC & ADJ",
+			},
+		}...), nil
+	}
+}
+
+func (s *SiteComEd) getPeriods(ts time.Time) ([]types.UtilityAdditionalFeesPeriod, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(s.settings.AdditionalFeesPeriods) == 0 {
+		return s.getDefaultAdditionalFees(ts, s.settings.UtilityRateOptions)
+	}
+	return s.settings.AdditionalFeesPeriods, nil
+}
+
+func (s *SiteComEd) applyFees(p types.Price) (types.Price, error) {
+	periods, err := s.getPeriods(p.TSStart)
+	if err != nil {
+		return p, err
+	}
+	for _, period := range periods {
+		// Calculate time-of-day in minutes for easier comparison if needed, or just use hour
+		// Check date range
+		if !period.Start.IsZero() && p.TSStart.Before(period.Start) {
+			continue
+		}
+		if !period.End.IsZero() && p.TSStart.After(period.End) {
+			continue
+		}
+
+		// Check hour range (inclusive start, exclusive end)
+		// Assuming p.TSStart is the start of the hour
+		h := p.TSStart.In(ctLocation).Hour()
+		if h < period.HourStart || h >= period.HourEnd {
+			continue
+		}
+
+		// Apply fee
+		if period.GridAdditional {
+			p.GridAddlDollarsPerKWH += period.DollarsPerKWH
+		} else {
+			p.DollarsPerKWH += period.DollarsPerKWH
+		}
+	}
+	return p, nil
+}
+
+func (s *SiteComEd) GetConfirmedPrices(ctx context.Context, start, end time.Time) ([]types.Price, error) {
+	prices, err := s.base.GetConfirmedPrices(ctx, start, end)
+	if err != nil {
+		return nil, err
+	}
+	for i := range prices {
+		prices[i], err = s.applyFees(prices[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return prices, nil
+}
+
+func (s *SiteComEd) GetCurrentPrice(ctx context.Context) (types.Price, error) {
+	p, err := s.base.GetCurrentPrice(ctx)
+	if err != nil {
+		return types.Price{}, err
+	}
+	return s.applyFees(p)
+}
+
+func (s *SiteComEd) GetFuturePrices(ctx context.Context) ([]types.Price, error) {
+	prices, err := s.base.GetFuturePrices(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]types.Price, len(prices))
+	for i, p := range prices {
+		out[i], err = s.applyFees(p)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }

@@ -9,8 +9,9 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"github.com/jameshartig/raterudder/pkg/types"
 	"github.com/levenlabs/go-lflag"
+	"github.com/raterudder/raterudder/pkg/log"
+	"github.com/raterudder/raterudder/pkg/types"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -111,19 +112,19 @@ func (f *FirestoreProvider) GetSettings(ctx context.Context, siteID string) (typ
 
 	val, err := doc.DataAt("json")
 	if err != nil {
-		slog.WarnContext(ctx, "settings doc missing json", slog.String("siteID", siteID))
+		log.Ctx(ctx).WarnContext(ctx, "settings doc missing json", slog.String("siteID", siteID))
 		return types.Settings{}, 0, fmt.Errorf("settings document missing 'json' field: %w", err)
 	}
 
 	jsonStr, ok := val.(string)
 	if !ok {
-		slog.WarnContext(ctx, "settings doc json not string", slog.String("siteID", siteID))
+		log.Ctx(ctx).WarnContext(ctx, "settings doc json not string", slog.String("siteID", siteID))
 		return types.Settings{}, 0, fmt.Errorf("settings 'json' field is not a string")
 	}
 
 	var s types.Settings
 	if err := json.Unmarshal([]byte(jsonStr), &s); err != nil {
-		slog.WarnContext(ctx, "failed to unmarshal settings json", slog.String("siteID", siteID), slog.Any("err", err))
+		log.Ctx(ctx).WarnContext(ctx, "failed to unmarshal settings json", slog.String("siteID", siteID), slog.Any("err", err))
 		return types.Settings{}, 0, fmt.Errorf("failed to unmarshal settings json: %w", err)
 	}
 	return s, version, nil
@@ -204,19 +205,19 @@ func (f *FirestoreProvider) GetActionHistory(ctx context.Context, siteID string,
 
 		val, err := doc.DataAt("json")
 		if err != nil {
-			slog.WarnContext(ctx, "action doc missing json", slog.String("actionID", doc.Ref.ID), slog.String("siteID", siteID), slog.Any("err", err))
+			log.Ctx(ctx).WarnContext(ctx, "action doc missing json", slog.String("actionID", doc.Ref.ID), slog.String("siteID", siteID), slog.Any("err", err))
 			return nil, fmt.Errorf("action document %s missing 'json' field: %w", doc.Ref.ID, err)
 		}
 
 		jsonStr, ok := val.(string)
 		if !ok {
-			slog.WarnContext(ctx, "action doc json not string", slog.String("actionID", doc.Ref.ID), slog.String("siteID", siteID))
+			log.Ctx(ctx).WarnContext(ctx, "action doc json not string", slog.String("actionID", doc.Ref.ID), slog.String("siteID", siteID))
 			return nil, fmt.Errorf("action document %s 'json' field is not string", doc.Ref.ID)
 		}
 
 		var a types.Action
 		if err := json.Unmarshal([]byte(jsonStr), &a); err != nil {
-			slog.WarnContext(ctx, "failed to unmarshal action", slog.String("actionID", doc.Ref.ID), slog.String("siteID", siteID), slog.Any("err", err))
+			log.Ctx(ctx).WarnContext(ctx, "failed to unmarshal action", slog.String("actionID", doc.Ref.ID), slog.String("siteID", siteID), slog.Any("err", err))
 			return nil, fmt.Errorf("failed to unmarshal action (id=%s): %w", doc.Ref.ID, err)
 		}
 		actions = append(actions, a)
@@ -279,19 +280,19 @@ func (f *FirestoreProvider) GetEnergyHistory(ctx context.Context, siteID string,
 
 		val, err := doc.DataAt("json")
 		if err != nil {
-			slog.WarnContext(ctx, "energy stats doc missing json", slog.String("docID", doc.Ref.ID), slog.String("siteID", siteID), slog.Any("err", err))
+			log.Ctx(ctx).WarnContext(ctx, "energy stats doc missing json", slog.String("docID", doc.Ref.ID), slog.String("siteID", siteID), slog.Any("err", err))
 			return nil, fmt.Errorf("energy stats doc %s missing 'json' field: %w", doc.Ref.ID, err)
 		}
 
 		jsonStr, ok := val.(string)
 		if !ok {
-			slog.WarnContext(ctx, "energy stats doc json not string", slog.String("docID", doc.Ref.ID), slog.String("siteID", siteID))
+			log.Ctx(ctx).WarnContext(ctx, "energy stats doc json not string", slog.String("docID", doc.Ref.ID), slog.String("siteID", siteID))
 			return nil, fmt.Errorf("energy stats doc %s 'json' field is not string", doc.Ref.ID)
 		}
 
 		var s types.EnergyStats
 		if err := json.Unmarshal([]byte(jsonStr), &s); err != nil {
-			slog.WarnContext(ctx, "failed to unmarshal energy stats", slog.String("docID", doc.Ref.ID), slog.String("siteID", siteID), slog.Any("err", err))
+			log.Ctx(ctx).WarnContext(ctx, "failed to unmarshal energy stats", slog.String("docID", doc.Ref.ID), slog.String("siteID", siteID), slog.Any("err", err))
 			return nil, fmt.Errorf("failed to unmarshal energy stats (id=%s): %w", doc.Ref.ID, err)
 		}
 		allStats = append(allStats, s)
@@ -347,18 +348,18 @@ func (f *FirestoreProvider) GetSite(ctx context.Context, siteID string) (types.S
 
 	val, err := doc.DataAt("json")
 	if err != nil {
-		slog.WarnContext(ctx, "site doc missing json", slog.String("siteID", siteID), slog.Any("err", err))
+		log.Ctx(ctx).WarnContext(ctx, "site doc missing json", slog.String("siteID", siteID), slog.Any("err", err))
 		return types.Site{}, fmt.Errorf("site %s missing json: %w", siteID, err)
 	}
 	jsonStr, ok := val.(string)
 	if !ok {
-		slog.WarnContext(ctx, "site doc json not string", slog.String("siteID", siteID))
+		log.Ctx(ctx).WarnContext(ctx, "site doc json not string", slog.String("siteID", siteID))
 		return types.Site{}, fmt.Errorf("site %s json not string", siteID)
 	}
 
 	var site types.Site
 	if err := json.Unmarshal([]byte(jsonStr), &site); err != nil {
-		slog.WarnContext(ctx, "failed to unmarshal site", slog.String("siteID", siteID), slog.Any("err", err))
+		log.Ctx(ctx).WarnContext(ctx, "failed to unmarshal site", slog.String("siteID", siteID), slog.Any("err", err))
 		return types.Site{}, fmt.Errorf("failed to unmarshal site %s: %w", siteID, err)
 	}
 	return site, nil
@@ -381,19 +382,19 @@ func (f *FirestoreProvider) ListSites(ctx context.Context) ([]types.Site, error)
 
 		val, err := doc.DataAt("json")
 		if err != nil {
-			slog.WarnContext(ctx, "site doc missing json", slog.String("siteID", doc.Ref.ID))
+			log.Ctx(ctx).WarnContext(ctx, "site doc missing json", slog.String("siteID", doc.Ref.ID))
 			// Skip malformed documents
 			continue
 		}
 		jsonStr, ok := val.(string)
 		if !ok {
-			slog.WarnContext(ctx, "site doc json not string", slog.String("siteID", doc.Ref.ID))
+			log.Ctx(ctx).WarnContext(ctx, "site doc json not string", slog.String("siteID", doc.Ref.ID))
 			continue
 		}
 
 		var site types.Site
 		if err := json.Unmarshal([]byte(jsonStr), &site); err != nil {
-			slog.WarnContext(ctx, "failed to unmarshal site", slog.String("siteID", doc.Ref.ID), slog.Any("err", err))
+			log.Ctx(ctx).WarnContext(ctx, "failed to unmarshal site", slog.String("siteID", doc.Ref.ID), slog.Any("err", err))
 			// Skip malformed JSON
 			continue
 		}
@@ -414,12 +415,12 @@ func (f *FirestoreProvider) GetUser(ctx context.Context, userID string) (types.U
 
 	val, err := doc.DataAt("json")
 	if err != nil {
-		slog.WarnContext(ctx, "user doc missing json", slog.String("userID", userID))
+		log.Ctx(ctx).WarnContext(ctx, "user doc missing json", slog.String("userID", userID))
 		return types.User{}, fmt.Errorf("user %s missing json: %w", userID, err)
 	}
 	jsonStr, ok := val.(string)
 	if !ok {
-		slog.WarnContext(ctx, "user doc json not string", slog.String("userID", userID))
+		log.Ctx(ctx).WarnContext(ctx, "user doc json not string", slog.String("userID", userID))
 		return types.User{}, fmt.Errorf("user %s json not string", userID)
 	}
 
@@ -430,20 +431,21 @@ func (f *FirestoreProvider) GetUser(ctx context.Context, userID string) (types.U
 	return user, nil
 }
 
-// UpsertPrice adds or updates a price record in the "utility_prices" collection.
+// UpsertPrice adds or updates a price record in the "price_history" sub-collection of the site.
 // The document ID is the RFC3339 timestamp of TSStart for efficient range queries.
-func (f *FirestoreProvider) UpsertPrice(ctx context.Context, price types.Price, version int) error {
+func (f *FirestoreProvider) UpsertPrice(ctx context.Context, siteID string, price types.Price, version int) error {
 	jsonBytes, err := json.Marshal(price)
 	if err != nil {
 		return fmt.Errorf("failed to marshal price: %w", err)
 	}
 
-	if price.Provider == "" {
-		return fmt.Errorf("price provider cannot be empty")
+	coll, err := f.getCollection(siteID, "price_history")
+	if err != nil {
+		return err
 	}
 
 	docID := price.TSStart.UTC().Format(time.RFC3339)
-	_, err = f.client.Collection("utilities").Doc(price.Provider).Collection("price_history").Doc(docID).Set(ctx, map[string]interface{}{
+	_, err = coll.Doc(docID).Set(ctx, map[string]interface{}{
 		"json":      string(jsonBytes),
 		"timestamp": price.TSStart,
 		"version":   version,
@@ -454,17 +456,17 @@ func (f *FirestoreProvider) UpsertPrice(ctx context.Context, price types.Price, 
 	return nil
 }
 
-// GetPriceHistory retrieves price records within the specified time range.
+// GetPriceHistory retrieves price records within the specified time range for a site.
 // Uses document ID range queries for efficient filtering.
-func (f *FirestoreProvider) GetPriceHistory(ctx context.Context, provider string, start, end time.Time) ([]types.Price, error) {
+func (f *FirestoreProvider) GetPriceHistory(ctx context.Context, siteID string, start, end time.Time) ([]types.Price, error) {
 	startDocID := start.UTC().Format(time.RFC3339)
 	endDocID := end.UTC().Format(time.RFC3339)
 
-	if provider == "" {
-		return nil, fmt.Errorf("price provider cannot be empty")
+	coll, err := f.getCollection(siteID, "price_history")
+	if err != nil {
+		return nil, err
 	}
 
-	coll := f.client.Collection("utilities").Doc(provider).Collection("price_history")
 	iter := coll.
 		Where(firestore.DocumentID, ">=", coll.Doc(startDocID)).
 		Where(firestore.DocumentID, "<", coll.Doc(endDocID)).
@@ -484,19 +486,19 @@ func (f *FirestoreProvider) GetPriceHistory(ctx context.Context, provider string
 
 		val, err := doc.DataAt("json")
 		if err != nil {
-			slog.WarnContext(ctx, "price doc missing json", slog.String("docID", doc.Ref.ID), slog.String("provider", provider), slog.Any("err", err))
+			log.Ctx(ctx).WarnContext(ctx, "price doc missing json", slog.String("docID", doc.Ref.ID), slog.String("siteID", siteID), slog.Any("err", err))
 			return nil, fmt.Errorf("price document %s missing 'json' field: %w", doc.Ref.ID, err)
 		}
 
 		jsonStr, ok := val.(string)
 		if !ok {
-			slog.WarnContext(ctx, "price doc json not string", slog.String("docID", doc.Ref.ID), slog.String("provider", provider))
+			log.Ctx(ctx).WarnContext(ctx, "price doc json not string", slog.String("docID", doc.Ref.ID), slog.String("siteID", siteID))
 			return nil, fmt.Errorf("price document %s 'json' field is not string", doc.Ref.ID)
 		}
 
 		var p types.Price
 		if err := json.Unmarshal([]byte(jsonStr), &p); err != nil {
-			slog.WarnContext(ctx, "failed to unmarshal price", slog.String("docID", doc.Ref.ID), slog.String("provider", provider), slog.Any("err", err))
+			log.Ctx(ctx).WarnContext(ctx, "failed to unmarshal price", slog.String("docID", doc.Ref.ID), slog.String("siteID", siteID), slog.Any("err", err))
 			return nil, fmt.Errorf("failed to unmarshal price (id=%s): %w", doc.Ref.ID, err)
 		}
 		prices = append(prices, p)
@@ -504,14 +506,15 @@ func (f *FirestoreProvider) GetPriceHistory(ctx context.Context, provider string
 	return prices, nil
 }
 
-// GetLatestPriceHistoryTime retrieves the timestamp of the last stored price record.
-func (f *FirestoreProvider) GetLatestPriceHistoryTime(ctx context.Context, provider string) (time.Time, int, error) {
-	if provider == "" {
-		return time.Time{}, 0, fmt.Errorf("price provider cannot be empty")
+// GetLatestPriceHistoryTime retrieves the timestamp of the last stored price record for a site.
+func (f *FirestoreProvider) GetLatestPriceHistoryTime(ctx context.Context, siteID string) (time.Time, int, error) {
+	coll, err := f.getCollection(siteID, "price_history")
+	if err != nil {
+		return time.Time{}, 0, err
 	}
 
 	// firestore automatically creates indexes for top-level fields
-	iter := f.client.Collection("utilities").Doc(provider).Collection("price_history").
+	iter := coll.
 		OrderBy("timestamp", firestore.Desc).
 		Limit(1).
 		Documents(ctx)

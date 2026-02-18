@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jameshartig/raterudder/pkg/types"
+	"github.com/raterudder/raterudder/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -60,13 +60,13 @@ func TestFirestoreProvider(t *testing.T) {
 
 	t.Run("Prices", func(t *testing.T) {
 		now := time.Now().Truncate(time.Second).UTC() // Firestore timestamp precision (RFC3339 is seconds)
-		p1 := types.Price{TSStart: now.Add(-1 * time.Hour), DollarsPerKWH: 0.10, Provider: "comed_hourly"}
-		p2 := types.Price{TSStart: now, DollarsPerKWH: 0.12, Provider: "comed_hourly"}
+		p1 := types.Price{TSStart: now.Add(-1 * time.Hour), DollarsPerKWH: 0.10, Provider: "test"}
+		p2 := types.Price{TSStart: now, DollarsPerKWH: 0.12, Provider: "test"}
 
-		require.NoError(t, f.UpsertPrice(ctx, p1, 0))
-		require.NoError(t, f.UpsertPrice(ctx, p2, 0))
+		require.NoError(t, f.UpsertPrice(ctx, "test-site", p1, 0))
+		require.NoError(t, f.UpsertPrice(ctx, "test-site", p2, 0))
 
-		prices, err := f.GetPriceHistory(ctx, "comed_hourly", now.Add(-2*time.Hour), now.Add(1*time.Minute))
+		prices, err := f.GetPriceHistory(ctx, "test-site", now.Add(-2*time.Hour), now.Add(1*time.Minute))
 		require.NoError(t, err)
 
 		// Note: We depend on emulator state. It might have data from previous runs if not cleared.
@@ -85,10 +85,10 @@ func TestFirestoreProvider(t *testing.T) {
 		assert.True(t, foundP2, "did not find inserted p2")
 
 		t.Run("UpsertOverwrite", func(t *testing.T) {
-			p2Updated := types.Price{TSStart: p2.TSStart, DollarsPerKWH: 0.99, Provider: "comed_hourly"}
-			require.NoError(t, f.UpsertPrice(ctx, p2Updated, 0))
+			p2Updated := types.Price{TSStart: p2.TSStart, DollarsPerKWH: 0.99, Provider: "test"}
+			require.NoError(t, f.UpsertPrice(ctx, "test-site", p2Updated, 0))
 
-			pricesUpdated, err := f.GetPriceHistory(ctx, "comed_hourly", now.Add(-2*time.Hour), now.Add(1*time.Minute))
+			pricesUpdated, err := f.GetPriceHistory(ctx, "test-site", now.Add(-2*time.Hour), now.Add(1*time.Minute))
 			require.NoError(t, err)
 
 			foundP2Updated := false
@@ -107,10 +107,10 @@ func TestFirestoreProvider(t *testing.T) {
 		t.Run("GetLatestPriceHistoryTime", func(t *testing.T) {
 			// Insert a future price
 			future := now.Add(24 * time.Hour)
-			pFuture := types.Price{TSStart: future, DollarsPerKWH: 0.99, Provider: "comed_hourly"}
-			require.NoError(t, f.UpsertPrice(ctx, pFuture, 0))
+			pFuture := types.Price{TSStart: future, DollarsPerKWH: 0.99, Provider: "test"}
+			require.NoError(t, f.UpsertPrice(ctx, "test-site", pFuture, 0))
 
-			latestTime, version, err := f.GetLatestPriceHistoryTime(ctx, "comed_hourly")
+			latestTime, version, err := f.GetLatestPriceHistoryTime(ctx, "test-site")
 			require.NoError(t, err)
 			assert.Equal(t, future, latestTime, "latest time should match the future timestamp we just inserted")
 			assert.Equal(t, 0, version, "version should be 0 because we didn't set it explicitly on upsert in this test")
@@ -124,7 +124,7 @@ func TestFirestoreProvider(t *testing.T) {
 			BatteryMode:  types.BatteryModeChargeAny,
 			SolarMode:    types.SolarModeAny,
 			Description:  "Charging test",
-			CurrentPrice: types.Price{DollarsPerKWH: 0.05, TSStart: now},
+			CurrentPrice: &types.Price{DollarsPerKWH: 0.05, TSStart: now},
 		}
 		require.NoError(t, f.InsertAction(ctx, "test-site", a1))
 
@@ -145,14 +145,14 @@ func TestFirestoreProvider(t *testing.T) {
 				BatteryMode:  types.BatteryModeLoad,
 				SolarMode:    types.SolarModeAny,
 				Description:  "Old action outside range",
-				CurrentPrice: types.Price{DollarsPerKWH: 0.08, TSStart: now.Add(-2 * time.Hour)},
+				CurrentPrice: &types.Price{DollarsPerKWH: 0.08, TSStart: now.Add(-2 * time.Hour)},
 			}
 			a3 := types.Action{
 				Timestamp:    now.Add(10 * time.Second),
 				BatteryMode:  types.BatteryModeChargeAny,
 				SolarMode:    types.SolarModeAny,
 				Description:  "Second action in range",
-				CurrentPrice: types.Price{DollarsPerKWH: 0.06, TSStart: now.Add(10 * time.Second)},
+				CurrentPrice: &types.Price{DollarsPerKWH: 0.06, TSStart: now.Add(10 * time.Second)},
 			}
 			require.NoError(t, f.InsertAction(ctx, "test-site", a2))
 			require.NoError(t, f.InsertAction(ctx, "test-site", a3))

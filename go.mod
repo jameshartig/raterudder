@@ -1,4 +1,4 @@
-module github.com/jameshartig/raterudder
+module github.com/raterudder/raterudder
 
 go 1.25.1
 

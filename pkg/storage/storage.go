@@ -3,9 +3,11 @@ package storage
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
-	"github.com/jameshartig/raterudder/pkg/types"
+	"github.com/levenlabs/go-lflag"
+	"github.com/raterudder/raterudder/pkg/types"
 )
 
 var (
@@ -20,16 +22,16 @@ type Database interface {
 
 	// Data Persistence
 	// UpsertPrice adds or updates a price record.
-	UpsertPrice(ctx context.Context, price types.Price, version int) error
+	UpsertPrice(ctx context.Context, siteID string, price types.Price, version int) error
 	InsertAction(ctx context.Context, siteID string, action types.Action) error
 	UpsertEnergyHistory(ctx context.Context, siteID string, stats types.EnergyStats, version int) error
 
 	// History
-	GetPriceHistory(ctx context.Context, provider string, start, end time.Time) ([]types.Price, error)
+	GetPriceHistory(ctx context.Context, siteID string, start, end time.Time) ([]types.Price, error)
 	GetActionHistory(ctx context.Context, siteID string, start, end time.Time) ([]types.Action, error)
 	GetEnergyHistory(ctx context.Context, siteID string, start, end time.Time) ([]types.EnergyStats, error)
 	GetLatestEnergyHistoryTime(ctx context.Context, siteID string) (time.Time, int, error)
-	GetLatestPriceHistoryTime(ctx context.Context, provider string) (time.Time, int, error)
+	GetLatestPriceHistoryTime(ctx context.Context, siteID string) (time.Time, int, error)
 
 	// Sites & Users
 	GetSite(ctx context.Context, siteID string) (types.Site, error)
@@ -41,4 +43,30 @@ type Database interface {
 
 	// Lifecycle
 	Close() error
+}
+
+// Configured sets up the Storage provider based on flags.
+func Configured() Database {
+	provider := lflag.String("storage-provider", "firestore", "Storage provider to use (available: firestore)")
+
+	var p struct{ Database }
+
+	fs := configuredFirestore()
+
+	lflag.Do(func() {
+		switch *provider {
+		case "firestore":
+			if err := fs.Validate(); err != nil {
+				panic(fmt.Sprintf("firestore validation failed: %v", err))
+			}
+			p.Database = fs
+			if err := fs.Init(context.Background()); err != nil {
+				panic(fmt.Sprintf("firestore init failed: %v", err))
+			}
+		default:
+			panic(fmt.Sprintf("unknown storage provider: %s", *provider))
+		}
+	})
+
+	return &p
 }

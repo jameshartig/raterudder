@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -14,13 +15,13 @@ import (
 	"time"
 
 	"github.com/NYTimes/gziphandler"
-	"github.com/jameshartig/raterudder/pkg/controller"
-	"github.com/jameshartig/raterudder/pkg/ess"
-	"github.com/jameshartig/raterudder/pkg/log"
-	"github.com/jameshartig/raterudder/pkg/storage"
-	"github.com/jameshartig/raterudder/pkg/utility"
-	"github.com/jameshartig/raterudder/web"
 	"github.com/levenlabs/go-lflag"
+	"github.com/raterudder/raterudder/pkg/controller"
+	"github.com/raterudder/raterudder/pkg/ess"
+	"github.com/raterudder/raterudder/pkg/log"
+	"github.com/raterudder/raterudder/pkg/storage"
+	"github.com/raterudder/raterudder/pkg/utility"
+	"github.com/raterudder/raterudder/web"
 	"google.golang.org/api/idtoken"
 )
 
@@ -84,7 +85,7 @@ func Configured(u *utility.Map, e *ess.Map, s storage.Database) *Server {
 	oidcAudience := lflag.String("oidc-audience", "", "token to use for id tokens audience to validate")
 	updateSpecificAudience := lflag.String("update-specific-audience", "", "audience to validate for /api/update")
 	singleSite := lflag.Bool("single-site", false, "Enable single-site mode (disables siteID requirement)")
-	encryptionKey := lflag.String("credentials-encryption-key", "", "Key for encrypting credentials (optional)")
+	encryptionKey := lflag.RequiredString("credentials-encryption-key", "Key for encrypting credentials")
 
 	lflag.Do(func() {
 		srv.listenAddr = *listenAddr
@@ -99,6 +100,11 @@ func Configured(u *utility.Map, e *ess.Map, s storage.Database) *Server {
 		srv.oidcAudience = *oidcAudience
 		srv.updateSpecificAudience = *updateSpecificAudience
 		srv.singleSite = *singleSite
+
+		if len(*encryptionKey) != 32 {
+			log.Ctx(context.Background()).Error("credentials-encryption-key must be 32 characters")
+			os.Exit(1)
+		}
 		srv.encryptionKey = *encryptionKey
 
 		if *devProxy != "" && *oidcAudience == "" && *adminEmails == "" {
@@ -191,6 +197,17 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
+func writeJSONError(w http.ResponseWriter, msg string, code int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	if err := json.NewEncoder(w).Encode(struct {
+		Error string `json:"error"`
+	}{Error: msg}); err != nil {
+		slog.Warn("failed to write error response", slog.Any("error", err))
+		panic(http.ErrAbortHandler)
+	}
+}
+
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write([]byte("ok")); err != nil {
@@ -209,6 +226,7 @@ func (s *Server) spaHandler(dir fs.FS, h http.Handler) http.HandlerFunc {
 			} else if errors.Is(err, fs.ErrNotExist) {
 				// Don't fallback to index.html for .well-known
 				if strings.HasPrefix(r.URL.Path, "/.well-known/") {
+					// we don't write JSON here because we don't know what file type is expected
 					http.Error(w, "not found", http.StatusNotFound)
 					return
 				}
@@ -216,6 +234,7 @@ func (s *Server) spaHandler(dir fs.FS, h http.Handler) http.HandlerFunc {
 				r.URL.Path = "/"
 			} else {
 				log.Ctx(r.Context()).ErrorContext(r.Context(), "failed to open file", "error", err)
+				// we don't write JSON here because we don't know what file type is expected
 				http.Error(w, "internal server error", http.StatusInternalServerError)
 				return
 			}

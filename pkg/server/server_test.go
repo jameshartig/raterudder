@@ -1,20 +1,24 @@
 package server
 
 import (
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"testing/fstest"
 
-	"github.com/jameshartig/raterudder/pkg/controller"
-	"github.com/jameshartig/raterudder/pkg/ess"
-	"github.com/jameshartig/raterudder/pkg/types"
-	"github.com/jameshartig/raterudder/pkg/utility"
+	"github.com/raterudder/raterudder/pkg/controller"
+	"github.com/raterudder/raterudder/pkg/ess"
+	"github.com/raterudder/raterudder/pkg/log"
+	"github.com/raterudder/raterudder/pkg/types"
+	"github.com/raterudder/raterudder/pkg/utility"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
 
-// Mock definitions moved to mock_test.go
+func init() {
+	log.SetDefaultLogLevel(slog.LevelError)
+}
 
 func TestSPAHandler(t *testing.T) {
 	// Setup basics for server
@@ -25,12 +29,12 @@ func TestSPAHandler(t *testing.T) {
 	mockP.SetSystem(types.SiteIDNone, mockE)
 
 	mockUMap := utility.NewMap()
-	mockUMap.SetProvider("comed_hourly", mockU)
+	mockUMap.SetProvider("test", mockU)
 
 	mockS.On("GetSettings", mock.Anything).Return(types.Settings{
 		DryRun:          true,
 		MinBatterySOC:   5.0,
-		UtilityProvider: "comed_hourly",
+		UtilityProvider: "test",
 	}, types.CurrentSettingsVersion, nil)
 
 	// Create a map-based filesystem for testing

@@ -8,10 +8,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/jameshartig/raterudder/pkg/log"
-	"github.com/jameshartig/raterudder/pkg/storage"
-	"github.com/jameshartig/raterudder/pkg/types"
 	"github.com/levenlabs/go-lflag"
+	"github.com/raterudder/raterudder/pkg/log"
+	"github.com/raterudder/raterudder/pkg/storage"
+	"github.com/raterudder/raterudder/pkg/types"
 )
 
 func main() {
@@ -102,8 +102,8 @@ func main() {
 		if price < 0.01 {
 			price = 0.01
 		}
-		action.CurrentPrice = types.Price{
-			Provider:      "comed_hourly",
+		action.CurrentPrice = &types.Price{
+			Provider:      "comed_besh",
 			DollarsPerKWH: price,
 			TSStart:       t,
 			TSEnd:         t.Add(time.Hour),
@@ -169,9 +169,11 @@ func main() {
 		}
 
 		// Seed Price
-		if err := s.UpsertPrice(ctx, action.CurrentPrice, types.CurrentPriceHistoryVersion); err != nil {
-			log.Ctx(ctx).ErrorContext(ctx, "failed to seed price", "error", err)
-			os.Exit(1)
+		if action.CurrentPrice != nil {
+			if err := s.UpsertPrice(ctx, types.SiteIDNone, *action.CurrentPrice, types.CurrentPriceHistoryVersion); err != nil {
+				log.Ctx(ctx).ErrorContext(ctx, "failed to seed price", "error", err)
+				os.Exit(1)
+			}
 		}
 
 		// Seed EnergyStats

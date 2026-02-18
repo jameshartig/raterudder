@@ -1,17 +1,18 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
+	"time"
 
-	"github.com/jameshartig/raterudder/pkg/controller"
-	"github.com/jameshartig/raterudder/pkg/ess"
-	"github.com/jameshartig/raterudder/pkg/types"
-	"github.com/jameshartig/raterudder/pkg/utility"
+	"github.com/raterudder/raterudder/pkg/controller"
+	"github.com/raterudder/raterudder/pkg/ess"
+	"github.com/raterudder/raterudder/pkg/types"
+	"github.com/raterudder/raterudder/pkg/utility"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -24,19 +25,22 @@ func TestSettings(t *testing.T) {
 	mockS.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{
 		DryRun:          false,
 		MinBatterySOC:   10.0,
-		UtilityProvider: "comed_hourly",
+		UtilityProvider: "test",
 	}, types.CurrentSettingsVersion, nil)
+	// Add expectations for background sync
+	mockS.On("GetLatestEnergyHistoryTime", mock.Anything, mock.Anything).Return(time.Time{}, 0, nil).Maybe()
+	mockS.On("UpsertEnergyHistory", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	// Helper to create server with auth config
-	newAuthServer := func(audience string, emails []string, validator TokenValidator) *Server {
+	newAuthServer := func(audience string, emails []string, validator TokenValidator) (*Server, *mockESS) {
 		mockES := &mockESS{}
 		mockP := ess.NewMap()
 		mockP.SetSystem(types.SiteIDNone, mockES)
 		// Expect some ESS calls if they happen, e.g. ApplySettings
-		mockES.On("ApplySettings", mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+		mockES.On("ApplySettings", mock.Anything, mock.Anything).Return(nil).Maybe()
 
 		mockUMap := utility.NewMap()
-		mockUMap.SetProvider("comed_hourly", mockU)
+		mockUMap.SetProvider("test", mockU)
 
 		return &Server{
 			utilities:      mockUMap,
@@ -46,7 +50,8 @@ func TestSettings(t *testing.T) {
 			adminEmails:    emails,
 			oidcAudience:   audience,
 			tokenValidator: validator,
-		}
+			encryptionKey:  "test-secret-key-1234567890123456",
+		}, mockES
 	}
 
 	// Helper to add user to context
@@ -62,7 +67,7 @@ func TestSettings(t *testing.T) {
 	}
 
 	t.Run("Get Settings", func(t *testing.T) {
-		srv := newAuthServer("", nil, nil)
+		srv, _ := newAuthServer("", nil, nil)
 		req := httptest.NewRequest("GET", "/api/settings", nil)
 		req = req.WithContext(context.WithValue(req.Context(), siteIDContextKey, types.SiteIDNone))
 		w := httptest.NewRecorder()
@@ -70,14 +75,15 @@ func TestSettings(t *testing.T) {
 		srv.handleGetSettings(w, req)
 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 
-		var settings types.Settings
-		err := json.NewDecoder(w.Body).Decode(&settings)
+		var resp SettingsRes
+		err := json.NewDecoder(w.Body).Decode(&resp)
 		require.NoError(t, err)
-		assert.Equal(t, 10.0, settings.MinBatterySOC)
+		assert.Equal(t, 10.0, resp.MinBatterySOC)
+		assert.False(t, resp.HasCredentials.Franklin)
 	})
 
 	t.Run("Update Settings - Disabled (No Admin)", func(t *testing.T) {
-		srv := newAuthServer("", nil, nil)
+		srv, _ := newAuthServer("", nil, nil)
 		req := httptest.NewRequest("POST", "/api/settings", nil)
 		req = withUser(req, "user@example.com", false) // Not admin
 		w := httptest.NewRecorder()
@@ -87,7 +93,7 @@ func TestSettings(t *testing.T) {
 	})
 
 	t.Run("Update Settings - Missing Auth", func(t *testing.T) {
-		srv := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
+		srv, _ := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
 		req := httptest.NewRequest("POST", "/api/settings", nil)
 		req = req.WithContext(context.WithValue(req.Context(), siteIDContextKey, types.SiteIDNone))
 		w := httptest.NewRecorder()
@@ -97,7 +103,7 @@ func TestSettings(t *testing.T) {
 	})
 
 	t.Run("Update Settings - Unauthorized Email", func(t *testing.T) {
-		srv := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
+		srv, _ := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
 		req := httptest.NewRequest("POST", "/api/settings", nil)
 		req = withUser(req, "hacker@example.com", false)
 		w := httptest.NewRecorder()
@@ -107,11 +113,13 @@ func TestSettings(t *testing.T) {
 	})
 
 	t.Run("Update Settings - Validation Error", func(t *testing.T) {
-		srv := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
+		srv, _ := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
 
 		// Invalid value (negative battery SOC)
-		body := `{"minBatterySOC": -5}`
-		req := httptest.NewRequest("POST", "/api/settings", strings.NewReader(body))
+		s1 := types.Settings{MinBatterySOC: -5}
+		b1, err := json.Marshal(s1)
+		require.NoError(t, err)
+		req := httptest.NewRequest("POST", "/api/settings", bytes.NewReader(b1))
 		req = withUser(req, "admin@example.com", true)
 		w := httptest.NewRecorder()
 
@@ -119,8 +127,10 @@ func TestSettings(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
 
 		// Invalid value (IgnoreHourUsageOverMultiple < 1)
-		body = `{"ignoreHourUsageOverMultiple": 0}`
-		req = httptest.NewRequest("POST", "/api/settings", strings.NewReader(body))
+		s2 := types.Settings{IgnoreHourUsageOverMultiple: 0}
+		b2, err := json.Marshal(s2)
+		require.NoError(t, err)
+		req = httptest.NewRequest("POST", "/api/settings", bytes.NewReader(b2))
 		req = withUser(req, "admin@example.com", true)
 		w = httptest.NewRecorder()
 
@@ -129,10 +139,20 @@ func TestSettings(t *testing.T) {
 	})
 
 	t.Run("Update Settings - Success", func(t *testing.T) {
-		srv := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
+		srv, mockES := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
 
-		body := `{"minBatterySOC": 80, "dryRun": true, "ignoreHourUsageOverMultiple": 5, "solarTrendRatioMax": 3.0, "solarBellCurveMultiplier": 1.0, "utilityProvider": "comed_hourly"}`
-		req := httptest.NewRequest("POST", "/api/settings", strings.NewReader(body))
+		s := types.Settings{
+			MinBatterySOC:               80,
+			DryRun:                      true,
+			IgnoreHourUsageOverMultiple: 5,
+			SolarTrendRatioMax:          3.0,
+			SolarBellCurveMultiplier:    1.0,
+			UtilityProvider:             "test",
+		}
+		b, err := json.Marshal(s)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest("POST", "/api/settings", bytes.NewReader(b))
 		req = withUser(req, "admin@example.com", true)
 		w := httptest.NewRecorder()
 
@@ -141,15 +161,20 @@ func TestSettings(t *testing.T) {
 			return s.MinBatterySOC == 80.0 && s.DryRun == true
 		}), types.CurrentSettingsVersion).Return(nil)
 
+		// Expect validation to pass
+		mockU.On("ApplySettings", mock.Anything, mock.Anything).Return(nil).Once()
+
 		srv.handleUpdateSettings(w, req)
 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 
 		// Verify storage updated
 		mockS.AssertExpectations(t)
+		mockES.AssertExpectations(t)
+		mockU.AssertExpectations(t)
 	})
 
 	t.Run("Auth Status - Not Logged In", func(t *testing.T) {
-		srv := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
+		srv, _ := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
 
 		req := httptest.NewRequest("GET", "/api/auth/status", nil)
 		w := httptest.NewRecorder()
@@ -161,5 +186,84 @@ func TestSettings(t *testing.T) {
 		err := json.NewDecoder(w.Body).Decode(&resp)
 		require.NoError(t, err)
 		assert.False(t, resp.LoggedIn)
+	})
+
+	t.Run("Update Settings - Call VerifySettings", func(t *testing.T) {
+		srv, mockES := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
+
+		// Create a request with franklin credentials and valid settings
+		s := struct {
+			types.Settings
+			Franklin *types.FranklinCredentials `json:"franklin,omitempty"`
+		}{
+			Settings: types.Settings{
+				MinBatterySOC:               80,
+				DryRun:                      true,
+				IgnoreHourUsageOverMultiple: 5,
+				SolarTrendRatioMax:          3.0,
+				SolarBellCurveMultiplier:    1.0,
+				UtilityProvider:             "test",
+			},
+			Franklin: &types.FranklinCredentials{Username: "foo", MD5Password: "bar"},
+		}
+		b, err := json.Marshal(s)
+		require.NoError(t, err)
+		req := httptest.NewRequest("POST", "/api/settings", bytes.NewReader(b))
+		req = withUser(req, "admin@example.com", true)
+		w := httptest.NewRecorder()
+
+		// Expect validation to pass
+		mockU.On("ApplySettings", mock.Anything, mock.Anything).Return(nil).Once()
+
+		// Expect Authenticate to be called with the provided credentials
+		mockES.On("Authenticate", mock.Anything, mock.MatchedBy(func(c types.Credentials) bool {
+			return c.Franklin != nil && c.Franklin.Username == "foo" && c.Franklin.MD5Password == "bar"
+		})).Return(types.Credentials{
+			Franklin: &types.FranklinCredentials{Username: "foo", MD5Password: "bar", GatewayID: "gw-123"},
+		}, true, nil)
+
+		// Expect GetEnergyHistory (Sync) because we are providing new credentials
+		// and the default mock storage returns no EncryptedCredentials
+		mockES.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
+
+		// Expect SetSettings to be called
+		mockS.On("SetSettings", mock.Anything, mock.Anything, mock.Anything, types.CurrentSettingsVersion).Return(nil)
+
+		srv.handleUpdateSettings(w, req)
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+
+		mockES.AssertExpectations(t)
+		mockS.AssertExpectations(t)
+		mockU.AssertExpectations(t)
+	})
+
+	t.Run("Update Settings - Rate Options Validation Failure", func(t *testing.T) {
+		srv, _ := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
+
+		// Create a request with valid settings but invalid rate options
+		s := types.Settings{
+			MinBatterySOC:               80,
+			DryRun:                      true,
+			IgnoreHourUsageOverMultiple: 5,
+			SolarTrendRatioMax:          3.0,
+			SolarBellCurveMultiplier:    1.0,
+			UtilityProvider:             "test",
+			UtilityRateOptions:          types.UtilityRateOptions{RateClass: "invalid"},
+		}
+		b, err := json.Marshal(s)
+		require.NoError(t, err)
+		req := httptest.NewRequest("POST", "/api/settings", bytes.NewReader(b))
+		req = withUser(req, "admin@example.com", true)
+		w := httptest.NewRecorder()
+
+		// Expect validation to fail
+		mockU.On("ApplySettings", mock.Anything, mock.MatchedBy(func(opts types.Settings) bool {
+			return opts.UtilityRateOptions.RateClass == "invalid"
+		})).Return(assert.AnError).Once()
+
+		srv.handleUpdateSettings(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+
+		mockU.AssertExpectations(t)
 	})
 }

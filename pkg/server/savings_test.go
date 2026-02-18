@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jameshartig/raterudder/pkg/types"
+	"github.com/raterudder/raterudder/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -19,7 +19,7 @@ type mockSavingsStorage struct {
 	stats  []types.EnergyStats
 }
 
-func (m *mockSavingsStorage) GetPriceHistory(ctx context.Context, provider string, start, end time.Time) ([]types.Price, error) {
+func (m *mockSavingsStorage) GetPriceHistory(ctx context.Context, siteID string, start, end time.Time) ([]types.Price, error) {
 	return m.prices, nil
 }
 

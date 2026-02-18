@@ -2,16 +2,18 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
 	"time"
 
-	"github.com/jameshartig/raterudder/pkg/log"
+	"github.com/raterudder/raterudder/pkg/log"
 )
 
 type hourlySavingsStatsDebugging struct {
-	Price         float64 `json:"price"`
+	ExportPrice   float64 `json:"exportPrice"`
+	ImportPrice   float64 `json:"importPrice"`
 	BatteryToHome float64 `json:"batteryToHome"`
 	Avoided       float64 `json:"avoided"`
 	GridToBattery float64 `json:"gridToBattery"`
@@ -41,22 +43,15 @@ func (s *Server) handleHistorySavings(w http.ResponseWriter, r *http.Request) {
 	siteID := s.getSiteID(r)
 	start, end, err := parseTimeRange(r)
 	if err != nil {
-		http.Error(w, "invalid time range: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	settings, _, err := s.getSettingsWithMigration(ctx, siteID)
-	if err != nil {
-		log.Ctx(ctx).ErrorContext(ctx, "failed to get settings", slog.Any("error", err))
-		http.Error(w, "failed to get settings", http.StatusInternalServerError)
+		writeJSONError(w, fmt.Sprintf("invalid time range: %v", err), http.StatusBadRequest)
 		return
 	}
 
 	// Fetch prices (these are hourly)
-	prices, err := s.storage.GetPriceHistory(ctx, settings.UtilityProvider, start, end)
+	prices, err := s.storage.GetPriceHistory(ctx, siteID, start, end)
 	if err != nil {
 		log.Ctx(ctx).ErrorContext(ctx, "failed to get prices", slog.Any("error", err))
-		http.Error(w, "failed to get prices", http.StatusInternalServerError)
+		writeJSONError(w, "failed to get price history", http.StatusInternalServerError)
 		return
 	}
 
@@ -64,33 +59,28 @@ func (s *Server) handleHistorySavings(w http.ResponseWriter, r *http.Request) {
 	energyStats, err := s.storage.GetEnergyHistory(ctx, siteID, start, end)
 	if err != nil {
 		log.Ctx(ctx).ErrorContext(ctx, "failed to get energy history", slog.Any("error", err))
-		http.Error(w, "failed to get energy history", http.StatusInternalServerError)
+		writeJSONError(w, "failed to get energy history", http.StatusInternalServerError)
 		return
-	}
-
-	// Create a map of prices for easier lookup by timestamp
-	priceMap := make(map[time.Time]float64)
-	for _, p := range prices {
-		priceMap[p.TSStart.Truncate(time.Hour)] = p.DollarsPerKWH
 	}
 
 	var totalSavings SavingsStats
 	totalSavings.Timestamp = start
-	hourlyPrices := make(map[time.Time]float64)
+	hourlyExportPrices := make(map[time.Time]float64)
+	hourlyImportPrices := make(map[time.Time]float64)
 
 	// TODO: fix this so that we look at the actual time ranges
 	for _, p := range prices {
 		tsHour := p.TSStart.Truncate(time.Hour)
-		hourlyPrices[tsHour] = p.DollarsPerKWH
+		hourlyExportPrices[tsHour] = p.DollarsPerKWH
+		hourlyImportPrices[tsHour] = p.DollarsPerKWH + p.GridAddlDollarsPerKWH
 	}
 
 	for _, stat := range energyStats {
 		ts := stat.TSHourStart.Truncate(time.Hour)
 
 		// this will be 0 if we don't have price data for this hour
-		price := hourlyPrices[ts]
-		gridImportPrice := price + settings.AdditionalFeesDollarsPerKWH
-		gridExportPrice := price
+		gridImportPrice := hourlyImportPrices[ts]
+		gridExportPrice := hourlyExportPrices[ts]
 
 		// Accumulate Energy Amounts even if price is missing
 		totalSavings.HomeUsed += stat.HomeKWH
@@ -125,7 +115,8 @@ func (s *Server) handleHistorySavings(w http.ResponseWriter, r *http.Request) {
 		totalSavings.SolarSavings += solarSavings
 
 		totalSavings.HourlyDebugging = append(totalSavings.HourlyDebugging, hourlySavingsStatsDebugging{
-			Price:         price,
+			ExportPrice:   gridExportPrice,
+			ImportPrice:   gridImportPrice,
 			BatteryToHome: batteryToHome,
 			Avoided:       avoided,
 			GridToBattery: gridToBattery,

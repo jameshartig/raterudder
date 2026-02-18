@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import Dashboard from './Dashboard';
 import { Router } from 'wouter';
-import { fetchActions, fetchSavings } from '../api';
+import { fetchActions, fetchSavings, fetchSettings } from '../api';
 
 // Mock the API
 vi.mock('../api', () => ({
@@ -32,9 +32,11 @@ vi.mock('../api', () => ({
         DeficitCharge: 'deficitCharge',
         ArbitrageCharge: 'arbitrageCharge',
         DischargeBeforeCapacity: 'dischargeBeforeCapacity',
-        DeficitSave: 'deficitSave',
+        DeficitSaveForPeak: 'deficitSaveForPeak',
         ArbitrageSave: 'dischargeAtPeak',
         NoChange: 'sufficientBattery',
+        EmergencyMode: 'emergencyMode',
+        DeficitSave: 'deficitSave',
     },
 }));
 
@@ -343,4 +345,158 @@ describe('Dashboard', () => {
             expect(screen.getByText(/peak later at.*\$0.500/)).toBeInTheDocument();
         });
     });
+
+    it('shows banner when Franklin credentials are missing', async () => {
+        (fetchActions as any).mockResolvedValue([]);
+        (fetchSavings as any).mockResolvedValue(null);
+        (fetchSettings as any).mockResolvedValue({
+            minBatterySOC: 10,
+            hasCredentials: { franklin: false }
+        });
+
+        renderWithRouter(<Dashboard />);
+
+        await waitFor(() => {
+            expect(screen.getByText(/FranklinWH credentials are not configured/i)).toBeInTheDocument();
+            expect(screen.getByText(/Configure them in Settings/i)).toBeInTheDocument();
+        });
+    });
+
+    it('does not show banner when Franklin credentials are present', async () => {
+        (fetchActions as any).mockResolvedValue([]);
+        (fetchSavings as any).mockResolvedValue(null);
+        (fetchSettings as any).mockResolvedValue({
+            minBatterySOC: 10,
+            hasCredentials: { franklin: true },
+            utilityProvider: 'comed_besh'
+        });
+
+        renderWithRouter(<Dashboard />);
+
+        await waitFor(() => {
+            // Need to wait for loading to finish
+            expect(screen.queryByText('Loading day...')).not.toBeInTheDocument();
+        });
+
+        expect(screen.queryByText(/FranklinWH credentials are not configured/i)).not.toBeInTheDocument();
+    });
+
+    it('shows banner when Utility Provider is missing', async () => {
+        (fetchActions as any).mockResolvedValue([]);
+        (fetchSavings as any).mockResolvedValue(null);
+        (fetchSettings as any).mockResolvedValue({
+            minBatterySOC: 10,
+            hasCredentials: { franklin: true },
+            utilityProvider: ''
+        });
+
+        renderWithRouter(<Dashboard />);
+
+        await waitFor(() => {
+            expect(screen.getByText(/Utility Provider is not configured/i)).toBeInTheDocument();
+            expect(screen.getByText(/Configure it in Settings/i)).toBeInTheDocument();
+        });
+    });
+
+    it('does not show banner when Utility Provider is present', async () => {
+        (fetchActions as any).mockResolvedValue([]);
+        (fetchSavings as any).mockResolvedValue(null);
+        (fetchSettings as any).mockResolvedValue({
+            minBatterySOC: 10,
+            hasCredentials: { franklin: true },
+            utilityProvider: 'comed_besh'
+        });
+
+        renderWithRouter(<Dashboard />);
+
+        await waitFor(() => {
+            expect(screen.queryByText('Loading day...')).not.toBeInTheDocument();
+        });
+
+        expect(screen.queryByText(/Utility Provider is not configured/i)).not.toBeInTheDocument();
+
+    });
+
+    it('renders manual emergency mode correctly', async () => {
+        const actions = [{
+            reason: 'emergencyMode',
+            description: 'Emergency Mode Active',
+            timestamp: new Date().toISOString(),
+            batteryMode: 0,
+            solarMode: 0,
+            fault: true,
+            systemStatus: {
+                alarms: [],
+                storm: []
+            },
+            currentPrice: { dollarsPerKWH: 0.10, tsStart: '', tsEnd: '' }
+        }];
+        (fetchActions as any).mockResolvedValue(actions);
+
+        renderWithRouter(<Dashboard />);
+
+        await waitFor(() => {
+            expect(screen.getByRole('heading', { name: /Emergency Mode/ })).toBeInTheDocument();
+            expect(screen.getByText('System manually put into emergency mode. Skipping automation.')).toBeInTheDocument();
+        });
+    });
+
+    it('renders storm protection mode correctly with times', async () => {
+        const stormStart = new Date('2023-01-01T12:00:00');
+        const stormEnd = new Date('2023-01-01T15:00:00');
+        const actions = [{
+            reason: 'emergencyMode',
+            description: 'Storm Prep',
+            timestamp: new Date('2023-01-01T10:00:00').toISOString(),
+            batteryMode: 0,
+            solarMode: 0,
+            fault: true,
+            systemStatus: {
+                alarms: [],
+                storms: [{
+                    description: 'Thunderstorm',
+                    tsStart: stormStart.toISOString(),
+                    tsEnd: stormEnd.toISOString(),
+                }]
+            },
+            currentPrice: { dollarsPerKWH: 0.10, tsStart: '', tsEnd: '' }
+        }];
+        (fetchActions as any).mockResolvedValue(actions);
+
+        renderWithRouter(<Dashboard />);
+
+        await waitFor(() => {
+            expect(screen.getByRole('heading', { name: /Storm Protection Mode/ })).toBeInTheDocument();
+            expect(screen.getByText('Franklin is charging the battery to prepare for the storm.')).toBeInTheDocument();
+            expect(screen.getByText(/Storm Duration: 12:00 PM - 3:00 PM/)).toBeInTheDocument();
+        });
+    });
+
+    it('hides price footer in summary when no price data is available', async () => {
+        const actions = [{
+            reason: 'emergencyMode',
+            description: 'Emergency Mode Active',
+            timestamp: new Date().toISOString(),
+            batteryMode: 0,
+            solarMode: 0,
+            fault: true,
+            systemStatus: {
+                alarms: [],
+                storms: []
+            },
+            // currentPrice is undefined
+        }];
+        (fetchActions as any).mockResolvedValue(actions);
+
+        renderWithRouter(<Dashboard />);
+
+        await waitFor(() => {
+            expect(screen.getByRole('heading', { name: /Emergency Mode/ })).toBeInTheDocument();
+            // Price label should not be present
+            expect(screen.queryByText('Avg Price:')).not.toBeInTheDocument();
+        });
+    });
 });
+
+
+

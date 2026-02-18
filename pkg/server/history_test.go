@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jameshartig/raterudder/pkg/controller"
-	"github.com/jameshartig/raterudder/pkg/ess"
-	"github.com/jameshartig/raterudder/pkg/types"
-	"github.com/jameshartig/raterudder/pkg/utility"
+	"github.com/raterudder/raterudder/pkg/controller"
+	"github.com/raterudder/raterudder/pkg/ess"
+	"github.com/raterudder/raterudder/pkg/types"
+	"github.com/raterudder/raterudder/pkg/utility"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -47,7 +47,7 @@ func TestHistory(t *testing.T) {
 	// But we need to use historyMockStorage to override methods.
 	mockSBase := &mockStorage{}
 	// We need to set expectations on the base mock if it's called
-	mockSBase.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{UtilityProvider: "comed_hourly"}, types.CurrentSettingsVersion, nil)
+	mockSBase.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{UtilityProvider: "test"}, types.CurrentSettingsVersion, nil)
 
 	mockS := &historyMockStorage{
 		mockStorage: mockSBase,
@@ -58,7 +58,7 @@ func TestHistory(t *testing.T) {
 	mockP.SetSystem(types.SiteIDNone, mockE)
 
 	mockUMap := utility.NewMap()
-	mockUMap.SetProvider("comed_hourly", mockU)
+	mockUMap.SetProvider("test", mockU)
 
 	srv := &Server{
 		utilities:  mockUMap,
@@ -116,7 +116,11 @@ func TestHistory(t *testing.T) {
 				resp := w.Result()
 				assert.Equal(t, tt.statusCode, resp.StatusCode)
 				if tt.statusCode != http.StatusOK {
-					assert.Contains(t, w.Body.String(), tt.errMsg)
+					var errResp struct {
+						Error string `json:"error"`
+					}
+					require.NoError(t, json.NewDecoder(w.Body).Decode(&errResp))
+					assert.Contains(t, errResp.Error, tt.errMsg)
 				}
 			})
 		}
@@ -136,7 +140,11 @@ func TestHistory(t *testing.T) {
 		handler.ServeHTTP(w, req)
 		resp := w.Result()
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-		assert.Contains(t, w.Body.String(), "time range cannot exceed 24 hours")
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&errResp))
+		assert.Contains(t, errResp.Error, "time range cannot exceed 24 hours")
 	})
 
 	t.Run("Fetch Actions Data", func(t *testing.T) {

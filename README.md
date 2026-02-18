@@ -30,7 +30,7 @@ The project is structured as follows:
 1.  **Clone the repository:**
 
     ```bash
-    git clone https://github.com/jameshartig/raterudder.git
+    git clone https://github.com/raterudder/raterudder.git
     cd raterudder
     ```
 

@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jameshartig/raterudder/pkg/log"
-	"github.com/jameshartig/raterudder/pkg/storage"
-	"github.com/jameshartig/raterudder/pkg/types"
+	"github.com/raterudder/raterudder/pkg/log"
+	"github.com/raterudder/raterudder/pkg/storage"
+	"github.com/raterudder/raterudder/pkg/types"
 )
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
@@ -23,7 +23,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		ctx = log.With(ctx, log.Ctx(ctx).With(slog.String("reqPath", r.URL.Path)))
 
 		allowNoLogin := r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/join"
-		ignoreUserNotFound := r.URL.Path == "/api/join" || r.URL.Path == "/api/auth/status"
+		ignoreUserNotFound := r.URL.Path == "/api/join" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/logout"
 		isUpdatePath := r.URL.Path == "/api/update" || r.URL.Path == "/api/updateSites"
 		ignoreSiteID := r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/logout"
 
@@ -41,6 +41,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				bodyBytes, err = io.ReadAll(r.Body)
 				if err != nil {
 					log.Ctx(ctx).ErrorContext(ctx, "failed to read request body", slog.Any("error", err))
+					// since we failed to read, don't return JSON error
 					http.Error(w, "invalid request", http.StatusBadRequest)
 					return
 				}
@@ -56,6 +57,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				err := json.Unmarshal(bodyBytes, &justSiteID)
 				if err != nil {
 					log.Ctx(ctx).ErrorContext(ctx, "failed to unmarshal request body", slog.Any("error", err))
+					// since we failed to read, don't return JSON error
 					http.Error(w, "invalid request", http.StatusBadRequest)
 					return
 				}
@@ -83,7 +85,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				if authHeader != "" {
 					if !strings.HasPrefix(authHeader, "Bearer ") {
 						log.Ctx(ctx).ErrorContext(ctx, "invalid auth header", slog.String("header", authHeader))
-						http.Error(w, "invalid request", http.StatusBadRequest)
+						writeJSONError(w, "invalid auth header", http.StatusBadRequest)
 						return
 					}
 					token := strings.TrimPrefix(authHeader, "Bearer ")
@@ -115,14 +117,14 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				authCookie, err := r.Cookie(authTokenCookie)
 				if err != nil && !errors.Is(err, http.ErrNoCookie) {
 					log.Ctx(ctx).ErrorContext(ctx, "failed to get auth cookie", slog.Any("error", err))
-					http.Error(w, "missing auth cookie", http.StatusBadRequest)
+					writeJSONError(w, "missing auth cookie", http.StatusBadRequest)
 					return
 				}
 				if authCookie != nil {
 					payload, err := s.tokenValidator(ctx, authCookie.Value, s.oidcAudience)
 					if err != nil {
 						log.Ctx(ctx).ErrorContext(ctx, "auth token validation failed", slog.Any("error", err))
-						http.Error(w, "invalid auth token", http.StatusBadRequest)
+						writeJSONError(w, "invalid auth token", http.StatusBadRequest)
 						return
 					} else {
 						email = payload.Claims["email"].(string)
@@ -131,7 +133,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 					}
 				} else if !allowNoLogin {
 					log.Ctx(ctx).WarnContext(ctx, "no auth cookie found")
-					http.Error(w, "invalid request", http.StatusBadRequest)
+					writeJSONError(w, "missing auth cookie", http.StatusBadRequest)
 					return
 				}
 			}
@@ -167,7 +169,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 							})
 						} else {
 							log.Ctx(ctx).WarnContext(ctx, "user lookup failed", slog.String("userID", userID), slog.String("email", email), slog.Any("error", err))
-							http.Error(w, "user lookup failed", http.StatusForbidden)
+							writeJSONError(w, "user lookup failed", http.StatusForbidden)
 							return
 						}
 					} else {
@@ -177,7 +179,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 							if len(user.SiteIDs) == 1 {
 								siteID = user.SiteIDs[0]
 							} else {
-								http.Error(w, "siteID required", http.StatusBadRequest)
+								writeJSONError(w, "siteID required", http.StatusBadRequest)
 								return
 							}
 						}
@@ -189,7 +191,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 					site, err := s.storage.GetSite(ctx, siteID)
 					if err != nil {
 						log.Ctx(ctx).WarnContext(ctx, "site lookup failed", slog.String("siteID", siteID), slog.Any("error", err))
-						http.Error(w, "site access denied", http.StatusForbidden)
+						writeJSONError(w, "site access denied", http.StatusForbidden)
 						return
 					}
 
@@ -203,7 +205,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 					}
 					if !permFound {
 						log.Ctx(ctx).WarnContext(ctx, "user does not have permission for site", slog.String("userID", userID), slog.String("email", email), slog.String("site", siteID))
-						http.Error(w, "site access denied", http.StatusForbidden)
+						writeJSONError(w, "site access denied", http.StatusForbidden)
 						return
 					}
 				}
@@ -214,7 +216,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			} else if !allowNoLogin {
 				log.Ctx(ctx).WarnContext(ctx, "unauthenticated request")
 				s.clearCookie(w)
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				writeJSONError(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
 		}
@@ -224,17 +226,19 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				siteID = types.SiteIDNone
 			} else if !allowNoLogin && !isUpdatePath && !ignoreSiteID {
 				log.Ctx(ctx).WarnContext(ctx, "siteID required", slog.String("userID", userID))
-				http.Error(w, "siteID required", http.StatusBadRequest)
+				writeJSONError(w, "siteID required", http.StatusBadRequest)
 				return
 			}
 		}
 
+		slogAttrs := make([]any, 0, 2)
 		if userID != "" {
-			ctx = log.With(ctx, log.Ctx(ctx).With(slog.String("userID", userID)))
+			slogAttrs = append(slogAttrs, slog.String("userID", userID))
 		}
 		if siteID != "" {
-			ctx = log.With(ctx, log.Ctx(ctx).With(slog.String("siteID", siteID)))
+			slogAttrs = append(slogAttrs, slog.String("siteID", siteID))
 		}
+		log.With(ctx, log.Ctx(ctx).With(slog.Group("auth", slogAttrs...)))
 
 		log.Ctx(ctx).DebugContext(
 			ctx,
@@ -254,6 +258,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Token string `json:"token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// since we failed to read, don't return JSON error
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -261,14 +266,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	payload, err := s.tokenValidator(r.Context(), req.Token, s.oidcAudience)
 	if err != nil {
 		log.Ctx(r.Context()).WarnContext(r.Context(), "failed to validate id token", slog.Any("error", err))
-		http.Error(w, "invalid id token", http.StatusUnauthorized)
+		writeJSONError(w, "invalid id token", http.StatusUnauthorized)
 		return
 	}
 
 	email, ok := payload.Claims["email"].(string)
 	if !ok {
 		log.Ctx(r.Context()).WarnContext(r.Context(), "invalid email in id token")
-		http.Error(w, "invalid oidc claims", http.StatusUnauthorized)
+		writeJSONError(w, "invalid oidc claims", http.StatusUnauthorized)
 		return
 	}
 

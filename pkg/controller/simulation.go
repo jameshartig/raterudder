@@ -6,7 +6,8 @@ import (
 	"math"
 	"time"
 
-	"github.com/jameshartig/raterudder/pkg/types"
+	"github.com/raterudder/raterudder/pkg/log"
+	"github.com/raterudder/raterudder/pkg/types"
 )
 
 // SimHour represents one hour of simulated energy state.
@@ -62,16 +63,18 @@ func (c *Controller) SimulateState(
 		// default to current price if no future price found but adjust it to fit
 		// the timestamp
 		return types.Price{
-			TSStart: t,
+			Provider: currentPrice.Provider,
+			TSStart:  t,
 			// TODO: should we assume 1 hour?
-			TSEnd:         t.Add(1 * time.Hour),
-			DollarsPerKWH: currentPrice.DollarsPerKWH,
+			TSEnd:                 t.Add(1 * time.Hour),
+			DollarsPerKWH:         currentPrice.DollarsPerKWH,
+			GridAddlDollarsPerKWH: currentPrice.GridAddlDollarsPerKWH,
 		}
 	}
 
 	// build our simulation timeline
 	todaySolarTrend := c.calculateSolarTrend(ctx, now, history, model, settings)
-	slog.DebugContext(ctx, "solar trend calculated", slog.Float64("trend", todaySolarTrend))
+	log.Ctx(ctx).DebugContext(ctx, "solar trend calculated", slog.Float64("trend", todaySolarTrend))
 
 	var hitDeficit bool
 	var hitCapacity bool
@@ -131,7 +134,7 @@ func (c *Controller) SimulateState(
 			TS:                      simTime,
 			Hour:                    h,
 			NetLoadSolarKWH:         netLoadSolar,
-			GridChargeDollarsPerKWH: price.DollarsPerKWH + settings.AdditionalFeesDollarsPerKWH,
+			GridChargeDollarsPerKWH: price.DollarsPerKWH + price.GridAddlDollarsPerKWH,
 			SolarOppDollarsPerKWH:   solarOppCost,
 			AvgHomeLoadKWH:          profile.avgHomeLoadKWH,
 			PredictedSolarKWH:       predictedAvgSolar,
@@ -208,7 +211,7 @@ func (c *Controller) buildHourlyEnergyModel(ctx context.Context, now time.Time, 
 
 			if len(outlierIdx) == 1 {
 				// We found exactly one outlier, ignore it
-				slog.DebugContext(
+				log.Ctx(ctx).DebugContext(
 					ctx,
 					"ignoring outlier data point",
 					slog.Int("hour", h),
@@ -223,7 +226,7 @@ func (c *Controller) buildHourlyEnergyModel(ctx context.Context, now time.Time, 
 					}
 				}
 			} else if len(outlierIdx) > 1 {
-				slog.DebugContext(
+				log.Ctx(ctx).DebugContext(
 					ctx,
 					"ignoring multiple outlier data points",
 					slog.Int("hour", h),
@@ -288,7 +291,7 @@ func (c *Controller) buildHourlyEnergyModel(ctx context.Context, now time.Time, 
 		daylightDuration = endSolarHour - startSolarHour + 1
 	}
 
-	slog.DebugContext(
+	log.Ctx(ctx).DebugContext(
 		ctx,
 		"determined daytime hours",
 		slog.Int("startSolarHour", startSolarHour),
@@ -378,7 +381,7 @@ func (c *Controller) buildHourlyEnergyModel(ctx context.Context, now time.Time, 
 		// Calculate estimated peak using the average of the best hour
 		factor := bellCurveFactor(float64(bestHour))
 		maxEstimatedPeak = maxAvg / factor
-		slog.DebugContext(
+		log.Ctx(ctx).DebugContext(
 			ctx,
 			"found best solar hour",
 			slog.Int("hour", bestHour),
@@ -391,7 +394,7 @@ func (c *Controller) buildHourlyEnergyModel(ctx context.Context, now time.Time, 
 	// if we didn't find any valid solar data, try to find *any* max solar data
 	// (Fallback to original behavior if no valid data exists)
 	if maxEstimatedPeak == 0 {
-		slog.DebugContext(ctx, "no non-battery-curtailed solar data found for smoothing, using raw max solar")
+		log.Ctx(ctx).DebugContext(ctx, "no non-battery-curtailed solar data found for smoothing, using raw max solar")
 		// Reset tracking to find the max raw solar that fits the curve constraints
 		maxOriginalPeak = 0.0
 		for _, h := range history {
@@ -408,7 +411,7 @@ func (c *Controller) buildHourlyEnergyModel(ctx context.Context, now time.Time, 
 		}
 	}
 
-	slog.DebugContext(
+	log.Ctx(ctx).DebugContext(
 		ctx,
 		"max solar estimated peak for smoothing",
 		slog.Float64("maxEstimatedPeak", maxEstimatedPeak),
@@ -433,7 +436,7 @@ func (c *Controller) buildHourlyEnergyModel(ctx context.Context, now time.Time, 
 		predicted := maxEstimatedPeak * bellCurveFactor(float64(h))
 		if curr.avgSolarKWH < predicted {
 			newSolar := curr.avgSolarKWH + (predicted-curr.avgSolarKWH)*settings.SolarBellCurveMultiplier
-			slog.DebugContext(
+			log.Ctx(ctx).DebugContext(
 				ctx,
 				"smoothing solar with bell curve",
 				slog.Int("hour", h),
@@ -468,7 +471,7 @@ func (c *Controller) calculateSolarTrend(ctx context.Context, now time.Time, his
 	}
 
 	if latestTime.IsZero() {
-		slog.DebugContext(
+		log.Ctx(ctx).DebugContext(
 			ctx,
 			"no recent data",
 			slog.Time("now", now),
@@ -485,7 +488,7 @@ func (c *Controller) calculateSolarTrend(ctx context.Context, now time.Time, his
 	s2, ok2 := statsByTime[t2]
 
 	if !ok1 || !ok2 {
-		slog.DebugContext(
+		log.Ctx(ctx).DebugContext(
 			ctx,
 			"not enough recent data",
 			slog.Time("now", now),
@@ -508,7 +511,7 @@ func (c *Controller) calculateSolarTrend(ctx context.Context, now time.Time, his
 	// TODO: figure out a better way to handle this because it could be that
 	// yesterday was cloudy and today is sunny
 	if modelSolar < 0.001 {
-		slog.DebugContext(
+		log.Ctx(ctx).DebugContext(
 			ctx,
 			"model expects no solar",
 			slog.Time("now", now),

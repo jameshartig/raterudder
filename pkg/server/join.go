@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/jameshartig/raterudder/pkg/log"
-	"github.com/jameshartig/raterudder/pkg/types"
+	"github.com/raterudder/raterudder/pkg/log"
+	"github.com/raterudder/raterudder/pkg/types"
 )
 
 func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
@@ -19,12 +19,13 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		JoinSiteID string `json:"joinSiteID"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// since we failed to read, don't return JSON error
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.InviteCode == "" || req.JoinSiteID == "" {
-		http.Error(w, "inviteCode and joinSiteID are required", http.StatusBadRequest)
+		writeJSONError(w, "inviteCode and joinSiteID are required", http.StatusBadRequest)
 		return
 	}
 
@@ -40,7 +41,7 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if userID == "" {
-		http.Error(w, "authentication required", http.StatusUnauthorized)
+		writeJSONError(w, "authentication required", http.StatusUnauthorized)
 		return
 	}
 
@@ -48,14 +49,14 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	site, err := s.storage.GetSite(ctx, req.JoinSiteID)
 	if err != nil {
 		log.Ctx(ctx).WarnContext(ctx, "join: site not found", slog.String("siteID", req.JoinSiteID), slog.Any("error", err))
-		http.Error(w, "site not found", http.StatusNotFound)
+		writeJSONError(w, "site not found", http.StatusNotFound)
 		return
 	}
 
 	// Validate invite code using constant-time comparison
 	if site.InviteCode == "" || subtle.ConstantTimeCompare([]byte(req.InviteCode), []byte(site.InviteCode)) != 1 {
 		log.Ctx(ctx).WarnContext(ctx, "join: invalid invite code", slog.String("siteID", req.JoinSiteID), slog.String("userID", userID))
-		http.Error(w, "invalid invite code", http.StatusForbidden)
+		writeJSONError(w, "invalid invite code", http.StatusForbidden)
 		return
 	}
 
@@ -83,7 +84,7 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := s.storage.CreateUser(ctx, newUser); err != nil {
 			log.Ctx(ctx).ErrorContext(ctx, "join: failed to create user", slog.String("userID", userID), slog.Any("error", err))
-			http.Error(w, "failed to join site", http.StatusInternalServerError)
+			writeJSONError(w, "failed to create user", http.StatusInternalServerError)
 			return
 		}
 	} else {
@@ -91,7 +92,7 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		existingUser, err := s.storage.GetUser(ctx, userID)
 		if err != nil {
 			log.Ctx(ctx).ErrorContext(ctx, "join: failed to get user", slog.Any("error", err))
-			http.Error(w, "failed to join site", http.StatusInternalServerError)
+			writeJSONError(w, "failed to join site", http.StatusInternalServerError)
 			return
 		}
 
@@ -107,7 +108,7 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 			existingUser.SiteIDs = append(existingUser.SiteIDs, req.JoinSiteID)
 			if err := s.storage.UpdateUser(ctx, existingUser); err != nil {
 				log.Ctx(ctx).ErrorContext(ctx, "join: failed to update user", slog.Any("error", err))
-				http.Error(w, "failed to join site", http.StatusInternalServerError)
+				writeJSONError(w, "failed to join site", http.StatusInternalServerError)
 				return
 			}
 		}
@@ -118,7 +119,7 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		site.Permissions = append(site.Permissions, types.SitePermissions{UserID: userID})
 		if err := s.storage.UpdateSite(ctx, req.JoinSiteID, site); err != nil {
 			log.Ctx(ctx).ErrorContext(ctx, "join: failed to update site", slog.String("siteID", req.JoinSiteID), slog.Any("error", err))
-			http.Error(w, "failed to join site", http.StatusInternalServerError)
+			writeJSONError(w, "failed to join site", http.StatusInternalServerError)
 			return
 		}
 	}

@@ -5,7 +5,7 @@ import { GoogleOAuthProvider } from '@react-oauth/google';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import './App.css';
-import { fetchAuthStatus, login, logout } from './api';
+import { fetchAuthStatus, login, logout, type AuthStatus } from './api';
 
 import LandingPage from './pages/LandingPage';
 import Dashboard from './pages/Dashboard';
@@ -41,50 +41,59 @@ function AppContent() {
     const [loading, setLoading] = useState(true);
     const [hasAttemptedFetch, setHasAttemptedFetch] = useState(false);
 
-    // const location = useLocation();
     const [, navigate] = useLocation();
 
-    const checkStatus = (redirectOnLogin = false) => {
-        setLoading(true);
+    const applyStatus = (status: AuthStatus, redirectOnLogin: boolean) => {
+        setAuthRequired(status.authRequired);
+        setLoggedIn(status.loggedIn);
+        setClientID(status.clientID);
+
+        const sites = status.siteIDs || [];
+        setSiteIDs(sites);
+
+        // Default select first site if not selected or invalid
+        if (sites.length > 0 && (!selectedSiteID || !sites.includes(selectedSiteID))) {
+            setSelectedSiteID(sites[0]);
+        }
+
+        setHasAttemptedFetch(true);
+
+        if (redirectOnLogin && status.loggedIn) {
+            navigate('/dashboard');
+        }
+    };
+
+    // Initial auth check — runs once on mount. Sets loading=true to gate
+    // the first render until we know whether the user is authenticated.
+    useEffect(() => {
         fetchAuthStatus()
             .then(status => {
-                setAuthRequired(status.authRequired);
-                setLoggedIn(status.loggedIn);
-                setClientID(status.clientID);
-
-                const sites = status.siteIDs || [];
-                setSiteIDs(sites);
-
-                // Default select first site if not selected or invalid
-                if (sites.length > 0 && (!selectedSiteID || !sites.includes(selectedSiteID))) {
-                    setSelectedSiteID(sites[0]);
-                }
-
-                setLoading(false);
-                setHasAttemptedFetch(true);
-
-                if (redirectOnLogin && status.loggedIn) {
-                    navigate('/dashboard');
-                }
+                applyStatus(status, false);
             })
             .catch(err => {
                 console.error(err);
-                setLoading(false);
                 setHasAttemptedFetch(true);
+            })
+            .finally(() => {
+                setLoading(false);
+            });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Re-check auth after login/logout without toggling loading, so child
+    // components stay mounted and don't re-fire their own data fetches.
+    const checkStatus = (redirectOnLogin = false) => {
+        fetchAuthStatus()
+            .then(status => {
+                applyStatus(status, redirectOnLogin);
+            })
+            .catch(err => {
+                console.error(err);
             });
     };
 
     const [location] = useLocation();
     const isHome = location === '/';
-
-    useEffect(() => {
-        if (isHome) {
-            setLoading(false);
-            return;
-        }
-        setLoading(true);
-        checkStatus();
-    }, [location, isHome]);
 
     const handleLoginSuccess = async (credentialResponse: any) => {
         try {

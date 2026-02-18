@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jameshartig/raterudder/pkg/log"
+	"github.com/raterudder/raterudder/pkg/log"
 )
 
 func (s *Server) handleHistoryPrices(w http.ResponseWriter, r *http.Request) {
@@ -15,21 +15,14 @@ func (s *Server) handleHistoryPrices(w http.ResponseWriter, r *http.Request) {
 	siteID := s.getSiteID(r)
 	start, end, err := parseTimeRange(r)
 	if err != nil {
-		http.Error(w, "invalid time range: "+err.Error(), http.StatusBadRequest)
+		writeJSONError(w, fmt.Sprintf("invalid time range: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	settings, _, err := s.getSettingsWithMigration(ctx, siteID)
+	prices, err := s.storage.GetPriceHistory(ctx, siteID, start, end)
 	if err != nil {
-		log.Ctx(ctx).ErrorContext(ctx, "failed to get settings", slog.Any("error", err))
-		http.Error(w, "failed to get settings", http.StatusInternalServerError)
-		return
-	}
-
-	prices, err := s.storage.GetPriceHistory(ctx, settings.UtilityProvider, start, end)
-	if err != nil {
-		log.Ctx(ctx).ErrorContext(ctx, "failed to get prices", slog.String("utility", settings.UtilityProvider), slog.Any("error", err))
-		http.Error(w, "failed to get prices", http.StatusInternalServerError)
+		log.Ctx(ctx).ErrorContext(ctx, "failed to get prices", slog.Any("error", err))
+		writeJSONError(w, "failed to get prices", http.StatusInternalServerError)
 		return
 	}
 
@@ -55,14 +48,14 @@ func (s *Server) handleHistoryActions(w http.ResponseWriter, r *http.Request) {
 	siteID := s.getSiteID(r)
 	start, end, err := parseTimeRange(r)
 	if err != nil {
-		http.Error(w, "invalid time range: "+err.Error(), http.StatusBadRequest)
+		writeJSONError(w, fmt.Sprintf("invalid time range: %v", err), http.StatusBadRequest)
 		return
 	}
 
 	actions, err := s.storage.GetActionHistory(ctx, siteID, start, end)
 	if err != nil {
 		log.Ctx(ctx).ErrorContext(ctx, "failed to get actions", slog.String("siteID", siteID), slog.Any("error", err))
-		http.Error(w, "failed to get actions", http.StatusInternalServerError)
+		writeJSONError(w, "failed to get actions", http.StatusInternalServerError)
 		return
 	}
 
