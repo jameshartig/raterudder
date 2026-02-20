@@ -13,7 +13,7 @@ describe('LandingPage Component', () => {
         );
 
         // Check for new hero text
-        expect(screen.getByText((content) => content.startsWith('Cut Your Electric Bill'))).toBeInTheDocument();
+        expect(screen.getByText((content) => content.startsWith('RateRudder learns your home'))).toBeInTheDocument();
 
         // Check for FAQ section
         expect(screen.getByText('Frequently Asked Questions')).toBeInTheDocument();

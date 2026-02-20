@@ -63,15 +63,19 @@ resource "google_cloudbuild_trigger" "github" {
 
     step {
       name = "gcr.io/cloud-builders/docker"
-      args = [
-        "build",
-        "-t",
-        "${google_artifact_registry_repository.raterudder.registry_uri}/raterudder:$COMMIT_SHA",
-        "-t",
-        "${google_artifact_registry_repository.raterudder.registry_uri}/raterudder:latest",
-        ".",
-      ]
+      args = concat(
+        ["build"],
+        var.join_form_url != "" ? ["--build-arg", "VITE_JOIN_FORM_URL=${var.join_form_url}"] : [],
+        [
+          "-t",
+          "${google_artifact_registry_repository.raterudder.registry_uri}/raterudder:$COMMIT_SHA",
+          "-t",
+          "${google_artifact_registry_repository.raterudder.registry_uri}/raterudder:latest",
+          ".",
+        ]
+      )
     }
+
 
     step {
       name = "gcr.io/cloud-builders/docker"

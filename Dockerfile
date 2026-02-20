@@ -4,7 +4,9 @@ WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ .
-RUN npm run build
+ARG VITE_JOIN_FORM_URL
+RUN VITE_JOIN_FORM_URL=$VITE_JOIN_FORM_URL npm run build
+
 
 # Build the backend
 FROM golang:1.25-alpine AS go-builder

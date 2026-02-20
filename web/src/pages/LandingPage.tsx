@@ -43,13 +43,19 @@ const LandingPage: React.FC = () => {
         },
         {
             question: "Do I need specific hardware?",
-            answer: "Currently, RateRudder is optimized for FranklinWH aPower batteries. We are expanding compatibility based on demand."
+            answer: "Currently, only FranklinWH aPower batteries are supported. We're looking for testers to help us add support for more battery types soon."
+        },
+        {
+            question: "Which utilities are supported?",
+            answer: "Currently only ComEd is supported but new utilities are being added quickly based on demand."
         },
         {
             question: "How much does it cost?",
             answer: "RateRudder is currently free for early adopters."
         }
     ];
+
+    const JOIN_FORM_URL = import.meta.env.VITE_JOIN_FORM_URL;
 
     const chartMargin = { top: 10, right: 10, left: 0, bottom: 0 };
     const axisStyle = { fontSize: isMobile ? 10 : 12, fontFamily: 'Inter, sans-serif' };
@@ -60,42 +66,59 @@ const LandingPage: React.FC = () => {
             <section className="hero-section">
                 <div className="content-container hero-layout">
                     <div className="hero-content">
-                        <h1>Cut Your Electric Bill <span className="highlight">Automatically</span></h1>
-                        <p>RateRudder uses your home battery to save you money on your electric bill.</p>
+                        <div className="badge">Limited Beta Now Open</div>
+                        <h1>Your Battery, Just <span className="highlight">Smarter.</span></h1>
+                        <p>
+                            RateRudder transforms your home battery into a powerful financial asset.
+                            Intelligently managing your energy to buy low, sell high, and slash your bill—all while you sleep.
+                        </p>
+                        {JOIN_FORM_URL && (
+                            <div className="cta-wrapper">
+                                <a href={JOIN_FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-button">
+                                    Request Early Access
+                                </a>
+                                <span className="cta-note">Tell us about your battery and utility to help skip the queue.</span>
+
+                            </div>
+                        )}
                     </div>
                     <div className="hero-visual">
-                        {/* Abstract visual representation using css shapes or a simplified chart */}
                         <div className="pulse-circle"></div>
                         <div className="floating-card">
-                            <span>Savings</span>
-                            <strong>$28.50</strong>
-                            <small>This Month</small>
+                            <span>Estimated Savings</span>
+                            <strong>$12.84</strong>
+                            <small>This Month*</small>
+                            <div className="status-indicator">
+                                <span className="dot"></span> Optimized by RateRudder
+                            </div>
                         </div>
                     </div>
                 </div>
             </section>
 
             <section className="features-strip">
-                <div className="content-container features-layout">
-                    <div className="feature-item">
-                        <div className="icon">⚡</div>
-                        <h3>Minimize Grid Use</h3>
-                        <p>Prioritize your own solar power.</p>
-                    </div>
-                    <div className="feature-item">
-                        <div className="icon">💰</div>
-                        <h3>Arbitrage Prices</h3>
-                        <p>Buy low, sell high. Automatically.</p>
-                    </div>
-                    <div className="feature-item">
-                        <div className="icon">🧠</div>
-                        <h3>Smart Forecast</h3>
-                        <p>Predicts usage & solar patterns.</p>
-                    </div>
-                    <div className="feature-item">
-                        <div className="icon">🛡️</div>
-                        <h3>Set & Forget</h3>
-                        <p>Works 24/7 in the background.</p>
+                <div className="content-container">
+                    <div className="features-grid">
+                        <div className="feature-item">
+                            <div className="icon">⚡</div>
+                            <h3>AI-Driven Arbitrage</h3>
+                            <p>Our algorithms track utility rates in real-time, charging your battery when prices bottom out and discharging when they peak.</p>
+                        </div>
+                        <div className="feature-item">
+                            <div className="icon">🛡️</div>
+                            <h3>Grid Independence</h3>
+                            <p>Maximize your solar self-consumption and insulate your home from rising grid costs and peak-hour surcharges.</p>
+                        </div>
+                        <div className="feature-item">
+                            <div className="icon">🧠</div>
+                            <h3>Predictive Intelligence</h3>
+                            <p>RateRudder learns your home's unique energy footprint and solar generation patterns to optimize for the days ahead.</p>
+                        </div>
+                        <div className="feature-item">
+                            <div className="icon">🚀</div>
+                            <h3>Set & Forget</h3>
+                            <p>Once configured, RateRudder works 24/7 in the background to secure your savings automatically.</p>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -186,9 +209,13 @@ const LandingPage: React.FC = () => {
                             </div>
                         ))}
                     </div>
+                    <p className="marketing-disclaimer">
+                        *Actual savings vary by utility plan, battery capacity, and household usage.
+                    </p>
                 </div>
             </section>
         </div>
+
     );
 };
 

@@ -31,6 +31,13 @@ variable "schedule_enabled" {
   default     = true
 }
 
+variable "join_form_url" {
+  description = "The URL for the Google Form to join the beta"
+  type        = string
+  default     = "https://forms.gle/Z6dJGBebud9J32vZA"
+}
+
+
 variable "networks" {
   default = {
     "us-central1" : "10.0.0.0/24",
