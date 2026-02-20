@@ -371,6 +371,24 @@ describe('Dashboard', () => {
         });
     });
 
+    it('appends disabled solar export text when price is negative and mode is NoExport', async () => {
+        const actions = [{
+            reason: 'sufficientBattery',
+            description: 'Sufficient battery.',
+            timestamp: new Date().toISOString(),
+            batteryMode: -1, // Load
+            solarMode: 1, // NoExport
+            currentPrice: { dollarsPerKWH: -0.05, tsStart: '', tsEnd: '' },
+        }];
+        (fetchActions as any).mockResolvedValue(actions);
+
+        renderWithRouter(<Dashboard />);
+
+        await waitFor(() => {
+            expect(screen.getByText('Battery is sufficient. Using battery normally. Disabled solar export because the price is negative.')).toBeInTheDocument();
+        });
+    });
+
     it('shows banner when Franklin credentials are missing', async () => {
         (fetchActions as any).mockResolvedValue([]);
         (fetchSavings as any).mockResolvedValue(null);

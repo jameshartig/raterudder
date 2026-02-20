@@ -1129,4 +1129,62 @@ func TestFranklin(t *testing.T) {
 		expectedEnd := expectedStart.Add(10 * time.Hour)
 		assert.Equal(t, expectedEnd.UTC(), status.Storms[0].TSEnd.UTC())
 	})
+
+	t.Run("SetModes Both Solar and Battery Export", func(t *testing.T) {
+		var callOrder []string
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/hes-gateway/terminal/initialize/appUserOrInstallerLogin" {
+				json.NewEncoder(w).Encode(map[string]interface{}{"code": 200, "success": true, "result": map[string]interface{}{"token": "tok"}})
+				return
+			}
+			if r.URL.Path == "/hes-gateway/terminal/getDeviceCompositeInfo" {
+				json.NewEncoder(w).Encode(map[string]interface{}{"code": 200, "success": true, "result": map[string]interface{}{}})
+				return
+			}
+			if r.URL.Path == "/hes-gateway/terminal/tou/getGatewayTouListV2" {
+				list := []map[string]interface{}{
+					{"id": 20.0, "workMode": 2, "electricityType": 1, "editSocFlag": true},
+				}
+				json.NewEncoder(w).Encode(map[string]interface{}{"code": 200, "success": true, "result": map[string]interface{}{"list": list, "currendId": 20.0}})
+				return
+			}
+			if r.URL.Path == "/hes-gateway/terminal/tou/getPowerControlSetting" {
+				json.NewEncoder(w).Encode(map[string]interface{}{"code": 200, "success": true, "result": map[string]interface{}{"gridMaxFlag": 1, "gridFeedMaxFlag": 3}})
+				return
+			}
+			if r.URL.Path == "/hes-gateway/terminal/tou/setPowerControlV2" {
+				callOrder = append(callOrder, "setPowerControlV2")
+				var data map[string]interface{}
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&data))
+				// Should set gridFeedMaxFlag to 2 (battery and solar export)
+				assert.EqualValues(t, 2, data["gridFeedMaxFlag"], "gridFeedMaxFlag should be 2 for Both Export")
+				json.NewEncoder(w).Encode(map[string]interface{}{"code": 200, "success": true, "result": map[string]interface{}{}})
+				return
+			}
+			http.Error(w, "not found "+r.URL.Path, 404)
+		}))
+		defer ts.Close()
+
+		f := &Franklin{
+			client:      ts.Client(),
+			baseURL:     ts.URL,
+			username:    "u",
+			md5Password: "p",
+			gatewayID:   "g",
+		}
+
+		// Set settings to enable grid export for solar AND batteries
+		err := f.ApplySettings(context.Background(), types.Settings{
+			GridExportSolar:     true,
+			GridExportBatteries: true,
+		})
+		require.NoError(t, err)
+
+		err = f.SetModes(context.Background(), types.BatteryModeNoChange, types.SolarModeAny)
+		require.NoError(t, err, "SetModes should succeed")
+
+		// Verify setPowerControlV2 was called
+		require.Len(t, callOrder, 1, "setPowerControlV2 should be called")
+		assert.Equal(t, "setPowerControlV2", callOrder[0])
+	})
 }

@@ -152,7 +152,7 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                                 />
                                 Delivery Time-of-Day (DTOD)
                             </label>
-                            <span className="help-text">Enable if you are enrolled in ComEd's Delivery Time-of-Day pricing.</span>
+                            <span className="help-text">Enable if you are enrolled in ComEd's Delivery Time-of-Day pricing. 30%-47% cheaper than fixed delivery rates in off-peak hours but 2x more expensive in on-peak hours (1pm-7pm).</span>
                         </div>
                     </div>
                 )}
@@ -213,6 +213,17 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                     </label>
                     <span className="help-text">Allow exporting solar generation to the grid.</span>
                 </div>
+                <div className="form-group checkbox-group">
+                    <label>
+                        <input
+                            type="checkbox"
+                            checked={settings.gridExportBatteries}
+                            onChange={(e) => handleChange('gridExportBatteries', e.target.checked)}
+                        />
+                        Grid Export Batteries
+                    </label>
+                    <span className="help-text">Allow exporting battery energy to the grid.</span>
+                </div>
 
                 <details>
                     <summary>Advanced Settings</summary>
@@ -266,7 +277,7 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                             value={settings.alwaysChargeUnderDollarsPerKWH}
                             onChange={(e) => handleChange('alwaysChargeUnderDollarsPerKWH', parseFloat(e.target.value))}
                         />
-                        <span className="help-text">Always charge the battery if the list price (before fees) is below this threshold, regardless of forecast.</span>
+                        <span className="help-text">Always charge the battery if the price (after fees) is below this threshold, regardless of forecast.</span>
                     </div>
                     <div className="form-group">
                         <label htmlFor="minArbitrage">Min Arbitrage Difference ($/kWh)</label>

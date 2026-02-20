@@ -23,7 +23,7 @@ func TestDecide(t *testing.T) {
 
 	baseSettings := types.Settings{
 		MinBatterySOC:                       20.0,
-		AlwaysChargeUnderDollarsPerKWH:      0.05,
+		AlwaysChargeUnderDollarsPerKWH:      -0.01,
 		GridChargeBatteries:                 true,
 		GridExportSolar:                     true,
 		MinArbitrageDifferenceDollarsPerKWH: 0.01,
@@ -69,7 +69,7 @@ func TestDecide(t *testing.T) {
 	}
 
 	t.Run("Negative Price -> Charge/Hold, No Export", func(t *testing.T) {
-		currentPrice := types.Price{TSStart: now, DollarsPerKWH: -0.01, GridAddlDollarsPerKWH: -0.01}
+		currentPrice := types.Price{TSStart: now, DollarsPerKWH: -0.01}
 		decision, err := c.Decide(ctx, baseStatus, currentPrice, nil, history, baseSettings)
 		require.NoError(t, err)
 
@@ -81,7 +81,7 @@ func TestDecide(t *testing.T) {
 	})
 
 	t.Run("Low Price -> Charge", func(t *testing.T) {
-		currentPrice := types.Price{TSStart: now, DollarsPerKWH: 0.04, GridAddlDollarsPerKWH: 0.04}
+		currentPrice := types.Price{TSStart: now, DollarsPerKWH: 0.00, GridAddlDollarsPerKWH: -0.01}
 		decision, err := c.Decide(ctx, baseStatus, currentPrice, nil, history, baseSettings)
 		require.NoError(t, err)
 

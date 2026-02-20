@@ -53,16 +53,16 @@ type Settings struct {
 	MinBatterySOC float64 `json:"minBatterySOC"`
 
 	// Grid Settings
-	// Maximum Grid Use (in kW) (not supported yet)
+	// Maximum Grid Use (in kW) (not supported yet since we don't change limits)
 	// MaxGridUseKW float64 `json:"maxGridUseKW"`
 	// Can charge batteries from grid
 	GridChargeBatteries bool `json:"gridChargeBatteries"`
-	// Maximum Grid Export (in kW)
+	// Maximum Grid Export (in kW) (not supported yet since we don't change limits)
 	//MaxGridExportKW float64 `json:"maxGridExportKW"`
 	// Can export solar to grid
 	GridExportSolar bool `json:"gridExportSolar"`
-	// Can export batteries to grid (not supported yet)
-	//GridExportBatteries bool `json:"gridExportBatteries"`
+	// Can export batteries to grid
+	GridExportBatteries bool `json:"gridExportBatteries"`
 
 	// Solar Settings
 	// Maximum ratio for solar trend adjustment (caps recentSolar/modelSolar).
@@ -103,10 +103,6 @@ func MigrateSettings(s Settings, currentVersion int) (Settings, bool, error) {
 			// version 1: initial
 			if s.IgnoreHourUsageOverMultiple == 0 {
 				s.IgnoreHourUsageOverMultiple = 2
-				migrated = true
-			}
-			if s.AlwaysChargeUnderDollarsPerKWH == 0 {
-				s.AlwaysChargeUnderDollarsPerKWH = 0.05
 				migrated = true
 			}
 			if s.MinArbitrageDifferenceDollarsPerKWH == 0 {

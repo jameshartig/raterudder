@@ -787,7 +787,12 @@ func (f *Franklin) SetModes(ctx context.Context, bat types.BatteryMode, sol type
 	case types.SolarModeAny:
 		// if settings allow us to export solar then we start exporting solar
 		// this will prefer home, then charge, then export
-		if f.settings.GridExportSolar {
+		if f.settings.GridExportSolar && f.settings.GridExportBatteries {
+			if pc.GridFeedMaxFlag != GridFeedMaxFlagBatteryAndSolar {
+				pc.GridFeedMaxFlag = GridFeedMaxFlagBatteryAndSolar
+				updatedPC = true
+			}
+		} else if f.settings.GridExportSolar {
 			if pc.GridFeedMaxFlag != GridFeedMaxFlagSolarOnly {
 				pc.GridFeedMaxFlag = GridFeedMaxFlagSolarOnly
 				updatedPC = true

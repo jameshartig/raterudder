@@ -77,6 +77,18 @@ export const SolarMode = {
 export type SolarMode = typeof SolarMode[keyof typeof SolarMode];
 
 async function extractError(response: Response, fallback: string): Promise<string> {
+    if (response.status === 401 && !response.url.includes('/api/auth/status')) {
+        try {
+            const statusRes = await fetch('/api/auth/status');
+            if (statusRes.ok) {
+                const status = await statusRes.json();
+                if (!status.loggedIn) {
+                    window.location.href = '/login';
+                }
+            }
+        } catch { /* ignore */ }
+    }
+
     try {
         const body = await response.json();
         if (body && typeof body.error === 'string') {
@@ -150,6 +162,7 @@ export interface Settings {
     ignoreHourUsageOverMultiple: number;
     gridChargeBatteries: boolean;
     gridExportSolar: boolean;
+    gridExportBatteries: boolean;
     solarTrendRatioMax: number;
     solarBellCurveMultiplier: number;
     utilityProvider: string;

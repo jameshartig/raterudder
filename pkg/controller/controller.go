@@ -178,29 +178,30 @@ func (c *Controller) Decide(
 		}
 	}
 
+	capacityKWH := currentStatus.BatteryCapacityKWH
+	if capacityKWH <= 0 {
+		return finalizeAction(types.BatteryModeStandby, types.ActionReasonMissingBattery, "Battery Config Missing or Capacity 0. Standby.", nil, time.Time{}, time.Time{}), nil
+	}
+
+	gridChargeNowCost := currentPrice.DollarsPerKWH + currentPrice.GridAddlDollarsPerKWH
 	// Rule 2: If the price is below the Always Charge Threshold, then charge the
 	// battery.
-	if currentPrice.DollarsPerKWH < settings.AlwaysChargeUnderDollarsPerKWH {
+	if gridChargeNowCost <= settings.AlwaysChargeUnderDollarsPerKWH {
 		desc := fmt.Sprintf(
 			"Price Low (%.3f < %.3f). Charging.",
-			currentPrice.DollarsPerKWH,
+			gridChargeNowCost,
 			settings.AlwaysChargeUnderDollarsPerKWH,
 		)
 		if solarMode == types.SolarModeNoExport {
 			desc += " (Export Disabled due to Negative Price)"
 		}
 		// If negative, we charge.
-		log.Ctx(ctx).DebugContext(ctx, "price below always charge threshold", slog.Float64("price", currentPrice.DollarsPerKWH), slog.Float64("threshold", settings.AlwaysChargeUnderDollarsPerKWH))
+		log.Ctx(ctx).DebugContext(ctx, "price below always charge threshold", slog.Float64("price", gridChargeNowCost), slog.Float64("threshold", settings.AlwaysChargeUnderDollarsPerKWH))
 		return finalizeAction(types.BatteryModeChargeAny, types.ActionReasonAlwaysChargeBelowThreshold, desc, nil, time.Time{}, time.Time{}), nil
 	}
 
 	// Rule 3: Charge now if its cheaper than later, if we will run out of energy
 	// or if we can make more money buying now and selling later (arbitrage)
-
-	capacityKWH := currentStatus.BatteryCapacityKWH
-	if capacityKWH <= 0 {
-		return finalizeAction(types.BatteryModeStandby, types.ActionReasonMissingBattery, "Battery Config Missing or Capacity 0. Standby.", nil, time.Time{}, time.Time{}), nil
-	}
 
 	chargeKW := currentStatus.MaxBatteryChargeKW
 	if chargeKW <= 0 {
@@ -210,7 +211,6 @@ func (c *Controller) Decide(
 
 	simData := c.SimulateState(ctx, now, currentStatus, currentPrice, futurePrices, history, settings)
 
-	gridChargeNowCost := currentPrice.DollarsPerKWH + currentPrice.GridAddlDollarsPerKWH
 	shouldCharge := false
 	var chargeDescription string
 	var chargeActionReason types.ActionReason

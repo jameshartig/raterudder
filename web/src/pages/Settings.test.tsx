@@ -74,6 +74,7 @@ describe('App & Settings', () => {
             pause: false,
             minBatterySOC: 10,
             gridExportSolar: false,
+            gridExportBatteries: false,
             gridChargeBatteries: true,
             solarTrendRatioMax: 3.0,
             solarBellCurveMultiplier: 1.0,
@@ -253,6 +254,35 @@ describe('App & Settings', () => {
          });
     });
 
+    it('can toggle grid export batteries setting', async () => {
+         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
+         render(<App />);
+         fireEvent.click(screen.getByText('Login'));
+
+         // Navigate
+         await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
+         fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
+
+         // Toggle Grid Export Batteries
+         await waitFor(() => expect(screen.getByLabelText(/Grid Export Batteries/i)).toBeInTheDocument());
+         const input = screen.getByLabelText(/Grid Export Batteries/i);
+         fireEvent.click(input);
+
+         // Mock update success
+         (updateSettings as any).mockResolvedValue(undefined);
+
+         // Helper to click save
+         const saveBtn = screen.getByText('Save Settings');
+         fireEvent.click(saveBtn);
+
+         await waitFor(() => {
+             expect(screen.getByText('Settings saved successfully')).toBeInTheDocument();
+             expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+                 gridExportBatteries: true
+             }), expect.any(String), undefined);
+         });
+    });
+
     it('renders solar settings inputs on settings page', async () => {
         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
         render(<App />);
@@ -297,6 +327,7 @@ describe('App & Settings', () => {
             pause: false,
             minBatterySOC: 10,
             gridExportSolar: true,
+            gridExportBatteries: false,
             gridChargeBatteries: true,
             solarTrendRatioMax: 3.0,
             solarBellCurveMultiplier: 1.0,
@@ -328,6 +359,7 @@ describe('App & Settings', () => {
             pause: false,
             minBatterySOC: 10,
             gridExportSolar: false,
+            gridExportBatteries: false,
             gridChargeBatteries: true,
             solarTrendRatioMax: 3.0,
             solarBellCurveMultiplier: 0.3,

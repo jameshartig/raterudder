@@ -456,7 +456,10 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                                 );
                             }
                             const action = item as Action;
-                            const reasonText = getReasonText(action);
+                            let reasonText = getReasonText(action);
+                            if (action.solarMode === SolarMode.NoExport && action.currentPrice && action.currentPrice.dollarsPerKWH < 0) {
+                                reasonText += " Disabled solar export because the price is negative.";
+                            }
                             return (
                                 <li key={index} className="action-item">
                                     <div className="action-time">
