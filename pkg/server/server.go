@@ -127,7 +127,7 @@ func (s *Server) setupHandler() http.Handler {
 	apiMux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
 	apiMux.HandleFunc("POST /api/auth/login", s.handleLogin)
 	apiMux.HandleFunc("POST /api/auth/logout", s.handleLogout)
-	apiMux.HandleFunc("GET /api/modeling", s.handleModeling)
+	apiMux.HandleFunc("GET /api/forecast", s.handleForecast)
 	apiMux.HandleFunc("POST /api/join", s.handleJoin)
 
 	mux := http.NewServeMux()

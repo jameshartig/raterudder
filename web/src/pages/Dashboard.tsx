@@ -79,6 +79,8 @@ const getReasonText = (action: Action): string => {
             return `Battery deficit predicted${deficitTimeStr ? ` at ${deficitTimeStr}` : ''}. Saving battery for higher prices${futurePriceStr ? ` (peak: ${futurePriceStr})` : ''}.`;
         case ActionReason.WaitingToCharge:
             return `Delaying charge for lower prices${futurePriceStr ? ` (expected: ${futurePriceStr})` : ''}.`;
+        case ActionReason.ChargeSurvivePeak:
+            return `Battery won't survive upcoming peak. Charging now${futurePriceStr ? ` (peak: ${futurePriceStr})` : ''}.`;
         case ActionReason.ArbitrageSave:
             return `Current price is peak (${currentPriceStr}). Using battery to offset grid costs.`;
         case ActionReason.NoChange:
@@ -177,6 +179,7 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
             isSummary: true;
             type: SummaryType;
             reason?: ActionReason;
+            latestAction: Action;
             startTime: string;
             avgPrice: number;
             min: number;
@@ -220,6 +223,7 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                     isSummary: true,
                     type: type,
                     reason: action.reason,
+                    latestAction: action,
                     startTime: action.timestamp,
                     count: 1,
                     alarms: new Set<string>(),
@@ -244,6 +248,7 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                 }
                 if (currentSummary && currentSummary.type === 'fault' && currentSummary.reason === action.reason) {
                     updateSummary(currentSummary);
+                    currentSummary.latestAction = action;
                 } else {
                     if (currentSummary) {
                         accumulator.push(currentSummary);
@@ -276,6 +281,7 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
             } else if (isNoChange) {
                 if (currentSummary && currentSummary.type === 'no_change') {
                     updateSummary(currentSummary);
+                    currentSummary.latestAction = action;
                 } else {
                     if (currentSummary) {
                         accumulator.push(currentSummary);
@@ -407,6 +413,8 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                                         title = 'Emergency Mode';
                                         description = 'System manually put into emergency mode. Skipping automation.';
                                     }
+                                } else if (!isFault && summary.latestAction) {
+                                    description = getReasonText(summary.latestAction);
                                 }
 
                                 const alarms = isFault && !isEmergency ? Array.from(summary.alarms).join(', ') : '';
@@ -428,9 +436,14 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                                                     )}
                                                 </div>
                                             ) : (
-                                                isFault && alarms && (
-                                                    <p className="fault-alarms">Alarms: {alarms}</p>
-                                                )
+                                                <>
+                                                    {isFault && alarms && (
+                                                        <p className="fault-alarms">Alarms: {alarms}</p>
+                                                    )}
+                                                    {!isFault && description && (
+                                                        <p>{description}</p>
+                                                    )}
+                                                </>
                                             )}
                                             {summary.hasPrice && (
                                                 <div className="action-footer">

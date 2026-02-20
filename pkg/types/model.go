@@ -62,6 +62,7 @@ const (
 	ActionReasonEmergencyMode              ActionReason = "emergencyMode"
 	ActionReasonHasAlarms                  ActionReason = "hasAlarms"
 	ActionReasonWaitingToCharge            ActionReason = "waitingToCharge"
+	ActionReasonChargeSurvivePeak          ActionReason = "chargeSurvivePeak"
 )
 
 // Action represents a control decision made by the system.

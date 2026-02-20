@@ -15,14 +15,16 @@ type SimHour struct {
 	TS                      time.Time   `json:"ts"`
 	Hour                    int         `json:"hour"`
 	NetLoadSolarKWH         float64     `json:"netLoadSolarKWH"`
+	ClampedNetLoadSolarKWH  float64     `json:"clampedNetLoadSolarKWH"`
 	GridChargeDollarsPerKWH float64     `json:"gridChargeDollarsPerKWH"`
 	SolarOppDollarsPerKWH   float64     `json:"solarOppDollarsPerKWH"`
 	AvgHomeLoadKWH          float64     `json:"avgHomeLoadKWH"`
 	PredictedSolarKWH       float64     `json:"predictedSolarKWH"`
 	BatteryKWH              float64     `json:"batteryKWH"`
+	BatteryKWHIfStandby     float64     `json:"batteryKWHIfStandby"`
 	BatteryCapacityKWH      float64     `json:"batteryCapacityKWH"`
 	BatteryReserveKWH       float64     `json:"batteryReserveKWH"`
-	BatteryDeficitKWH       float64     `json:"batteryDeficitKWH"`
+	TotalBatteryDeficitKWH  float64     `json:"totalBatteryDeficitKWH"`
 	TodaySolarTrend         float64     `json:"todaySolarTrend"`
 	HitCapacity             bool        `json:"hitCapacity"`
 	HitDeficit              bool        `json:"hitDeficit"`
@@ -44,6 +46,7 @@ func (c *Controller) SimulateState(
 	currentSOC := currentStatus.BatterySOC
 	// simulate battery energy over the 24 hours
 	simEnergy := capacityKWH * (currentSOC / 100.0)
+	simStandbyEnergy := simEnergy
 	var deficitKWH float64
 
 	// Build Energy Model
@@ -101,9 +104,9 @@ func (c *Controller) SimulateState(
 
 		netLoadSolar := profile.avgHomeLoadKWH - predictedAvgSolar
 
+		clampedNet := netLoadSolar
 		// update simulated energy state
 		if netLoadSolar > 0 {
-			clampedNet := netLoadSolar
 			// make sure we don't simulate discharging more than we can
 			if currentStatus.MaxBatteryDischargeKW > 0 && clampedNet > currentStatus.MaxBatteryDischargeKW {
 				clampedNet = currentStatus.MaxBatteryDischargeKW
@@ -117,16 +120,20 @@ func (c *Controller) SimulateState(
 			}
 		} else {
 			// make sure we don't simulate charging more than we can
-			clampedNet := -netLoadSolar
-			if currentStatus.MaxBatteryChargeKW > 0 && clampedNet > currentStatus.MaxBatteryChargeKW {
-				clampedNet = currentStatus.MaxBatteryChargeKW
+			if currentStatus.MaxBatteryChargeKW > 0 && clampedNet < -currentStatus.MaxBatteryChargeKW {
+				clampedNet = -currentStatus.MaxBatteryChargeKW
 			}
 			// Solar > Load: We charge battery
-			simEnergy += clampedNet
+			simEnergy -= clampedNet
 			// make sure we don't simulate charging more than it can hold
 			if simEnergy > capacityKWH {
 				simEnergy = capacityKWH
 				hitCapacity = true
+			}
+
+			simStandbyEnergy -= clampedNet
+			if simStandbyEnergy > capacityKWH {
+				simStandbyEnergy = capacityKWH
 			}
 		}
 
@@ -134,14 +141,16 @@ func (c *Controller) SimulateState(
 			TS:                      simTime,
 			Hour:                    h,
 			NetLoadSolarKWH:         netLoadSolar,
+			ClampedNetLoadSolarKWH:  clampedNet,
 			GridChargeDollarsPerKWH: price.DollarsPerKWH + price.GridAddlDollarsPerKWH,
 			SolarOppDollarsPerKWH:   solarOppCost,
 			AvgHomeLoadKWH:          profile.avgHomeLoadKWH,
 			PredictedSolarKWH:       predictedAvgSolar,
 			BatteryKWH:              simEnergy,
+			BatteryKWHIfStandby:     simStandbyEnergy,
 			BatteryCapacityKWH:      capacityKWH,
 			BatteryReserveKWH:       minKWH,
-			BatteryDeficitKWH:       deficitKWH,
+			TotalBatteryDeficitKWH:  deficitKWH,
 			TodaySolarTrend:         currentSolarTrend,
 			HitCapacity:             hitCapacity,
 			HitDeficit:              hitDeficit,

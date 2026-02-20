@@ -158,6 +158,34 @@ func TestDecide(t *testing.T) {
 		assert.NotZero(t, decision.Action.FuturePrice.DollarsPerKWH, "FuturePrice should be set for deficit charge")
 	})
 
+	t.Run("Peak Survival -> Already Hit Capacity Before Peak", func(t *testing.T) {
+		currentPrice := types.Price{TSStart: now, DollarsPerKWH: 0.10, GridAddlDollarsPerKWH: 0.10}
+		futurePrices := []types.Price{}
+		// First 5 hours are low price, then high price
+		for i := 1; i <= 24; i++ {
+			price := 0.10
+			if i >= 5 {
+				price = 0.50
+			}
+			futurePrices = append(futurePrices, types.Price{
+				TSStart:       now.Add(time.Duration(i) * time.Hour),
+				DollarsPerKWH: price, GridAddlDollarsPerKWH: price,
+			})
+		}
+
+		// Battery is low, but solar is going to charge it up to 100% before the peak
+		lowBattStatus := baseStatus
+		lowBattStatus.BatterySOC = 20.0
+		lowBattStatus.SolarKW = 10.0 // huge solar, will fill battery quickly
+		lowBattStatus.HomeKW = 1.0
+
+		decision, err := c.Decide(ctx, lowBattStatus, currentPrice, futurePrices, history, baseSettings)
+		require.NoError(t, err)
+
+		// It should NOT charge now because we're going to hit capacity anyway
+		assert.NotEqual(t, types.ActionReasonChargeSurvivePeak, decision.Action.Reason)
+	})
+
 	t.Run("Deficit detected -> Charge Later due to MinDeficitPriceDifference", func(t *testing.T) {
 		currentPrice := types.Price{TSStart: now, DollarsPerKWH: 0.10, GridAddlDollarsPerKWH: 0.10}
 		// Future is expensive, but difference is small

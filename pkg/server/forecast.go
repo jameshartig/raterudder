@@ -9,7 +9,7 @@ import (
 	"github.com/raterudder/raterudder/pkg/log"
 )
 
-func (s *Server) handleModeling(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleForecast(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	siteID := s.getSiteID(r)
 

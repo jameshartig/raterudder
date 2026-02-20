@@ -37,6 +37,8 @@ vi.mock('../api', () => ({
         NoChange: 'sufficientBattery',
         EmergencyMode: 'emergencyMode',
         DeficitSave: 'deficitSave',
+        ChargeSurvivePeak: 'chargeSurvivePeak',
+        WaitingToCharge: 'waitingToCharge',
     },
 }));
 
@@ -244,6 +246,9 @@ describe('Dashboard', () => {
         await waitFor(() => {
             // Should show "No Change" title/header
             expect(screen.getByRole('heading', { name: /No Change/ })).toBeInTheDocument();
+            // Should show the latest action's description/reason
+            expect(screen.getByText('No change 2')).toBeInTheDocument();
+            expect(screen.queryByText('No change 1')).not.toBeInTheDocument();
             // Should show average price: (0.10 + 0.20) / 2 = 0.15
             expect(screen.getByText(/Avg Price:/)).toBeInTheDocument();
             expect(screen.getByText(/\$0.150\/kWh/)).toBeInTheDocument();
@@ -306,6 +311,26 @@ describe('Dashboard', () => {
             expect(screen.getByText(/peak later/)).toBeInTheDocument();
             // Should show the future price in footer
             expect(screen.getByText(/Peak:.*\$0.500/)).toBeInTheDocument();
+        });
+    });
+
+    it('renders charge survive peak reason text', async () => {
+        const actions = [{
+            reason: 'chargeSurvivePeak',
+            description: 'Charging Optimized: Cannot survive peak pricing...',
+            timestamp: new Date().toISOString(),
+            batteryMode: 2, // ChargeAny
+            solarMode: 0,
+            currentPrice: { dollarsPerKWH: 0.10, tsStart: '', tsEnd: '' },
+            futurePrice: { dollarsPerKWH: 0.50, tsStart: '', tsEnd: '' },
+        }];
+        (fetchActions as any).mockResolvedValue(actions);
+
+        renderWithRouter(<Dashboard />);
+
+        await waitFor(() => {
+            expect(screen.getByText(/Battery won't survive upcoming peak. Charging now/)).toBeInTheDocument();
+            expect(screen.getByText(/peak:.*\$0.500/)).toBeInTheDocument();
         });
     });
 

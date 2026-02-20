@@ -30,6 +30,7 @@ export const ActionReason = {
     EmergencyMode: 'emergencyMode',
     HasAlarms: 'hasAlarms',
     WaitingToCharge: 'waitingToCharge',
+    ChargeSurvivePeak: 'chargeSurvivePeak',
     // deprecated
     DeficitSave: 'deficitSave',
 } as const;
@@ -255,6 +256,7 @@ export interface ModelingHour {
     avgHomeLoadKWH: number;
     predictedSolarKWH: number;
     batteryKWH: number;
+    batteryKWHIfStandby: number;
     batteryCapacityKWH: number;
     batteryReserveKWH: number;
     todaySolarTrend: number;
@@ -265,7 +267,7 @@ export const fetchModeling = async (siteID?: string): Promise<ModelingHour[]> =>
     if (siteID) {
         query.append('siteID', siteID);
     }
-    const response = await fetch(`/api/modeling?${query.toString()}`);
+    const response = await fetch(`/api/forecast?${query.toString()}`);
     if (!response.ok) {
         throw new Error(await extractError(response, 'Failed to fetch modeling data'));
     }

@@ -18,7 +18,7 @@ import (
 	"github.com/raterudder/raterudder/pkg/utility"
 )
 
-func TestHandleModeling(t *testing.T) {
+func TestHandleForecast(t *testing.T) {
 	t.Run("Returns 24 SimHours", func(t *testing.T) {
 		mockU := &mockUtility{}
 		mockU.On("ApplySettings", mock.Anything, mock.Anything).Return(nil)
@@ -55,13 +55,13 @@ func TestHandleModeling(t *testing.T) {
 			bypassAuth: true,
 		}
 
-		req := httptest.NewRequest("GET", "/api/modeling", nil)
+		req := httptest.NewRequest("GET", "/api/forecast", nil)
 		// Inject siteID
 		ctx := context.WithValue(req.Context(), siteIDContextKey, types.SiteIDNone)
 		req = req.WithContext(ctx)
 		w := httptest.NewRecorder()
 
-		srv.handleModeling(w, req)
+		srv.handleForecast(w, req)
 
 		resp := w.Result()
 		require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -89,12 +89,12 @@ func TestHandleModeling(t *testing.T) {
 			bypassAuth: true,
 		}
 
-		req := httptest.NewRequest("GET", "/api/modeling", nil)
+		req := httptest.NewRequest("GET", "/api/forecast", nil)
 		// Inject siteID
 		req = req.WithContext(context.WithValue(req.Context(), siteIDContextKey, types.SiteIDNone))
 		w := httptest.NewRecorder()
 
-		srv.handleModeling(w, req)
+		srv.handleForecast(w, req)
 
 		assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
 		var errResp struct {
@@ -122,12 +122,12 @@ func TestHandleModeling(t *testing.T) {
 			bypassAuth: true,
 		}
 
-		req := httptest.NewRequest("GET", "/api/modeling", nil)
+		req := httptest.NewRequest("GET", "/api/forecast", nil)
 		// Inject siteID
 		req = req.WithContext(context.WithValue(req.Context(), siteIDContextKey, types.SiteIDNone))
 		w := httptest.NewRecorder()
 
-		srv.handleModeling(w, req)
+		srv.handleForecast(w, req)
 
 		assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
 		var errResp struct {
@@ -163,12 +163,12 @@ func TestHandleModeling(t *testing.T) {
 			bypassAuth: true,
 		}
 
-		req := httptest.NewRequest("GET", "/api/modeling", nil)
+		req := httptest.NewRequest("GET", "/api/forecast", nil)
 		// Inject siteID
 		req = req.WithContext(context.WithValue(req.Context(), siteIDContextKey, types.SiteIDNone))
 		w := httptest.NewRecorder()
 
-		srv.handleModeling(w, req)
+		srv.handleForecast(w, req)
 
 		assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
 		var errResp struct {
@@ -214,12 +214,12 @@ func TestHandleModeling(t *testing.T) {
 			bypassAuth: true,
 		}
 
-		req := httptest.NewRequest("GET", "/api/modeling", nil)
+		req := httptest.NewRequest("GET", "/api/forecast", nil)
 		// Inject siteID
 		req = req.WithContext(context.WithValue(req.Context(), siteIDContextKey, types.SiteIDNone))
 		w := httptest.NewRecorder()
 
-		srv.handleModeling(w, req)
+		srv.handleForecast(w, req)
 
 		require.Equal(t, http.StatusOK, w.Result().StatusCode)
 
