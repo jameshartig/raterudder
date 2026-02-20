@@ -42,7 +42,8 @@ function AppContent() {
     const [loading, setLoading] = useState(true);
     const [hasAttemptedFetch, setHasAttemptedFetch] = useState(false);
 
-    const [, navigate] = useLocation();
+    const [location, navigate] = useLocation();
+    const isHome = location === '/';
 
     useEffect(() => {
         const queryParams = new URLSearchParams(window.location.search);
@@ -75,6 +76,13 @@ function AppContent() {
     // Initial auth check — runs once on mount. Sets loading=true to gate
     // the first render until we know whether the user is authenticated.
     useEffect(() => {
+        // Skip auth check if we're on the landing page.
+        // We'll trigger it later if they navigate away.
+        if (window.location.pathname === '/') {
+            setLoading(false);
+            return;
+        }
+
         fetchAuthStatus()
             .then(status => {
                 applyStatus(status, false);
@@ -89,6 +97,24 @@ function AppContent() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    // Trigger auth check if user navigates to a non-home page and hasn't checked yet.
+    useEffect(() => {
+        if (!isHome && !hasAttemptedFetch && !loading) {
+            setLoading(true);
+            fetchAuthStatus()
+                .then(status => {
+                    applyStatus(status, false);
+                })
+                .catch(err => {
+                    console.error(err);
+                    setHasAttemptedFetch(true);
+                })
+                .finally(() => {
+                    setLoading(false);
+                });
+        }
+    }, [location, hasAttemptedFetch, loading]);
+
     // Re-check auth after login/logout without toggling loading, so child
     // components stay mounted and don't re-fire their own data fetches.
     const checkStatus = (redirectOnLogin = false) => {
@@ -100,9 +126,6 @@ function AppContent() {
                 console.error(err);
             });
     };
-
-    const [location] = useLocation();
-    const isHome = location === '/';
 
     const handleLoginSuccess = async (credentialResponse: any) => {
         try {

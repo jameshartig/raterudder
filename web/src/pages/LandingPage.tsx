@@ -66,7 +66,9 @@ const LandingPage: React.FC = () => {
             <section className="hero-section">
                 <div className="content-container hero-layout">
                     <div className="hero-content">
-                        <div className="badge">Limited Beta Now Open</div>
+                        {JOIN_FORM_URL && (
+                            <div className="badge">Limited Beta Now Open</div>
+                        )}
                         <h1>Your Battery, Just <span className="highlight">Smarter.</span></h1>
                         <p>
                             RateRudder transforms your home battery into a powerful financial asset.
