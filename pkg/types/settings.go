@@ -7,7 +7,7 @@ import (
 
 // CurrentSettingsVersion is the current version of the settings struct.
 // Increment this value when adding new fields that require default values.
-const CurrentSettingsVersion = 5
+const CurrentSettingsVersion = 6
 
 // UtilityRateOptions represents the options for the utility rate.
 type UtilityRateOptions struct {
@@ -32,6 +32,9 @@ type Settings struct {
 	DryRun bool `json:"dryRun"`
 	// Pause updates
 	Pause bool `json:"pause"`
+
+	// What environment to opt into
+	Release string `json:"release"`
 
 	// Power History Settings
 	// What multiple over previous days to ignore when calculating power usage
@@ -137,6 +140,11 @@ func MigrateSettings(s Settings, currentVersion int) (Settings, bool, error) {
 			// version 5: add additional fees schedule
 			if s.UtilityProvider == "comed_hourly" {
 				s.UtilityProvider = "comed_besh"
+				migrated = true
+			}
+		case 6:
+			if s.Release == "" {
+				s.Release = "production"
 				migrated = true
 			}
 		default:

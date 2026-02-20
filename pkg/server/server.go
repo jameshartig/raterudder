@@ -58,6 +58,7 @@ type Server struct {
 	bypassAuth    bool
 	singleSite    bool
 	encryptionKey string
+	release       string
 }
 
 // Configured initializes the Server with dependencies.
@@ -86,6 +87,7 @@ func Configured(u *utility.Map, e *ess.Map, s storage.Database) *Server {
 	updateSpecificAudience := lflag.String("update-specific-audience", "", "audience to validate for /api/update")
 	singleSite := lflag.Bool("single-site", false, "Enable single-site mode (disables siteID requirement)")
 	encryptionKey := lflag.RequiredString("credentials-encryption-key", "Key for encrypting credentials")
+	release := lflag.String("release", "production", "Release environment (production or staging)")
 
 	lflag.Do(func() {
 		srv.listenAddr = *listenAddr
@@ -100,6 +102,7 @@ func Configured(u *utility.Map, e *ess.Map, s storage.Database) *Server {
 		srv.oidcAudience = *oidcAudience
 		srv.updateSpecificAudience = *updateSpecificAudience
 		srv.singleSite = *singleSite
+		srv.release = *release
 
 		if len(*encryptionKey) != 32 {
 			log.Ctx(context.Background()).Error("credentials-encryption-key must be 32 characters")

@@ -155,6 +155,7 @@ export interface UtilityRateOptions {
 export interface Settings {
     dryRun: boolean;
     pause: boolean;
+    release: string;
     alwaysChargeUnderDollarsPerKWH: number;
     minArbitrageDifferenceDollarsPerKWH: number;
     minDeficitPriceDifferenceDollarsPerKWH: number;

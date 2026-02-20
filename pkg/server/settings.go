@@ -97,6 +97,11 @@ type SettingsRes struct {
 	HasCredentials HasCredentials `json:"hasCredentials"`
 }
 
+var validEnvironments = map[string]bool{
+	"production": true,
+	"staging":    true,
+}
+
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	siteID := s.getSiteID(r)
@@ -157,7 +162,8 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if newSettings.MinArbitrageDifferenceDollarsPerKWH < 0 ||
 		newSettings.MinBatterySOC < 0 || newSettings.MinBatterySOC > 100 ||
 		newSettings.IgnoreHourUsageOverMultiple < 1 ||
-		newSettings.SolarBellCurveMultiplier < 0 || newSettings.SolarTrendRatioMax < 1 {
+		newSettings.SolarBellCurveMultiplier < 0 || newSettings.SolarTrendRatioMax < 1 ||
+		newSettings.Release != s.release {
 		writeJSONError(w, "invalid settings values", http.StatusBadRequest)
 		return
 	}

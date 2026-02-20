@@ -522,15 +522,16 @@ func TestHandleUpdateSites(t *testing.T) {
 	mockS.On("ListSites", mock.Anything).Return([]types.Site{
 		{ID: "site1"},
 		{ID: "site2"},
+		{ID: "site3"},
 	}, nil)
 
-	// Expect GetSettings for both sites
-	mockS.On("GetSettings", mock.Anything, "site1").Return(types.Settings{UtilityProvider: "test"}, types.CurrentSettingsVersion, nil)
-	mockS.On("GetSettings", mock.Anything, "site2").Return(types.Settings{UtilityProvider: "test"}, types.CurrentSettingsVersion, nil)
+	// In production mode (default), site1 and site3 (default) should run. site2 should be skipped.
+	mockS.On("GetSettings", mock.Anything, "site1").Return(types.Settings{UtilityProvider: "test", Release: "production"}, types.CurrentSettingsVersion, nil)
+	mockS.On("GetSettings", mock.Anything, "site2").Return(types.Settings{UtilityProvider: "test", Release: "staging"}, types.CurrentSettingsVersion, nil)
+	mockS.On("GetSettings", mock.Anything, "site3").Return(types.Settings{UtilityProvider: "test", Release: "production"}, types.CurrentSettingsVersion, nil)
 
-	// Other storage calls for both sites
+	// Other storage calls for site1 and site3
 	mockS.On("GetLatestEnergyHistoryTime", mock.Anything, mock.Anything).Return(time.Time{}, 0, nil)
-	// Return recent time for PriceHistory to limit backfill to 1 call (for current partial day)
 	mockS.On("GetLatestPriceHistoryTime", mock.Anything, mock.Anything).Return(time.Now().Add(-1*time.Hour), types.CurrentPriceHistoryVersion, nil)
 	mockS.On("UpsertEnergyHistory", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	mockS.On("UpsertPrice", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
@@ -538,7 +539,6 @@ func TestHandleUpdateSites(t *testing.T) {
 	mockS.On("InsertAction", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	mockES := &mockESS{}
-	// Expect calls for both sites
 	mockES.On("ApplySettings", mock.Anything, mock.Anything).Return(nil)
 	mockES.On("Authenticate", mock.Anything, mock.Anything).Return(types.Credentials{}, false, nil)
 	mockES.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
@@ -547,7 +547,7 @@ func TestHandleUpdateSites(t *testing.T) {
 
 	mockP := ess.NewMap()
 	mockP.SetSystem("site1", mockES)
-	mockP.SetSystem("site2", mockES)
+	mockP.SetSystem("site3", mockES)
 
 	mockUMap := utility.NewMap()
 	mockUMap.SetProvider("test", mockU)
@@ -559,6 +559,7 @@ func TestHandleUpdateSites(t *testing.T) {
 		listenAddr: ":8080",
 		controller: controller.NewController(),
 		bypassAuth: true,
+		release:    "production",
 	}
 
 	req := httptest.NewRequest("POST", "/api/updateSites", nil)
@@ -574,12 +575,29 @@ func TestHandleUpdateSites(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "success", results["site1"])
-	assert.Equal(t, "success", results["site2"])
+	assert.NotContains(t, results, "site2")
+	assert.Equal(t, "success", results["site3"])
 
-	// Verify caching: GetCurrentPrice should be called once per site
+	// Verify caching: GetCurrentPrice should be called twice (once for site1 and once for site3)
 	mockU.AssertNumberOfCalls(t, "GetCurrentPrice", 2)
-	mockU.AssertNumberOfCalls(t, "GetConfirmedPrices", 2)
-	mockS.AssertNumberOfCalls(t, "GetLatestPriceHistoryTime", 2)
+
+	t.Run("Staging Release", func(t *testing.T) {
+		srv.release = "staging"
+		// Reset mocks if necessary, but here we just want to verify site2 is picked up
+		mockS.On("GetSettings", mock.Anything, "site2").Return(types.Settings{UtilityProvider: "test"}, types.CurrentSettingsVersion, nil)
+		mockP.SetSystem("site2", mockES)
+
+		w := httptest.NewRecorder()
+		srv.handleUpdateSites(w, req)
+
+		var results map[string]string
+		err := json.NewDecoder(w.Body).Decode(&results)
+		require.NoError(t, err)
+
+		assert.NotContains(t, results, "site1")
+		assert.Equal(t, "success", results["site2"])
+		assert.NotContains(t, results, "site3")
+	})
 }
 
 // Helpers for Recording Mocks

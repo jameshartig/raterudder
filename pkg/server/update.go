@@ -18,7 +18,14 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	siteID := s.getSiteID(r)
 
-	action, status, err := s.performSiteUpdate(ctx, siteID)
+	// 1. Get Settings and Credentials
+	settings, creds, err := s.getSettingsWithMigration(ctx, siteID)
+	if err != nil {
+		log.Ctx(ctx).ErrorContext(ctx, "failed to get site settings", slog.Any("error", err))
+		writeJSONError(w, "failed to get site settings", http.StatusInternalServerError)
+		return
+	}
+	action, status, err := s.performSiteUpdate(ctx, siteID, settings, creds)
 	if err != nil {
 		// Log the error, but check if we returned an error that should be returned to the client
 		log.Ctx(ctx).ErrorContext(ctx, "update failed", slog.Any("error", err))
@@ -56,16 +63,27 @@ func (s *Server) handleUpdateSites(w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := make(map[string]string)
-
 	for _, site := range sites {
 		ctx := log.With(ctx, log.Ctx(ctx).With(slog.String("siteID", site.ID)))
-		log.Ctx(ctx).InfoContext(ctx, "processing site update")
-		_, status, err := s.performSiteUpdate(ctx, site.ID)
+
+		settings, creds, err := s.getSettingsWithMigration(ctx, site.ID)
+		if err != nil {
+			log.Ctx(ctx).ErrorContext(ctx, "failed to get site settings", slog.Any("error", err))
+			continue
+		}
+
+		if settings.Release != s.release {
+			continue
+		}
+
+		log.Ctx(ctx).DebugContext(ctx, "processing site update")
+		_, status, err := s.performSiteUpdate(ctx, site.ID, settings, creds)
 		if err != nil {
 			// TODO: don't error when its because of missing credentials
 			log.Ctx(ctx).ErrorContext(ctx, "site update failed", slog.Any("error", err))
 			results[site.ID] = fmt.Sprintf("failed: %v", err)
 		} else {
+			log.Ctx(ctx).InfoContext(ctx, "site update success")
 			if status == "" {
 				status = "success"
 			}
@@ -79,12 +97,12 @@ func (s *Server) handleUpdateSites(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) performSiteUpdate(ctx context.Context, siteID string) (*types.Action, string, error) {
-	// 1. Get Settings and Credentials
-	settings, creds, err := s.getSettingsWithMigration(ctx, siteID)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to get settings: %w", err)
-	}
+func (s *Server) performSiteUpdate(
+	ctx context.Context,
+	siteID string,
+	settings settingsWithVersion,
+	creds types.Credentials,
+) (*types.Action, string, error) {
 
 	// get ESS System
 	essSystem, err := s.getESSSystem(ctx, siteID, settings, creds)
@@ -98,7 +116,7 @@ func (s *Server) performSiteUpdate(ctx context.Context, siteID string) (*types.A
 		return nil, "", fmt.Errorf("failed to get utility system (%s): %w", settings.UtilityProvider, err)
 	}
 
-	// 2. Sync energy history
+	// sync energy history
 	if err := s.updateEnergyHistory(ctx, siteID, essSystem); err != nil {
 		log.Ctx(ctx).ErrorContext(ctx, "failed to sync energy history", slog.Any("error", err))
 		// continue even if history sync fails
@@ -116,7 +134,7 @@ func (s *Server) performSiteUpdate(ctx context.Context, siteID string) (*types.A
 		return nil, "paused", nil
 	}
 
-	// 3. Fetch current ESS status
+	// fetch current ESS status
 	status, err := essSystem.GetStatus(ctx)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to get ess status: %w", err)
@@ -155,7 +173,7 @@ func (s *Server) performSiteUpdate(ctx context.Context, siteID string) (*types.A
 		return nil, "alarms present", nil
 	}
 
-	// 4. Get Current Price for controller
+	// get Current Price for controller
 	currentPrice, err := utility.GetCurrentPrice(ctx)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to get price: %w", err)
@@ -163,14 +181,14 @@ func (s *Server) performSiteUpdate(ctx context.Context, siteID string) (*types.A
 
 	log.Ctx(ctx).DebugContext(ctx, "update: current price fetched")
 
-	// 5. Get Future Prices for controller
+	// get Future Prices for controller
 	futurePrices, err := utility.GetFuturePrices(ctx)
 	if err != nil {
 		log.Ctx(ctx).WarnContext(ctx, "failed to get future prices", slog.Any("error", err))
 		// Continue with empty future prices
 	}
 
-	// 6. Get History for Controller (Last 72 hours from Storage)
+	// get History for Controller (Last 72 hours from Storage)
 	historyStart := time.Now().Add(-72 * time.Hour)
 	historyEnd := time.Now()
 	energyHistory, err := s.storage.GetEnergyHistory(ctx, siteID, historyStart, historyEnd)
@@ -180,7 +198,7 @@ func (s *Server) performSiteUpdate(ctx context.Context, siteID string) (*types.A
 
 	log.Ctx(ctx).DebugContext(ctx, "update: starting decision")
 
-	// 7. Decide Action
+	// decide Action
 	decision, err := s.controller.Decide(ctx, status, currentPrice, futurePrices, energyHistory, settings.Settings)
 	if err != nil {
 		return nil, "", fmt.Errorf("controller decision failed: %w", err)
@@ -203,7 +221,7 @@ func (s *Server) performSiteUpdate(ctx context.Context, siteID string) (*types.A
 		slog.Float64("batterySOC", status.BatterySOC),
 	)
 
-	// 8. Execute Action
+	// execute Action
 	switch action.BatteryMode {
 	case types.BatteryModeChargeAny:
 		err = essSystem.SetModes(ctx, types.BatteryModeChargeAny, types.SolarModeAny) // Force charge
@@ -223,7 +241,7 @@ func (s *Server) performSiteUpdate(ctx context.Context, siteID string) (*types.A
 		action.DryRun = true
 	}
 
-	// 9. Log Action
+	// log Action
 	if err := s.storage.InsertAction(ctx, siteID, action); err != nil {
 		log.Ctx(ctx).ErrorContext(ctx, "failed to insert action", slog.Any("error", err))
 	}
