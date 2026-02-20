@@ -13,15 +13,6 @@ resource "google_firestore_database" "default" {
   depends_on = [module.enabled_google_apis]
 }
 
-resource "google_firestore_backup_schedule" "default" {
-  project  = var.project_id
-  database = google_firestore_database.default.name
-
-  retention = "86400s" # 1 day
-
-  daily_recurrence {}
-}
-
 resource "google_project_iam_member" "raterudder_firestore" {
   project = var.project_id
   role    = "roles/datastore.user"

@@ -2,7 +2,6 @@ web/node_modules
 web/dist
 config.json
 config.test.json
-tf/.terraform/*
-tf/backend.tf
+/tf/
 *.har
 *.log

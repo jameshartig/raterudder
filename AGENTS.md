@@ -1,9 +1,3 @@
-Build/Test/Lint
-- Single test: go test -v ./pkg/<pkg> -run ^TestName$
-- Package test: go test -v ./pkg/<pkg>/...
-- Storage emulator tests: go test -v ./pkg/storage/... (uses FIRESTORE_EMULATOR_HOST)
-- Lint/format: go fmt -w . && go vet ./...
-
 Architecture
 - cmd/raterudder is the main entry point and orchestrator.
 - pkg/controller contains decision logic for charging/discharging.
@@ -12,6 +6,9 @@ Architecture
 - pkg/storage persists data/config using Google Cloud Firestore.
 - pkg/server exposes HTTP API endpoints for update/history.
 - pkg/model and pkg/types hold shared data models and types.
+- web is the React frontend.
+- tf is the actual Terraform configuration for deployment.
+- deployment/tf is an example Terraform configuration for deployment.
 
 Code Style
 - Use go fmt formatting and standard Go import grouping.

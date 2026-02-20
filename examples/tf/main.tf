@@ -18,7 +18,7 @@ provider "google" {
 
 variable "project_id" {
   description = "gcp project ID"
-  default     = "raterudder"
+  default     = "YOUR_PROJECT_ID"
 }
 
 data "google_project" "raterudder" {
@@ -32,16 +32,19 @@ variable "schedule_enabled" {
 }
 
 variable "join_form_url" {
-  description = "The URL for the Google Form to join the beta"
+  description = "The URL for the homepage CTA"
   type        = string
-  default     = "https://forms.gle/Z6dJGBebud9J32vZA"
+  default     = ""
 }
 
+variable "github_connection_name" {
+  description = "Name of GitHub connection on https://console.cloud.google.com/cloud-build/repositories/2nd-gen"
+  default = ""
+}
 
-variable "networks" {
-  default = {
-    "us-central1" : "10.0.0.0/24",
-  }
+variable "repository_name" {
+  description = "Name of repository on https://console.cloud.google.com/cloud-build/repositories/2nd-gen"
+  default = "raterudder-raterudder"
 }
 
 module "enabled_google_apis" {

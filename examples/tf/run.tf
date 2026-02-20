@@ -43,15 +43,18 @@ resource "google_artifact_registry_repository_iam_member" "raterudder_build" {
   member     = "serviceAccount:${google_service_account.raterudder_build.email}"
 }
 
+# You need to manually set up a repository on
+# https://console.cloud.google.com/cloud-build/repositories/2nd-gen
+# and update the variables with the names
 resource "google_cloudbuild_trigger" "github" {
   project         = var.project_id
   location        = "us-central1"
   service_account = google_service_account.raterudder_build.id
 
   repository_event_config {
-    repository = "projects/${var.project_id}/locations/us-central1/connections/github-raterudder/repositories/raterudder-raterudder"
+    repository = "projects/${var.project_id}/locations/us-central1/connections/${var.github_connection_name}/repositories/${var.repository_name}"
     push {
-      branch = "^(main|wip)$"
+      branch = "^main$"
     }
   }
 
@@ -175,7 +178,7 @@ resource "google_cloud_run_v2_service" "raterudder" {
 
       env {
         name  = "SINGLE_SITE"
-        value = "false"
+        value = "true"
       }
 
       env {
@@ -234,25 +237,4 @@ resource "google_cloud_run_v2_service_iam_member" "raterudder_build" {
   name     = google_cloud_run_v2_service.raterudder.name
   role     = "roles/run.developer"
   member   = "serviceAccount:${google_service_account.raterudder_build.email}"
-}
-
-resource "google_cloud_run_v2_service_iam_binding" "raterudder" {
-  project  = var.project_id
-  location = google_cloud_run_v2_service.raterudder.location
-  name     = google_cloud_run_v2_service.raterudder.name
-  role     = "roles/run.invoker"
-  members = [
-    "allUsers"
-  ]
-}
-
-resource "google_cloud_run_domain_mapping" "raterudder_com" {
-  name     = "raterudder.com"
-  location = google_cloud_run_v2_service.raterudder.location
-  metadata {
-    namespace = data.google_project.raterudder.project_id
-  }
-  spec {
-    route_name = google_cloud_run_v2_service.raterudder.name
-  }
 }
