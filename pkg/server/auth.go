@@ -175,7 +175,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 					} else {
 						userFound = true
 						// User found, proceed with normal logic
-						if siteID == "" && !ignoreUserNotFound && r.URL.Path != "/api/auth/logout" {
+						if siteID == "" && !ignoreUserNotFound {
 							if len(user.SiteIDs) == 1 {
 								siteID = user.SiteIDs[0]
 							} else {
@@ -201,6 +201,15 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 							permFound = true
 							user.Admin = true
 							break
+						}
+					}
+					if !permFound {
+						for _, admin := range s.adminEmails {
+							if email == admin {
+								permFound = true
+								// Do not set user.Admin = true to grant read-only access
+								break
+							}
 						}
 					}
 					if !permFound {
@@ -231,14 +240,12 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			}
 		}
 
-		slogAttrs := make([]any, 0, 2)
 		if userID != "" {
-			slogAttrs = append(slogAttrs, slog.String("userID", userID))
+			ctx = log.With(ctx, log.Ctx(ctx).With(slog.String("authUserID", userID)))
 		}
 		if siteID != "" {
-			slogAttrs = append(slogAttrs, slog.String("siteID", siteID))
+			ctx = log.With(ctx, log.Ctx(ctx).With(slog.String("authSiteID", siteID)))
 		}
-		log.With(ctx, log.Ctx(ctx).With(slog.Group("auth", slogAttrs...)))
 
 		log.Ctx(ctx).DebugContext(
 			ctx,

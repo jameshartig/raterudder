@@ -65,6 +65,11 @@ func TestAuthMiddleware(t *testing.T) {
 		user, ok := r.Context().Value(userContextKey).(types.User)
 		if ok {
 			w.Header().Set("X-Email", user.Email)
+			if user.Admin {
+				w.Header().Set("X-Admin", "true")
+			} else {
+				w.Header().Set("X-Admin", "false")
+			}
 		}
 		userReg, ok := r.Context().Value(userToRegisterContextKey).(types.User)
 		if ok {
@@ -175,6 +180,35 @@ func TestAuthMiddleware(t *testing.T) {
 		server.authMiddleware(testHandler).ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("Multi Site Mode - Auth as Admin bypasses permissions as read-only", func(t *testing.T) {
+		server.singleSite = false
+		server.adminEmails = []string{"user@example.com"}
+		defer func() { server.adminEmails = nil }() // reset
+
+		w := httptest.NewRecorder()
+		cookie := &http.Cookie{Name: authTokenCookie, Value: "valid-token"}
+		req := createReq("GET", "/api/test?siteID=site3", nil, cookie)
+
+		mockStorage.On("GetUser", mock.Anything, "user@example.com").Return(types.User{
+			ID:      "user@example.com",
+			Email:   "user@example.com",
+			SiteIDs: []string{"site1", "site2"},
+			Admin:   false,
+		}, nil).Once()
+
+		// Permission check typically fails because they aren't explicit here
+		mockStorage.On("GetSite", mock.Anything, "site3").Return(types.Site{
+			ID:          "site3",
+			Permissions: []types.SitePermissions{},
+		}, nil).Once()
+
+		server.authMiddleware(testHandler).ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "user@example.com", w.Header().Get("X-Email"))
+		assert.Equal(t, "false", w.Header().Get("X-Admin"))
 	})
 
 	t.Run("Multi Site Mode - Auth and POST Body SiteID", func(t *testing.T) {

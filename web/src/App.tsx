@@ -38,10 +38,19 @@ function AppContent() {
     const [clientID, setClientID] = useState("");
     const [siteIDs, setSiteIDs] = useState<string[]>([]);
     const [selectedSiteID, setSelectedSiteID] = useState<string>("");
+    const [viewSiteOverride, setViewSiteOverride] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [hasAttemptedFetch, setHasAttemptedFetch] = useState(false);
 
     const [, navigate] = useLocation();
+
+    useEffect(() => {
+        const queryParams = new URLSearchParams(window.location.search);
+        const override = queryParams.get('viewSite');
+        if (override) {
+            setViewSiteOverride(override);
+        }
+    }, []);
 
     const applyStatus = (status: AuthStatus, redirectOnLogin: boolean) => {
         setAuthRequired(status.authRequired);
@@ -120,18 +129,33 @@ function AppContent() {
 
     const showLoading = (loading || (!isHome && !hasAttemptedFetch)) && !isHome;
 
+    const effectiveSiteID = viewSiteOverride || selectedSiteID;
+    const effectiveSiteIDs = viewSiteOverride && !siteIDs.includes(viewSiteOverride)
+        ? [...siteIDs, viewSiteOverride]
+        : siteIDs;
+
+    const handleSiteChange = (id: string) => {
+        if (viewSiteOverride) setViewSiteOverride(null);
+        setSelectedSiteID(id);
+    };
+
     return (
         <AuthWrapper clientID={clientID}>
             <div className={isHome ? "app-container-home" : "app-container"}>
                 <Header
                     loggedIn={loggedIn}
-                    siteIDs={siteIDs}
-                    selectedSiteID={selectedSiteID}
-                    onSiteChange={setSelectedSiteID}
+                    siteIDs={effectiveSiteIDs}
+                    selectedSiteID={effectiveSiteID}
+                    onSiteChange={handleSiteChange}
                     onLogout={handleLogout}
                 />
 
                 <main className="main-content">
+                    {viewSiteOverride && (
+                        <div className="admin-site-banner" style={{ background: '#f59e0b', color: '#fff', padding: '0.5rem', textAlign: 'center', fontWeight: 'bold' }}>
+                            Admin Mode: Viewing Site {viewSiteOverride}
+                        </div>
+                    )}
                     {showLoading ? (
                         <div className="loading-screen">Loading...</div>
                     ) : (
@@ -152,28 +176,28 @@ function AppContent() {
                             {/* Protected Routes */}
                             <Route path="/dashboard">
                                 <ProtectedRoute loggedIn={loggedIn} loading={loading}>
-                                    {siteIDs.length === 0 ? (
+                                    {!effectiveSiteID && effectiveSiteIDs.length === 0 ? (
                                         <JoinPage onJoinSuccess={() => checkStatus(true)} />
                                     ) : (
-                                        <Dashboard siteID={selectedSiteID} />
+                                        <Dashboard siteID={effectiveSiteID} />
                                     )}
                                 </ProtectedRoute>
                             </Route>
                             <Route path="/forecast">
                                 <ProtectedRoute loggedIn={loggedIn} loading={loading}>
-                                    {siteIDs.length === 0 ? (
+                                    {!effectiveSiteID && effectiveSiteIDs.length === 0 ? (
                                         <JoinPage onJoinSuccess={() => checkStatus(true)} />
                                     ) : (
-                                        <Forecast siteID={selectedSiteID} />
+                                        <Forecast siteID={effectiveSiteID} />
                                     )}
                                 </ProtectedRoute>
                             </Route>
                             <Route path="/settings">
                                 <ProtectedRoute loggedIn={loggedIn} loading={loading}>
-                                    {siteIDs.length === 0 ? (
+                                    {!effectiveSiteID && effectiveSiteIDs.length === 0 ? (
                                         <JoinPage onJoinSuccess={() => checkStatus(true)} />
                                     ) : (
-                                        <Settings siteID={selectedSiteID} />
+                                        <Settings siteID={effectiveSiteID} />
                                     )}
                                 </ProtectedRoute>
                             </Route>
