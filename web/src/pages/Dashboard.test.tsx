@@ -272,7 +272,9 @@ describe('Dashboard', () => {
             gridImported: 10,
             gridExported: 5,
             homeUsed: 25,
-            batteryUsed: 10
+            batteryUsed: 10,
+            lastPrice: 0.123,
+            lastCost: 0.150
         });
 
         renderWithRouter(<Dashboard />);
@@ -285,6 +287,8 @@ describe('Dashboard', () => {
             expect(screen.getByText('$5.00')).toBeInTheDocument();
             expect(screen.getByText('Battery Savings')).toBeInTheDocument();
             expect(screen.getByText('$5.50')).toBeInTheDocument();
+            expect(screen.getByText(/Last Price:/)).toBeInTheDocument();
+            expect(screen.getByText(/\$0.123\/kWh/)).toBeInTheDocument();
         });
     });
 

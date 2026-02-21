@@ -128,6 +128,8 @@ export interface SavingsStats {
     gridExported: number;
     homeUsed: number;
     batteryUsed: number;
+    lastCost: number;
+    lastPrice: number;
 }
 
 export const fetchSavings = async (start: Date, end: Date, siteID?: string): Promise<SavingsStats|null> => {

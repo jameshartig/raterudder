@@ -387,6 +387,7 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                                 <span><strong>Grid Import:</strong> {savings.gridImported.toFixed(2)} kWh</span>
                                 <span><strong>Grid Export:</strong> {savings.gridExported.toFixed(2)} kWh</span>
                                 <span><strong>Battery Use:</strong> {savings.batteryUsed.toFixed(2)} kWh</span>
+                                <span><strong>Last Price:</strong> ${savings.lastPrice.toFixed(3)}/kWh</span>
                             </div>
                         </div>
                     )}

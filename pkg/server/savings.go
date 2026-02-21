@@ -22,6 +22,7 @@ type hourlySavingsStatsDebugging struct {
 	SolarSavings  float64 `json:"solarSavings"`
 }
 
+// SavingsStats is the response type for the savings endpoint
 type SavingsStats struct {
 	Timestamp       time.Time                     `json:"timestamp"`
 	Cost            float64                       `json:"cost"`
@@ -35,6 +36,8 @@ type SavingsStats struct {
 	GridExported    float64                       `json:"gridExported"`   // Total grid exported
 	HomeUsed        float64                       `json:"homeUsed"`       // Total home usage
 	BatteryUsed     float64                       `json:"batteryUsed"`    // Total battery discharged
+	LastCost        float64                       `json:"lastCost"`       // Latest cost of grid import
+	LastPrice       float64                       `json:"lastPrice"`      // Latest base price
 	HourlyDebugging []hourlySavingsStatsDebugging `json:"hourlyDebugging"`
 }
 
@@ -69,10 +72,16 @@ func (s *Server) handleHistorySavings(w http.ResponseWriter, r *http.Request) {
 	hourlyImportPrices := make(map[time.Time]float64)
 
 	// TODO: fix this so that we look at the actual time ranges
+	var lastPrice time.Time
 	for _, p := range prices {
 		tsHour := p.TSStart.Truncate(time.Hour)
 		hourlyExportPrices[tsHour] = p.DollarsPerKWH
 		hourlyImportPrices[tsHour] = p.DollarsPerKWH + p.GridAddlDollarsPerKWH
+		if p.TSStart.After(lastPrice) {
+			totalSavings.LastCost = p.DollarsPerKWH + p.GridAddlDollarsPerKWH
+			totalSavings.LastPrice = p.DollarsPerKWH
+			lastPrice = p.TSStart
+		}
 	}
 
 	for _, stat := range energyStats {

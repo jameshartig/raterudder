@@ -136,6 +136,10 @@ func TestHandleHistorySavings(t *testing.T) {
 
 	// Net Savings calculation removed from backend.
 
+	// Last price/cost
+	assert.Equal(t, 0.30, savings.LastPrice)
+	assert.Equal(t, 0.30, savings.LastCost)
+
 	// Home Used: 10 + 10 + 0 + 0 + 10 = 30
 	assert.Equal(t, 30.0, savings.HomeUsed)
 }
