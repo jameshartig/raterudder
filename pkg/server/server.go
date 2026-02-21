@@ -46,19 +46,21 @@ type Server struct {
 	storage    storage.Database
 	controller *controller.Controller
 
-	listenAddr             string
-	devProxy               string
+	listenAddr     string
+	devProxy       string
+	tokenValidator TokenValidator
+	httpServer     *http.Server
+
 	updateSpecificAudience string
 	updateSpecificEmail    string
-	tokenValidator         TokenValidator
-	httpServer             *http.Server
-
-	adminEmails   []string
-	oidcAudience  string
-	bypassAuth    bool
-	singleSite    bool
-	encryptionKey string
-	release       string
+	adminEmails            []string
+	oidcAudience           string
+	bypassAuth             bool
+	singleSite             bool
+	encryptionKey          string
+	release                string
+	serverName             string
+	webCacheDuration       time.Duration
 }
 
 // Configured initializes the Server with dependencies.
@@ -70,6 +72,11 @@ func Configured(u *utility.Map, e *ess.Map, s storage.Database) *Server {
 		storage:        s,
 		controller:     controller.NewController(),
 		tokenValidator: idtoken.Validate,
+		serverName:     "raterudder",
+	}
+	revision := os.Getenv("K_REVISION")
+	if revision != "" {
+		srv.serverName = revision
 	}
 
 	// get the port from PORT when running in cloud run
@@ -88,6 +95,7 @@ func Configured(u *utility.Map, e *ess.Map, s storage.Database) *Server {
 	singleSite := lflag.Bool("single-site", false, "Enable single-site mode (disables siteID requirement)")
 	encryptionKey := lflag.RequiredString("credentials-encryption-key", "Key for encrypting credentials")
 	release := lflag.String("release", "production", "Release environment (production or staging)")
+	webCacheDuration := lflag.Duration("web-cache-duration", 0, "Duration to cache web files (e.g. 1h, 5m). 0 means no cache.")
 
 	lflag.Do(func() {
 		srv.listenAddr = *listenAddr
@@ -103,6 +111,7 @@ func Configured(u *utility.Map, e *ess.Map, s storage.Database) *Server {
 		srv.updateSpecificAudience = *updateSpecificAudience
 		srv.singleSite = *singleSite
 		srv.release = *release
+		srv.webCacheDuration = *webCacheDuration
 
 		if len(*encryptionKey) != 32 {
 			log.Ctx(context.Background()).Error("credentials-encryption-key must be 32 characters")
@@ -149,10 +158,10 @@ func (s *Server) setupHandler() http.Handler {
 			panic(fmt.Errorf("failed to get web dist fs: %w", err))
 		}
 		fileServer := http.FileServer(http.FS(distFS))
-		mux.Handle("/", s.spaHandler(distFS, fileServer))
+		mux.Handle("/", s.webHandler(distFS, fileServer))
 	}
 	mux.HandleFunc("/healthz", s.handleHealthz)
-	return gziphandler.GzipHandler(s.securityHeadersMiddleware(mux))
+	return s.revisionMiddleware(gziphandler.GzipHandler(s.securityHeadersMiddleware(mux)))
 }
 
 func (s *Server) getSiteID(r *http.Request) string {
@@ -218,7 +227,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) spaHandler(dir fs.FS, h http.Handler) http.HandlerFunc {
+func (s *Server) webHandler(dir fs.FS, h http.Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Default to serving index.html for unknown paths (SPA)
 		if r.URL.Path != "/" {
@@ -242,9 +251,21 @@ func (s *Server) spaHandler(dir fs.FS, h http.Handler) http.HandlerFunc {
 				return
 			}
 		}
-		// cache SPA files for an hour
-		w.Header().Set("Cache-Control", "public, max-age=3600")
+		// cache SPA files if duration is set
+		if s.webCacheDuration > 0 {
+			w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(s.webCacheDuration.Seconds())))
+		}
 
 		h.ServeHTTP(w, r)
 	}
+}
+
+func (s *Server) revisionMiddleware(next http.Handler) http.Handler {
+	if s.serverName == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Server", s.serverName)
+		next.ServeHTTP(w, r)
+	})
 }

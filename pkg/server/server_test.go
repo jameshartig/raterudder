@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/raterudder/raterudder/pkg/controller"
 	"github.com/raterudder/raterudder/pkg/ess"
@@ -20,7 +21,7 @@ func init() {
 	log.SetDefaultLogLevel(slog.LevelError)
 }
 
-func TestSPAHandler(t *testing.T) {
+func TestWebHandler(t *testing.T) {
 	// Setup basics for server
 	mockU := &mockUtility{}
 	mockS := &mockStorage{}
@@ -43,7 +44,7 @@ func TestSPAHandler(t *testing.T) {
 		"assets/main.js": {Data: []byte("console.log('hello');")},
 	}
 
-	t.Run("Serve Existing SPA File", func(t *testing.T) {
+	t.Run("Serve Existing Web File", func(t *testing.T) {
 		srv := &Server{
 			utilities:  mockUMap,
 			ess:        mockP,
@@ -54,7 +55,7 @@ func TestSPAHandler(t *testing.T) {
 
 		mux := http.NewServeMux()
 		fileServer := http.FileServer(http.FS(testFS))
-		mux.Handle("/", srv.spaHandler(testFS, fileServer))
+		mux.Handle("/", srv.webHandler(testFS, fileServer))
 
 		// Add a non-asset file to test map
 		testFS["favicon.ico"] = &fstest.MapFile{Data: []byte("icon")}
@@ -68,7 +69,7 @@ func TestSPAHandler(t *testing.T) {
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 		body := w.Body.String()
 		assert.Equal(t, "icon", body)
-		assert.Equal(t, "public, max-age=3600", w.Header().Get("Cache-Control"))
+		assert.Empty(t, w.Header().Get("Cache-Control"))
 	})
 
 	t.Run("Serve Index on Root", func(t *testing.T) {
@@ -82,7 +83,7 @@ func TestSPAHandler(t *testing.T) {
 
 		mux := http.NewServeMux()
 		fileServer := http.FileServer(http.FS(testFS))
-		mux.Handle("/", srv.spaHandler(testFS, fileServer))
+		mux.Handle("/", srv.webHandler(testFS, fileServer))
 
 		req := httptest.NewRequest("GET", "/", nil)
 		w := httptest.NewRecorder()
@@ -92,7 +93,7 @@ func TestSPAHandler(t *testing.T) {
 		resp := w.Result()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 		assert.Equal(t, "<html>index</html>", w.Body.String())
-		assert.Equal(t, "public, max-age=3600", w.Header().Get("Cache-Control"))
+		assert.Empty(t, w.Header().Get("Cache-Control"))
 	})
 
 	t.Run("Serve Index on Unknown Route", func(t *testing.T) {
@@ -106,7 +107,7 @@ func TestSPAHandler(t *testing.T) {
 
 		mux := http.NewServeMux()
 		fileServer := http.FileServer(http.FS(testFS))
-		mux.Handle("/", srv.spaHandler(testFS, fileServer))
+		mux.Handle("/", srv.webHandler(testFS, fileServer))
 
 		req := httptest.NewRequest("GET", "/some/random/route", nil)
 		w := httptest.NewRecorder()
@@ -116,7 +117,7 @@ func TestSPAHandler(t *testing.T) {
 		resp := w.Result()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 		assert.Equal(t, "<html>index</html>", w.Body.String())
-		assert.Equal(t, "public, max-age=3600", w.Header().Get("Cache-Control"))
+		assert.Empty(t, w.Header().Get("Cache-Control"))
 	})
 
 	t.Run("Proxy to Dev Server", func(t *testing.T) {
@@ -164,7 +165,7 @@ func TestSPAHandler(t *testing.T) {
 
 		mux := http.NewServeMux()
 		fileServer := http.FileServer(http.FS(testFS))
-		mux.Handle("/", srv.spaHandler(testFS, fileServer))
+		mux.Handle("/", srv.webHandler(testFS, fileServer))
 
 		req := httptest.NewRequest("GET", "/.well-known/some-file", nil)
 		w := httptest.NewRecorder()
@@ -173,5 +174,50 @@ func TestSPAHandler(t *testing.T) {
 
 		resp := w.Result()
 		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	})
+
+	t.Run("Server Header", func(t *testing.T) {
+		srv := &Server{
+			utilities:  mockUMap,
+			ess:        mockP,
+			storage:    mockS,
+			listenAddr: ":8080",
+			controller: controller.NewController(),
+			serverName: "test-revision-123",
+		}
+
+		handler := srv.setupHandler()
+
+		req := httptest.NewRequest("GET", "/healthz", nil)
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		resp := w.Result()
+		assert.Equal(t, "test-revision-123", resp.Header.Get("Server"))
+	})
+
+	t.Run("web Cache Duration Header", func(t *testing.T) {
+		srv := &Server{
+			utilities:        mockUMap,
+			ess:              mockP,
+			storage:          mockS,
+			listenAddr:       ":8080",
+			controller:       controller.NewController(),
+			webCacheDuration: 5 * time.Minute,
+		}
+
+		mux := http.NewServeMux()
+		fileServer := http.FileServer(http.FS(testFS))
+		mux.Handle("/", srv.webHandler(testFS, fileServer))
+
+		req := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+
+		mux.ServeHTTP(w, req)
+
+		resp := w.Result()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "public, max-age=300", w.Header().Get("Cache-Control"))
 	})
 }
