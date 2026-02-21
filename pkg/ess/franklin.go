@@ -423,6 +423,10 @@ func (f *Franklin) GetStatus(ctx context.Context) (types.SystemStatus, error) {
 			slog.Time("time", t),
 			slog.String("code", alarm.AlarmCode),
 		)
+		if alarm.Name == "SIM card not inserted" {
+			continue
+		}
+
 		alarms = append(alarms, types.SystemAlarm{
 			Name:        alarm.Name,
 			Description: alarm.Explanation,

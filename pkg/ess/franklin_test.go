@@ -249,6 +249,88 @@ func TestFranklin(t *testing.T) {
 		assert.Equal(t, expectedTime.UTC(), status.Alarms[0].Time.UTC())
 	})
 
+	t.Run("GetStatus Alarms Filtered", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/hes-gateway/terminal/initialize/appUserOrInstallerLogin" {
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"code":    200,
+					"success": true,
+					"result":  map[string]interface{}{"token": "tok"},
+				})
+				return
+			}
+			if r.URL.Path == "/hes-gateway/terminal/getDeviceInfoV2" {
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"code":    200,
+					"success": true,
+					"result":  map[string]interface{}{"totalCap": 30.0, "timeZone": "UTC"},
+				})
+				return
+			}
+			if r.URL.Path == "/hes-gateway/terminal/tou/getPowerControlSetting" {
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"code":    200,
+					"success": true,
+					"result":  map[string]interface{}{"gridMaxFlag": 0, "gridFeedMaxFlag": 0},
+				})
+				return
+			}
+			if r.URL.Path == "/hes-gateway/terminal/tou/getGatewayTouListV2" {
+				list := []map[string]interface{}{
+					{"id": 1.0, "workMode": 1},
+				}
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"code":    200,
+					"success": true,
+					"result":  map[string]interface{}{"list": list, "currendId": 1.0},
+				})
+				return
+			}
+			if r.URL.Path == "/hes-gateway/terminal/getDeviceCompositeInfo" {
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"code":    200,
+					"success": true,
+					"result": map[string]interface{}{
+						"runtimeData": map[string]interface{}{
+							"soc": 50.0,
+						},
+						"currentAlarmVOList": []map[string]interface{}{
+							{
+								"logName":          "SIM card not inserted",
+								"alarmExplanation": "Ignore this",
+								"alarmCode":        "E001",
+								"time":             "2023-10-27 12:00:00",
+							},
+							{
+								"logName":          "Real Alarm",
+								"alarmExplanation": "Don't ignore this",
+								"alarmCode":        "E002",
+								"time":             "2023-10-27 12:00:01",
+							},
+						},
+					},
+				})
+				return
+			}
+			http.Error(w, "not found: "+r.URL.Path, 404)
+		}))
+		defer ts.Close()
+
+		f := &Franklin{
+			client:      ts.Client(),
+			baseURL:     ts.URL,
+			username:    "u",
+			md5Password: "p",
+			gatewayID:   "g",
+			settings:    types.Settings{MinBatterySOC: 10},
+		}
+
+		status, err := f.GetStatus(context.Background())
+		require.NoError(t, err, "GetStatus should succeed")
+		require.Len(t, status.Alarms, 1, "should have only 1 alarm (SIM card alarm should be ignored)")
+		assert.Equal(t, "Real Alarm", status.Alarms[0].Name)
+	})
+
 	t.Run("SetModes", func(t *testing.T) {
 		var callOrder []string
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
