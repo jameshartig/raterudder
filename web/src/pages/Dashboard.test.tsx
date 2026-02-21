@@ -6,7 +6,7 @@ import { Router } from 'wouter';
 import * as api from '../api';
 import { setupDefaultApiMocks } from '../test/apiMocks';
 
-const { fetchActions, fetchSavings, fetchSettings } = api;
+const { fetchActions, fetchSavings, fetchSettings, ActionReason } = api;
 
 // Mock the API
 vi.mock('../api', async (importOriginal) => {
@@ -34,6 +34,7 @@ const renderWithRouter = (component: React.ReactNode) => {
 
 describe('Dashboard', () => {
     beforeEach(() => {
+        window.history.replaceState({}, '', '/');
         vi.resetAllMocks();
         setupDefaultApiMocks(api);
     });
@@ -59,7 +60,7 @@ describe('Dashboard', () => {
 
         await waitFor(() => {
             // Should show reason-based text, not description
-            expect(screen.getByText(/Price is low.*Charging batteries/)).toBeInTheDocument();
+            expect(screen.getByText(/Price is low.*\$ 0\.040/)).toBeInTheDocument();
             // Legacy description should NOT be shown
             expect(screen.queryByText('This is a legacy description')).not.toBeInTheDocument();
         });
@@ -116,9 +117,33 @@ describe('Dashboard', () => {
          });
     });
 
+    it('renders battery SOC in footer', async () => {
+        const actions = [{
+            reason: ActionReason.AlwaysChargeBelowThreshold,
+            description: 'SOC test',
+            timestamp: new Date().toISOString(),
+            batteryMode: 1,
+            solarMode: 1,
+            currentPrice: { dollarsPerKWH: 0.05, tsStart: '2026-02-20T19:00:00Z', tsEnd: '' },
+            systemStatus: {
+                batterySOC: 42.5,
+                alarms: [],
+                storms: [],
+            }
+        }];
+        (fetchActions as any).mockResolvedValue(actions);
+
+        renderWithRouter(<Dashboard />);
+
+        await waitFor(() => {
+            expect(screen.getAllByText(/Battery/).length).toBeGreaterThan(0);
+            expect(screen.getAllByText(/42.5%/).length).toBeGreaterThan(0);
+        });
+    });
+
     it('renders dry run badge', async () => {
         const actions = [{
-            reason: 'alwaysChargeBelowThreshold',
+            reason: ActionReason.AlwaysChargeBelowThreshold,
             description: 'Dry run test',
             timestamp: new Date().toISOString(),
             batteryMode: 1, // Standby
@@ -149,7 +174,7 @@ describe('Dashboard', () => {
 
         await waitFor(() => {
             // Solar mode should be visible
-            expect(screen.getByText('No Export')).toBeInTheDocument();
+            expect(screen.getByText('Use & No Export')).toBeInTheDocument();
             // Battery mode (NoChange) should NOT be visible as a badge/tag
             // However, the label might be used elsewhere?
             // In Dashboard.tsx:
@@ -234,9 +259,9 @@ describe('Dashboard', () => {
             expect(screen.queryByText('No change 1')).not.toBeInTheDocument();
             // Should show average price: (0.10 + 0.20) / 2 = 0.15
             expect(screen.getByText(/Avg Price:/)).toBeInTheDocument();
-            expect(screen.getByText(/\$0.150\/kWh/)).toBeInTheDocument();
+            expect(screen.getByText(/\$ 0.150\/kWh/)).toBeInTheDocument();
             // Should show range: 0.10 - 0.20
-            expect(screen.getByText(/Range: \$0.100 - \$0.200/)).toBeInTheDocument();
+            expect(screen.getByText(/Range: \$ 0.100 - \$ 0.200/)).toBeInTheDocument();
             // Should show count in title
             expect(screen.getByText('(2x)')).toBeInTheDocument();
         });
@@ -255,7 +280,7 @@ describe('Dashboard', () => {
             gridImported: 10,
             gridExported: 5,
             homeUsed: 25,
-            batteryUsed: 10,
+            batteryUsed: 11,
             lastPrice: 0.123,
             lastCost: 0.150
         });
@@ -263,15 +288,74 @@ describe('Dashboard', () => {
         renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
-            expect(screen.getByText('Daily Overview')).toBeInTheDocument();
-            expect(screen.getByText('Net Savings')).toBeInTheDocument();
-            expect(screen.getByText('$10.50')).toBeInTheDocument();
-            expect(screen.getByText('Solar Savings')).toBeInTheDocument();
-            expect(screen.getByText('$5.00')).toBeInTheDocument();
-            expect(screen.getByText('Battery Savings')).toBeInTheDocument();
-            expect(screen.getByText('$5.50')).toBeInTheDocument();
-            expect(screen.getByText(/Last Price:/)).toBeInTheDocument();
-            expect(screen.getByText(/\$0.123\/kWh/)).toBeInTheDocument();
+            expect(screen.getByText('Net Savings Today')).toBeInTheDocument();
+            // Net savings: 5.50 (battery) + 5.00 (solar) + 1.00 (credit) = 11.50
+            expect(screen.getByText(/\$ 11\.50/)).toBeInTheDocument();
+            expect(screen.getByText('Solar')).toBeInTheDocument();
+            expect(screen.getByText('+ $ 5.00')).toBeInTheDocument();
+            expect(screen.getByText('Battery')).toBeInTheDocument();
+            expect(screen.getByText('+ $ 5.50')).toBeInTheDocument();
+            expect(screen.getByText('Export')).toBeInTheDocument();
+            expect(screen.getByText('+ $ 1.00')).toBeInTheDocument();
+        });
+
+        await waitFor(() => {
+            expect(screen.getByText('Home Usage')).toBeInTheDocument();
+            expect(screen.getByText(/25\.0/)).toBeInTheDocument();
+            expect(screen.getByText('Solar Gen')).toBeInTheDocument();
+            expect(screen.getByText(/20\.0/)).toBeInTheDocument();
+            expect(screen.getByText('Battery Use')).toBeInTheDocument();
+            expect(screen.getByText(/11\.0/)).toBeInTheDocument();
+            expect(screen.getByText(/Grid \(In\/Out\)/)).toBeInTheDocument();
+            expect(screen.getByText('10.0')).toBeInTheDocument();
+            expect(screen.getByText('5.0')).toBeInTheDocument();
+            expect(screen.getAllByText(/kWh/).length).toBeGreaterThanOrEqual(3);
+            expect(screen.getByText('Total Credit')).toBeInTheDocument();
+            expect(screen.getAllByText('$ 1.00').length).toBeGreaterThanOrEqual(1);
+            expect(screen.getByText('Total Cost')).toBeInTheDocument();
+            expect(screen.getByText(/\$ 2\.00/)).toBeInTheDocument();
+        });
+    });
+
+    it('renders negative savings correctly', async () => {
+        (fetchActions as any).mockResolvedValue([]);
+        (fetchSavings as any).mockResolvedValue({
+            batterySavings: -2.50,
+            solarSavings: 1.00,
+            cost: 10.00,
+            credit: -0.50, // Negative credit due to negative price
+            avoidedCost: 0.50,
+            chargingCost: 3.00,
+            solarGenerated: 5,
+            gridImported: 20,
+            gridExported: 2,
+            homeUsed: 23,
+            batteryUsed: 5,
+            lastPrice: 0.123,
+            lastCost: 0.150
+        });
+
+        renderWithRouter(<Dashboard />);
+
+        await waitFor(() => {
+            // Net savings: 1.00 (solar) - 2.50 (battery) - 0.50 (credit) = -2.00
+            expect(screen.getByText('Net Savings Today')).toBeInTheDocument();
+            const netValue = screen.getByText(/- \$ 2\.00/);
+            expect(netValue).toBeInTheDocument();
+            expect(netValue).toHaveClass('negative');
+
+            expect(screen.getByText('Solar')).toBeInTheDocument();
+            expect(screen.getByText('+ $ 1.00')).toBeInTheDocument();
+
+            expect(screen.getByText('Battery')).toBeInTheDocument();
+            const batteryValue = screen.getByText('- $ 2.50');
+            expect(batteryValue).toBeInTheDocument();
+            expect(batteryValue).toHaveClass('negative');
+
+            expect(screen.getByText('Export')).toBeInTheDocument();
+            const exportValues = screen.getAllByText('- $ 0.50');
+            expect(exportValues.length).toBe(2);
+            expect(exportValues[0]).toHaveClass('negative');
         });
     });
 
@@ -294,10 +378,10 @@ describe('Dashboard', () => {
         await waitFor(() => {
             // Should show the templatized deficit charge text
             expect(screen.getByText(/Battery deficit predicted/)).toBeInTheDocument();
-            expect(screen.getByText(/Charging now/)).toBeInTheDocument();
-            expect(screen.getByText(/peak later/)).toBeInTheDocument();
+            expect(screen.getByText(/Charging now.*\$ 0\.100/)).toBeInTheDocument();
+            expect(screen.getByText(/peak later.*\$ 0\.500/)).toBeInTheDocument();
             // Should show the future price in footer
-            expect(screen.getByText(/Peak:.*\$0.500/)).toBeInTheDocument();
+            expect(screen.getByText(/Peak:.*\$ 0\.500/)).toBeInTheDocument();
         });
     });
 
@@ -316,8 +400,8 @@ describe('Dashboard', () => {
         renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
-            expect(screen.getByText(/Battery won't survive upcoming peak. Charging now/)).toBeInTheDocument();
-            expect(screen.getByText(/peak:.*\$0.500/)).toBeInTheDocument();
+            expect(screen.getByText(/Battery won't survive upcoming peak. Charging now.*\$ 0\.500/)).toBeInTheDocument();
+            expect(screen.getByText(/peak:.*\$ 0\.500/)).toBeInTheDocument();
         });
     });
 
@@ -353,8 +437,8 @@ describe('Dashboard', () => {
         renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
-            expect(screen.getByText(/Arbitrage opportunity.*charging at.*\$0.100/)).toBeInTheDocument();
-            expect(screen.getByText(/peak later at.*\$0.500/)).toBeInTheDocument();
+            expect(screen.getByText(/Arbitrage opportunity.*charging at.*\$ 0\.100/)).toBeInTheDocument();
+            expect(screen.getByText(/peak later at.*\$ 0\.500/)).toBeInTheDocument();
         });
     });
 
@@ -526,7 +610,183 @@ describe('Dashboard', () => {
             expect(screen.queryByText('Avg Price:')).not.toBeInTheDocument();
         });
     });
+
+    it('hides CurrentStatus on previous dates', async () => {
+        const user = userEvent.setup();
+        const now = new Date();
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+
+        (fetchActions as any).mockResolvedValue([]);
+        renderWithRouter(<Dashboard />);
+
+        // Wait for initial load
+        await waitFor(() => {
+            expect(screen.queryByText('Loading day...')).not.toBeInTheDocument();
+        });
+
+        // Click Prev button to go to yesterday
+        const prevButton = screen.getByText(/Prev/);
+        await user.click(prevButton);
+
+        // Verification of navigation happened
+        await waitFor(() => {
+            const hasDateParam = window.location.search.includes('date=');
+            expect(hasDateParam).toBe(true);
+        });
+
+        // Mock actions for yesterday
+        const actions = [{
+            timestamp: yesterday.toISOString(),
+            batteryMode: 0,
+            solarMode: 0,
+            targetBatteryMode: 2,
+            systemStatus: {
+                batterySOC: 50,
+                batteryKW: -5.0,
+            },
+            currentPrice: { dollarsPerKWH: 0.05, tsStart: '', tsEnd: '' },
+        }];
+        (fetchActions as any).mockResolvedValue(actions);
+
+        await waitFor(() => {
+            // Should NOT show CurrentStatus card on a non-today date
+            expect(document.querySelector('.current-status-card')).not.toBeInTheDocument();
+        });
+    });
+
+    it('renders CurrentStatus using targetBatteryMode when batteryMode is NoChange', async () => {
+        const now = new Date();
+        const actions = [{
+            timestamp: now.toISOString(),
+            batteryMode: 0, // NoChange
+            solarMode: 0,
+            targetBatteryMode: 2, // ChargeAny
+            systemStatus: {
+                batterySOC: 50,
+                batteryKW: -5.0, // Charging
+            },
+            currentPrice: { dollarsPerKWH: 0.05, tsStart: '', tsEnd: '' },
+        }];
+        (fetchActions as any).mockResolvedValue(actions);
+
+        renderWithRouter(<Dashboard />);
+
+        await waitFor(() => {
+            // Should show "System Charging" because targetBatteryMode is ChargeAny
+            expect(screen.getByText('System Charging')).toBeInTheDocument();
+
+            // Should show the specific label in the CurrentStatus component
+            const statusCard = document.querySelector('.current-status-card');
+            expect(statusCard).toBeInTheDocument();
+            expect(statusCard?.textContent).toContain('Charge From Solar+Grid');
+        });
+    });
+
+    it('shows pills for targetBatteryMode even when batteryMode is NoChange', async () => {
+        const actions = [{
+            description: 'Target mode test',
+            timestamp: new Date().toISOString(),
+            batteryMode: 0, // NoChange
+            solarMode: 0,
+            targetBatteryMode: -1, // Load
+            targetSolarMode: 1, // NoExport
+        }];
+        (fetchActions as any).mockResolvedValue(actions);
+
+        renderWithRouter(<Dashboard />);
+
+        await waitFor(() => {
+            // Should show "Use Battery" and "No Export" pills
+            const useBatteryPills = screen.getAllByText('Use Battery');
+            expect(useBatteryPills.some(p => p.classList.contains('tag'))).toBe(true);
+
+            const noExportPills = screen.getAllByText('Use & No Export');
+            expect(noExportPills.some(p => p.classList.contains('tag'))).toBe(true);
+        });
+    });
+
+    it('shows target mode pills in summaries', async () => {
+        const actions = [
+            {
+                description: 'No change 1',
+                timestamp: new Date('2023-01-01T10:00:00').toISOString(),
+                batteryMode: 0,
+                solarMode: 0,
+                targetBatteryMode: 1, // Standby
+                targetSolarMode: 1, // NoExport
+            },
+            {
+                description: 'No change 2',
+                timestamp: new Date('2023-01-01T10:30:00').toISOString(),
+                batteryMode: 0,
+                solarMode: 0,
+                targetBatteryMode: 1, // Standby
+                targetSolarMode: 1, // NoExport
+            }
+        ];
+        (fetchActions as any).mockResolvedValue(actions);
+
+        renderWithRouter(<Dashboard />);
+
+        await waitFor(() => {
+            expect(screen.getByRole('heading', { name: /No Change/ })).toBeInTheDocument();
+            // Should show pills in the summary item
+            const holdBatteryPills = screen.getAllByText('Hold Battery');
+            expect(holdBatteryPills.some(p => p.classList.contains('tag'))).toBe(true);
+
+            const noExportPills = screen.getAllByText('Use & No Export');
+            expect(noExportPills.some(p => p.classList.contains('tag'))).toBe(true);
+        });
+    });
+
+    it('renders action summaries with price range, latest battery charge, and info tags', async () => {
+        const actions = [
+            {
+                timestamp: new Date('2023-01-01T10:00:00').toISOString(),
+                batteryMode: 0,
+                solarMode: 0,
+                currentPrice: { dollarsPerKWH: 0.10, tsStart: '2023-01-01T10:00:00Z', tsEnd: '' },
+                systemStatus: { batterySOC: 40 },
+                deficitAt: '2023-01-01T15:00:00Z',
+            },
+            {
+                timestamp: new Date('2023-01-01T10:30:00').toISOString(),
+                batteryMode: 0,
+                solarMode: 0,
+                currentPrice: { dollarsPerKWH: 0.20, tsStart: '2023-01-01T10:30:00Z', tsEnd: '' },
+                systemStatus: { batterySOC: 45 },
+                deficitAt: '2023-01-01T16:00:00Z',
+                capacityAt: '2023-01-01T18:00:00Z',
+            }
+        ];
+        (fetchActions as any).mockResolvedValue(actions);
+
+        renderWithRouter(<Dashboard />);
+
+        await waitFor(() => {
+            expect(screen.getByRole('heading', { name: /No Change/ })).toBeInTheDocument();
+
+            // Should show average price and range
+            expect(screen.getByText(/Avg Price:/)).toBeInTheDocument();
+            expect(screen.getByText(/\$ 0\.150\/kWh/)).toBeInTheDocument();
+            expect(screen.getByText(/Range: \$ 0\.100 - \$ 0\.200/)).toBeInTheDocument();
+
+            // Should show average SOC and range
+            expect(screen.getByText(/Battery:/)).toBeInTheDocument();
+            expect(screen.getByText(/42\.5%/)).toBeInTheDocument();
+            expect(screen.getByText(/Range: 40% - 45%/)).toBeInTheDocument();
+
+            // Should show Deficit and Capacity tags from the LATEST action
+            // Using a more flexible regex for time as it depends on local timezone
+            expect(screen.getByText(/Deficit:/)).toBeInTheDocument();
+            expect(screen.getByText(/Capacity:/)).toBeInTheDocument();
+
+            // Check that some element contains the Deficit/Capacity text with some time format
+            const tags = document.querySelectorAll('.tag-info');
+            const tagTexts = Array.from(tags).map(t => t.textContent);
+            expect(tagTexts.some(t => t?.includes('Deficit:'))).toBe(true);
+            expect(tagTexts.some(t => t?.includes('Capacity:'))).toBe(true);
+        });
+    });
 });
-
-
-

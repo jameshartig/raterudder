@@ -32,143 +32,190 @@ func main() {
 	start := now.Truncate(24 * time.Hour)
 
 	// Simulation state
-	currentSOC := 50.0
+	const (
+		BatteryCapacityKWH = 27.2 // 2-battery system
+		MaxBatteryKW       = 10.0
+		HomeAvgKW          = 1.5
+		SolarPeakKW        = 8.0
+		DeliveryFee        = 0.04
+	)
+	currentSOC := 40.0 // Start at 40%
 
 	// Create actions every hour
 	for t := start; t.Before(now); t = t.Add(time.Hour) {
-		var action types.Action
-		action.Timestamp = t
-		action.SolarMode = types.SolarModeAny
-		// Mostly dry run, but occasionally a "real" action
-		action.DryRun = rng.Float64() > 0.1
-
 		hour := t.Hour()
-		basePrice := 0.05
-		var mode types.BatteryMode
-		var desc string
 
-		// Base Strategy
+		// 1. Determine Price Scenario
+		basePrice := 0.08
+		if hour >= 6 && hour < 9 {
+			basePrice = 0.22 // Morning Peak
+		} else if hour >= 10 && hour < 15 {
+			basePrice = 0.05 // Mid-day Lull
+		} else if hour >= 17 && hour < 21 {
+			basePrice = 0.35 // Evening Peak
+		} else if hour >= 21 {
+			basePrice = 0.10 // Night
+		}
+		// Jitter
+		basePrice += (rng.Float64() * 0.02) - 0.01
+
+		currentPrice := &types.Price{
+			Provider:              "comed_besh",
+			DollarsPerKWH:         basePrice,
+			GridAddlDollarsPerKWH: DeliveryFee,
+			TSStart:               t,
+			TSEnd:                 t.Add(time.Hour),
+		}
+
+		// 2. Determine System Status
+		// Solar (bell curve)
+		solarKW := 0.0
+		if hour > 6 && hour < 19 {
+			dist := math.Abs(float64(hour) - 13.0)
+			solarKW = SolarPeakKW * math.Exp(-(dist*dist)/12.0)
+		}
+
+		// Home usage
+		homeKW := HomeAvgKW + (rng.Float64() * 1.0)
+		if hour >= 7 && hour < 9 {
+			homeKW += 2.0 // Breakfast
+		} else if hour >= 18 && hour < 22 {
+			homeKW += 4.0 // Evening activities
+		}
+
+		// Battery Activity & Decision logic simulation
+		var mode types.BatteryMode
+		var reason types.ActionReason
+		var desc string
+		var hitDeficitAt time.Time
+		var hitCapacityAt time.Time
+
+		// Strategy simulation
 		if hour < 6 {
-			// Early morning: Charge if price is low, else Standby
-			mode = types.BatteryModeChargeAny
-			desc = "Overnight charging"
-			basePrice = 0.02
+			// Night - charge if cheap
+			if currentPrice.DollarsPerKWH+DeliveryFee < 0.10 && currentSOC < 60 {
+				mode = types.BatteryModeChargeAny
+				reason = types.ActionReasonAlwaysChargeBelowThreshold
+				desc = "Overnight charging"
+			} else {
+				mode = types.BatteryModeStandby
+				reason = types.ActionReasonNoChange
+				desc = "Overnight standby"
+			}
 		} else if hour < 9 {
 			// Morning peak
 			mode = types.BatteryModeLoad
+			reason = types.ActionReasonArbitrageSave
 			desc = "Morning peak discharge"
-			basePrice = 0.15
+			hitDeficitAt = t.Add(5 * time.Hour)
 		} else if hour < 17 {
-			// Day time: Standby / Self-consumption
-			mode = types.BatteryModeStandby
-			desc = "Day time self-consumption"
-			basePrice = 0.05
-		} else if hour < 21 {
+			// Day time solar charging
+			if solarKW > homeKW && currentSOC < 95 {
+				mode = types.BatteryModeChargeSolar
+				reason = types.ActionReasonNoChange
+				desc = "Solar charging"
+				hitCapacityAt = t.Add(3 * time.Hour)
+			} else {
+				mode = types.BatteryModeStandby
+				reason = types.ActionReasonNoChange
+				desc = "Daytime standby"
+			}
+		} else if hour < 22 {
 			// Evening peak
 			mode = types.BatteryModeLoad
+			reason = types.ActionReasonArbitrageSave
 			desc = "Evening peak discharge"
-			basePrice = 0.20
 		} else {
-			// Night
 			mode = types.BatteryModeStandby
-			desc = "Night standby"
-			basePrice = 0.04
+			reason = types.ActionReasonNoChange
+			desc = "Post-peak standby"
 		}
 
-		// Diversification & Randomness
-		roll := rng.Float64()
-		if roll < 0.15 {
-			mode = types.BatteryModeNoChange
-			desc = "No change"
-		} else if roll < 0.25 {
-			mode = types.BatteryModeStandby
-			desc = "Idling"
-		} else if roll < 0.30 && hour > 10 && hour < 15 {
-			mode = types.BatteryModeChargeSolar
-			desc = "Excess solar charging"
-		}
-
-		// Force a period of "No Action" (NoChange) in the afternoon
-		if hour >= 13 && hour <= 15 {
-			mode = types.BatteryModeNoChange
-			desc = "Siesta time (No Change)"
-		}
-
-		action.BatteryMode = mode
-		action.Description = fmt.Sprintf("Mock: %s", desc)
-
-		// Price Jitter
-		price := basePrice + (rng.Float64()*0.02 - 0.01) // +/- 0.01
-		if price < 0.01 {
-			price = 0.01
-		}
-		action.CurrentPrice = &types.Price{
-			Provider:      "comed_besh",
-			DollarsPerKWH: price,
-			TSStart:       t,
-			TSEnd:         t.Add(time.Hour),
-		}
-
-		// System Status Simulation
-		stat := types.SystemStatus{
-			Timestamp: t,
-		}
-
-		// Solar Generation (simple bell curve centered at noon)
-		solar := 0.0
-		if hour > 6 && hour < 18 {
-			dist := math.Abs(float64(hour) - 12.0)
-			solar = 5.0 * math.Exp(-(dist*dist)/(18)) // 2*3^2
-			solar += rng.Float64() - 0.5              // noise
-			if solar < 0 {
-				solar = 0
-			}
-		}
-		stat.SolarKW = solar
-
-		// Home Consumption
-		home := 1.0 + rng.Float64()*2.0
-		if hour > 17 && hour < 22 {
-			home += 2.0 // evening usage spike
-		}
-		stat.HomeKW = home
-
-		// Battery Activity
+		// System Status Simulation updates
 		batKW := 0.0
 		switch mode {
-		case types.BatteryModeChargeAny, types.BatteryModeChargeSolar:
-			batKW = -3.0 // charging
-			currentSOC += 15.0
+		case types.BatteryModeChargeAny:
+			batKW = -MaxBatteryKW
+		case types.BatteryModeChargeSolar:
+			// Charge with excess solar only
+			surplus := solarKW - homeKW
+			if surplus > 0 {
+				batKW = -math.Min(surplus, MaxBatteryKW)
+			}
 		case types.BatteryModeLoad:
-			batKW = 3.0 // discharging
-			currentSOC -= 15.0
+			// Discharge to cover home usage
+			needed := homeKW - solarKW
+			if needed > 0 {
+				batKW = math.Min(needed, MaxBatteryKW)
+			} else {
+				batKW = 0 // Solar covers it
+			}
 		case types.BatteryModeStandby, types.BatteryModeNoChange:
 			batKW = 0.0
 		}
 
-		// Clamp SOC
+		// Update SOC based on batKW (kWh = kW * 1h)
+		socDelta := (-batKW / BatteryCapacityKWH) * 100.0
+		currentSOC += socDelta
 		if currentSOC > 100 {
 			currentSOC = 100
+			batKW = 0 // actually stopped charging
 		}
-		if currentSOC < 0 {
-			currentSOC = 0
+		if currentSOC < 5 { // Reserve 5%
+			currentSOC = 5
+			batKW = 0 // actually stopped discharging
 		}
 
-		stat.BatterySOC = currentSOC
-		stat.BatteryKW = batKW
-		// Grid = Home - Solar - Battery (approx)
-		// If battery discharges (pos), it reduces grid import.
-		// If battery charges (neg), it increases grid import.
-		stat.GridKW = stat.HomeKW - stat.SolarKW - stat.BatteryKW
+		stat := types.SystemStatus{
+			Timestamp:             t,
+			BatterySOC:            currentSOC,
+			BatteryKW:             batKW,
+			SolarKW:               solarKW,
+			HomeKW:                homeKW,
+			GridKW:                homeKW - solarKW - batKW,
+			BatteryCapacityKWH:    BatteryCapacityKWH,
+			MaxBatteryChargeKW:    MaxBatteryKW,
+			MaxBatteryDischargeKW: MaxBatteryKW,
+			CanExportSolar:        true,
+			CanExportBattery:      false,
+			CanImportBattery:      true,
+			BatteryAboveMinSOC:    currentSOC > 20,
+		}
 
-		action.SystemStatus = stat
+		action := types.Action{
+			Timestamp:         t,
+			BatteryMode:       mode,
+			SolarMode:         types.SolarModeAny,
+			TargetBatteryMode: mode,
+			TargetSolarMode:   types.SolarModeAny,
+			Reason:            reason,
+			Description:       fmt.Sprintf("Mock: %s", desc),
+			CurrentPrice:      currentPrice,
+			SystemStatus:      stat,
+			HitDeficitAt:      hitDeficitAt,
+			HitCapacityAt:     hitCapacityAt,
+			DryRun:            rng.Float64() > 0.1,
+		}
+
+		// Future Price (mocking "some time later")
+		futureHourT := t.Add(4 * time.Hour)
+		futurePriceVal := 0.12
+		if futureHourT.Hour() >= 17 && futureHourT.Hour() < 21 {
+			futurePriceVal = 0.35
+		}
+		action.FuturePrice = &types.Price{
+			Provider:              "comed_besh",
+			DollarsPerKWH:         futurePriceVal,
+			GridAddlDollarsPerKWH: DeliveryFee,
+			TSStart:               futureHourT,
+			TSEnd:                 futureHourT.Add(time.Hour),
+		}
 
 		if err := s.InsertAction(ctx, types.SiteIDNone, action); err != nil {
 			log.Ctx(ctx).ErrorContext(ctx, "failed to seed action", "error", err)
 			os.Exit(1)
 		}
 
-		// Seed Price
 		if action.CurrentPrice != nil {
 			if err := s.UpsertPrice(ctx, types.SiteIDNone, *action.CurrentPrice, types.CurrentPriceHistoryVersion); err != nil {
 				log.Ctx(ctx).ErrorContext(ctx, "failed to seed price", "error", err)
@@ -177,35 +224,39 @@ func main() {
 		}
 
 		// Seed EnergyStats
-		// Derive approx energy stats from the instant KW values
-		// Since we run this for each hour, we can assume the KW value held for the hour (simplification)
 		eStat := types.EnergyStats{
-			TSHourStart:       t,
-			HomeKWH:           stat.HomeKW * 1.0,
-			SolarKWH:          stat.SolarKW * 1.0,
-			GridImportKWH:     0,
-			GridExportKWH:     0,
-			BatteryUsedKWH:    0,
-			BatteryChargedKWH: 0,
+			TSHourStart:   t,
+			MinBatterySOC: math.Max(0, currentSOC-2),
+			MaxBatterySOC: math.Min(100, currentSOC+2),
+			HomeKWH:       stat.HomeKW,
+			SolarKWH:      stat.SolarKW,
 		}
 
-		// Battery
+		// Simplify energy distribution for seeding
 		if stat.BatteryKW > 0 {
 			// Discharging
-			eStat.BatteryUsedKWH = stat.BatteryKW * 1.0
+			eStat.BatteryUsedKWH = stat.BatteryKW
+			eStat.BatteryToHomeKWH = math.Min(stat.BatteryKW, stat.HomeKW)
 		} else if stat.BatteryKW < 0 {
 			// Charging
-			eStat.BatteryChargedKWH = -stat.BatteryKW * 1.0
+			eStat.BatteryChargedKWH = -stat.BatteryKW
+			if solarKW > homeKW {
+				surplus := solarKW - homeKW
+				eStat.SolarToBatteryKWH = math.Min(surplus, -stat.BatteryKW)
+			}
 		}
 
-		// Grid logic from stat.GridKW
-		// GridKW = Home - Solar - BatteryKW
-		// If GridKW > 0 (Import)
-		// If GridKW < 0 (Export)
+		if solarKW > 0 {
+			eStat.SolarToHomeKWH = math.Min(solarKW, homeKW)
+			if solarKW > (eStat.SolarToHomeKWH + eStat.SolarToBatteryKWH) {
+				eStat.SolarToGridKWH = solarKW - eStat.SolarToHomeKWH - eStat.SolarToBatteryKWH
+			}
+		}
+
 		if stat.GridKW > 0 {
-			eStat.GridImportKWH = stat.GridKW * 1.0
+			eStat.GridImportKWH = stat.GridKW
 		} else {
-			eStat.GridExportKWH = -stat.GridKW * 1.0
+			eStat.GridExportKWH = -stat.GridKW
 		}
 
 		if err := s.UpsertEnergyHistory(ctx, types.SiteIDNone, eStat, types.CurrentEnergyStatsVersion); err != nil {
@@ -213,8 +264,8 @@ func main() {
 			os.Exit(1)
 		}
 
-		fmt.Printf("Seeded action at %s: %s (Price: $%.3f, SOC: %.0f%%)\n",
-			t.Format(time.Kitchen), action.Description, action.CurrentPrice.DollarsPerKWH, currentSOC)
+		fmt.Printf("Seeded action at %s: %s (Price: $%.3f, SOC: %.0f%%, Solar: %.1fkW)\n",
+			t.Format(time.Kitchen), action.Description, action.CurrentPrice.DollarsPerKWH, currentSOC, solarKW)
 	}
 
 	log.Ctx(ctx).InfoContext(ctx, "seeded mock data successfully")

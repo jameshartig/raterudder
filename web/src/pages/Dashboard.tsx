@@ -26,8 +26,8 @@ const getBatteryModeClass = (mode: number) => {
 
 const getSolarModeLabel = (mode: number) => {
     switch (mode) {
-        case SolarMode.NoExport: return 'No Export';
-        case SolarMode.Any: return 'Any';
+        case SolarMode.NoExport: return 'Use & No Export';
+        case SolarMode.Any: return 'Use & Export';
         case SolarMode.NoChange: return 'No Change';
         default: return 'Unknown';
     }
@@ -36,13 +36,18 @@ const getSolarModeLabel = (mode: number) => {
 const getSolarModeClass = (mode: number) => {
     switch (mode) {
         case SolarMode.NoExport: return 'no_export';
-        case SolarMode.Any: return 'any';
+        case SolarMode.Any: return 'export';
         case SolarMode.NoChange: return 'no_change';
         default: return 'unknown';
     }
 };
 
-const formatPrice = (dollars: number) => `$${dollars.toFixed(3)}/kWh`;
+const formatPrice = (dollars: number) => `$ ${dollars.toFixed(3)}/kWh`;
+
+const formatCurrency = (amount: number, forceSign: boolean = false) => {
+    const sign = amount >= 0 ? (forceSign ? '+ ' : '') : '- ';
+    return `${sign}$ ${Math.abs(amount).toFixed(2)}`;
+};
 
 const formatTime = (ts: string) => {
     try {
@@ -88,6 +93,49 @@ const getReasonText = (action: Action): string => {
         default:
             return action.description || `Unknown reason: ${reason}`;
     }
+};
+
+const CurrentStatus: React.FC<{ action: Action }> = ({ action }) => {
+    const effectiveBatteryMode = action.targetBatteryMode
+        ? action.targetBatteryMode
+        : action.batteryMode;
+    const mode = effectiveBatteryMode;
+    const kw = action.systemStatus?.batteryKW || 0;
+    const soc = action.systemStatus?.batterySOC ?? 0;
+    const price = action.currentPrice?.dollarsPerKWH ?? 0;
+
+    let state: 'charging' | 'discharging' | 'standby' = 'standby';
+    if (mode === BatteryMode.Load || kw > 0.1) state = 'discharging';
+    else if (mode === BatteryMode.ChargeAny || mode === BatteryMode.ChargeSolar || kw < -0.1) state = 'charging';
+
+    return (
+        <div className={`current-status-card ${state}`}>
+            <div className="status-main">
+                <div className="status-icon">
+                    {state === 'charging' && <span className="icon">⚡</span>}
+                    {state === 'discharging' && <span className="icon">🏠</span>}
+                    {state === 'standby' && <span className="icon">⏲️</span>}
+                </div>
+                <div className="status-info">
+                    <span className="status-label">System {state.charAt(0).toUpperCase() + state.slice(1)}</span>
+                    <span className="status-value">{getBatteryModeLabel(mode)}</span>
+                </div>
+            </div>
+            <div className="status-metrics">
+                <div className="metric">
+                    <span className="metric-label">Battery</span>
+                    <span className="metric-value">{soc.toFixed(1)}%</span>
+                    <div className="battery-bar">
+                        <div className="battery-fill" style={{ width: `${soc}%` }}></div>
+                    </div>
+                </div>
+                <div className="metric">
+                    <span className="metric-label">Price</span>
+                    <span className="metric-value">$ {price.toFixed(3)}<small>/kWh</small></span>
+                </div>
+            </div>
+        </div>
+    );
 };
 
 const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
@@ -170,7 +218,9 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
         day: 'numeric'
     });
 
-    const netSavings = savings ? savings.batterySavings + savings.solarSavings : 0;
+    const netSavings = savings ? savings.batterySavings + savings.solarSavings + savings.credit : 0;
+    const isToday = currentDate.toDateString() === new Date().toDateString();
+    const latestAction = actions.length > 0 ? actions[actions.length - 1] : null;
 
     const groupedActions = useMemo(() => {
         type SummaryType = 'no_change' | 'fault';
@@ -184,17 +234,23 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
             avgPrice: number;
             min: number;
             max: number;
+            avgSOC: number;
+            minSOC: number;
+            maxSOC: number;
             count: number;
             alarms: Set<string>;
             storms: Set<string>;
             stormStart?: Date;
             stormEnd?: Date;
             hasPrice: boolean;
+            hasSOC: boolean;
         }
 
-        interface ActionSummaryAccumulator extends Omit<ActionSummary, 'avgPrice'> {
+        interface ActionSummaryAccumulator extends Omit<ActionSummary, 'avgPrice' | 'avgSOC'> {
             priceTotal: number;
             priceCount: number;
+            socTotal: number;
+            socCount: number;
         }
 
         const accumulator: (Action | ActionSummaryAccumulator)[] = [];
@@ -216,9 +272,19 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                     if (summary.min === undefined || price < summary.min) summary.min = price;
                     if (summary.max === undefined || price > summary.max) summary.max = price;
                 }
+                if (action.systemStatus && action.systemStatus.batterySOC !== undefined && action.systemStatus.batterySOC !== 0) {
+                    summary.hasSOC = true;
+                    const soc = action.systemStatus.batterySOC;
+                    summary.socTotal += soc;
+                    summary.socCount++;
+                    if (summary.minSOC === undefined || soc < summary.minSOC) summary.minSOC = soc;
+                    if (summary.maxSOC === undefined || soc > summary.maxSOC) summary.maxSOC = soc;
+                }
             };
 
             const createSummary = (type: SummaryType): ActionSummaryAccumulator => {
+                 const hasSOC = !!(action.systemStatus && action.systemStatus.batterySOC !== undefined && action.systemStatus.batterySOC !== 0);
+                 const soc = (action.systemStatus && action.systemStatus.batterySOC !== undefined && action.systemStatus.batterySOC !== 0) ? action.systemStatus.batterySOC : 0;
                  return {
                     isSummary: true,
                     type: type,
@@ -232,7 +298,12 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                     priceTotal: hasPrice ? price : 0,
                     priceCount: hasPrice ? 1 : 0,
                     min: hasPrice ? price : Infinity,
-                    max: hasPrice ? price : -Infinity
+                    max: hasPrice ? price : -Infinity,
+                    hasSOC: hasSOC,
+                    socTotal: hasSOC ? soc : 0,
+                    socCount: hasSOC ? 1 : 0,
+                    minSOC: hasSOC ? soc : Infinity,
+                    maxSOC: hasSOC ? soc : -Infinity
                 };
             }
 
@@ -304,10 +375,11 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
         return accumulator.map(item => {
             if ('isSummary' in item) {
                 const summary = item as ActionSummaryAccumulator;
-                const { priceTotal, priceCount, ...rest } = summary;
+                const { priceTotal, priceCount, socTotal, socCount, ...rest } = summary;
                 return {
                     ...rest,
-                    avgPrice: priceCount > 0 ? priceTotal / priceCount : 0
+                    avgPrice: priceCount > 0 ? priceTotal / priceCount : 0,
+                    avgSOC: socCount > 0 ? socTotal / socCount : 0
                 } as ActionSummary;
             }
             return item;
@@ -320,7 +392,7 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                 <div className="date-controls">
                     <button onClick={() => handleDateChange(-1)} disabled={loading}>&lt; Prev</button>
                     <h2>{formattedDate}</h2>
-                    <button onClick={() => handleDateChange(1)} disabled={loading || currentDate.toDateString() === new Date().toDateString()}>Next &gt;</button>
+                    <button onClick={() => handleDateChange(1)} disabled={loading || isToday}>Next &gt;</button>
                 </div>
             </header>
 
@@ -344,53 +416,88 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                         </div>
                     )}
 
+                    {isToday && latestAction && (
+                        <CurrentStatus action={latestAction} />
+                    )}
+
                     {savings && (
-                        <div className="savings-summary">
-                            <div className="savings-header">
-                                <h3>Daily Overview</h3>
-                            </div>
-                            <div className="savings-grid">
-                                <div className="savings-item">
-                                    <span className="savings-label">Net Savings</span>
-                                    <span className={`savings-value ${netSavings > 0 ? 'positive' : netSavings < 0 ? 'negative' : 'neutral'}`}>
-                                        ${netSavings.toFixed(2)}
-                                    </span>
+                        <div className="savings-summary-v2">
+                            <div className="overview-hero">
+                                <div className="net-savings-panel">
+                                    <span className="hero-label">Net Savings Today</span>
+                                    <div className="hero-value-group">
+                                        <span className={`hero-value ${netSavings >= 0 ? 'positive' : 'negative'}`}>
+                                            {formatCurrency(netSavings)}
+                                        </span>
+                                    </div>
+                                    <div className="hero-breakdown">
+                                        <div className="breakdown-item">
+                                            <span className="dot solar"></span>
+                                            <span className="label">Solar</span>
+                                            <span className={`value ${savings.solarSavings >= 0 ? 'positive' : 'negative'}`}>
+                                                {formatCurrency(savings.solarSavings, true)}
+                                            </span>
+                                        </div>
+                                        <div className="breakdown-item">
+                                            <span className="dot battery"></span>
+                                            <span className="label">Battery</span>
+                                            <span className={`value ${savings.batterySavings >= 0 ? 'positive' : 'negative'}`}>
+                                                {formatCurrency(savings.batterySavings, true)}
+                                            </span>
+                                        </div>
+                                        {Math.abs(savings.credit) > 0.01 && (
+                                            <div className="breakdown-item">
+                                                <span className="dot credit"></span>
+                                                <span className="label">Export</span>
+                                                <span className={`value ${savings.credit >= 0 ? 'positive' : 'negative'}`}>
+                                                    {formatCurrency(savings.credit, true)}
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
-                                <div className="savings-item">
-                                    <span className="savings-label">Solar Savings</span>
-                                    <span className="savings-value positive">
-                                        ${savings.solarSavings.toFixed(2)}
-                                    </span>
+
+                                <div className="usage-stats-panel">
+                                    <div className="stats-row">
+                                        <div className="stat-card">
+                                            <span className="stat-label">Home Usage</span>
+                                            <span className="stat-value">{savings.homeUsed.toFixed(1)} <small>kWh</small></span>
+                                        </div>
+                                        <div className="stat-card">
+                                            <span className="stat-label">Solar Gen</span>
+                                            <span className="stat-value">{savings.solarGenerated.toFixed(1)} <small>kWh</small></span>
+                                        </div>
+                                        <div className="stat-card">
+                                            <span className="stat-label">Battery Use</span>
+                                            <span className="stat-value">{savings.batteryUsed.toFixed(1)} <small>kWh</small></span>
+                                        </div>
+                                    </div>
+                                    <div className="stats-row grid-metrics">
+                                        <div className="stat-card">
+                                            <span className="stat-label">Grid (In/Out)</span>
+                                            <span className="stat-value traffic-value">
+                                                <span className="traffic-in">{savings.gridImported.toFixed(1)}</span>
+                                                <span className="traffic-sep">/</span>
+                                                <span className="traffic-out">{savings.gridExported.toFixed(1)}</span>
+                                                <small>kWh</small>
+                                            </span>
+                                        </div>
+                                        <div className="stat-card">
+                                            <span className="stat-label">Total Credit</span>
+                                            <span className={`stat-value ${savings.credit > 0 ? 'positive' : savings.credit < 0 ? 'negative' : ''}`}>
+                                                {formatCurrency(savings.credit)}
+                                            </span>
+                                        </div>
+                                        <div className="stat-card">
+                                            <span className="stat-label">Total Cost</span>
+                                            <span className="stat-value">$ {savings.cost.toFixed(2)}</span>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div className="savings-item">
-                                    <span className="savings-label">Battery Savings</span>
-                                    <span className={`savings-value ${savings.batterySavings > 0 ? 'positive' : savings.batterySavings < 0 ? 'negative' : 'neutral'}`}>
-                                        ${savings.batterySavings.toFixed(2)}
-                                    </span>
-                                </div>
-                                <div className="savings-item">
-                                    <span className="savings-label">Total Cost</span>
-                                    <span className="savings-value">
-                                        ${savings.cost.toFixed(2)}
-                                    </span>
-                                </div>
-                                <div className="savings-item">
-                                    <span className="savings-label">Credit</span>
-                                    <span className="savings-value">
-                                        ${savings.credit.toFixed(2)}
-                                    </span>
-                                </div>
-                            </div>
-                            <div className="savings-details">
-                                <span><strong>Home:</strong> {savings.homeUsed.toFixed(2)} kWh</span>
-                                <span><strong>Solar:</strong> {savings.solarGenerated.toFixed(2)} kWh</span>
-                                <span><strong>Grid Import:</strong> {savings.gridImported.toFixed(2)} kWh</span>
-                                <span><strong>Grid Export:</strong> {savings.gridExported.toFixed(2)} kWh</span>
-                                <span><strong>Battery Use:</strong> {savings.batteryUsed.toFixed(2)} kWh</span>
-                                <span><strong>Last Price:</strong> ${savings.lastPrice.toFixed(3)}/kWh</span>
                             </div>
                         </div>
                     )}
+
 
                     {actions && actions.length === 0 && <p className="no-actions">No actions recorded for this day.</p>}
 
@@ -444,12 +551,36 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                                                     {!isFault && description && (
                                                         <p>{description}</p>
                                                     )}
+                                                    <div className="tags">
+                                                        {(summary.latestAction.targetBatteryMode !== undefined && summary.latestAction.targetBatteryMode !== BatteryMode.NoChange) && (
+                                                            <span className={`tag mode-${getBatteryModeClass(summary.latestAction.targetBatteryMode)}`}>{getBatteryModeLabel(summary.latestAction.targetBatteryMode)}</span>
+                                                        )}
+                                                        {(summary.latestAction.targetSolarMode !== undefined && summary.latestAction.targetSolarMode !== SolarMode.NoChange) && (
+                                                            <span className={`tag solar-${getSolarModeClass(summary.latestAction.targetSolarMode)}`}>{getSolarModeLabel(summary.latestAction.targetSolarMode)}</span>
+                                                        )}
+                                                        {summary.latestAction.deficitAt && summary.latestAction.deficitAt !== '0001-01-01T00:00:00Z' && (
+                                                            <span className="tag tag-info">Deficit: {formatTime(summary.latestAction.deficitAt)}</span>
+                                                        )}
+                                                        {summary.latestAction.capacityAt && summary.latestAction.capacityAt !== '0001-01-01T00:00:00Z' && (
+                                                            <span className="tag tag-info">Capacity: {formatTime(summary.latestAction.capacityAt)}</span>
+                                                        )}
+                                                    </div>
                                                 </>
                                             )}
-                                            {summary.hasPrice && (
+                                            {(summary.hasPrice || summary.hasSOC) && (
                                                 <div className="action-footer">
-                                                     <span className="price-label">Avg Price:</span> ${summary.avgPrice.toFixed(3)}/kWh
-                                                     {showRange && <span className="price-range"> (Range: ${summary.min.toFixed(3)} - ${summary.max.toFixed(3)})</span>}
+                                                    {summary.hasPrice && (
+                                                        <span>
+                                                            <span className="price-label">Avg Price:</span> $ {summary.avgPrice.toFixed(3)}/kWh
+                                                            {showRange && <span className="price-range"> (Range: $ {summary.min.toFixed(3)} - $ {summary.max.toFixed(3)})</span>}
+                                                        </span>
+                                                    )}
+                                                    {summary.hasSOC && (
+                                                        <span>
+                                                            <span className="price-label">Battery:</span> {summary.avgSOC.toFixed(1)}%
+                                                            {summary.minSOC !== summary.maxSOC && <span className="soc-range"> (Range: {summary.minSOC.toFixed(0)}% - {summary.maxSOC.toFixed(0)}%)</span>}
+                                                        </span>
+                                                    )}
                                                  </div>
                                             )}
                                         </div>
@@ -470,11 +601,11 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                                         <h3>{getBatteryModeLabel(action.batteryMode)}</h3>
                                         <p>{reasonText}</p>
                                         <div className="tags">
-                                            {action.batteryMode !== BatteryMode.NoChange && (
-                                                <span className={`tag mode-${getBatteryModeClass(action.batteryMode)}`}>{getBatteryModeLabel(action.batteryMode)}</span>
+                                            {(action.batteryMode !== BatteryMode.NoChange || (action.targetBatteryMode !== undefined && action.targetBatteryMode !== BatteryMode.NoChange)) && (
+                                                <span className={`tag mode-${getBatteryModeClass(action.targetBatteryMode || action.batteryMode)}`}>{getBatteryModeLabel(action.targetBatteryMode || action.batteryMode)}</span>
                                             )}
-                                            {action.solarMode !== SolarMode.NoChange && (
-                                                <span className={`tag solar-${getSolarModeClass(action.solarMode)}`}>{getSolarModeLabel(action.solarMode)}</span>
+                                            {(action.solarMode !== SolarMode.NoChange || (action.targetSolarMode !== undefined && action.targetSolarMode !== SolarMode.NoChange)) && (
+                                                <span className={`tag solar-${getSolarModeClass(action.targetSolarMode || action.solarMode)}`}>{getSolarModeLabel(action.targetSolarMode || action.solarMode)}</span>
                                             )}
                                             {action.dryRun && (
                                                 <span className="tag dry-run">Dry Run</span>
@@ -486,14 +617,21 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                                                 <span className="tag tag-info">Capacity: {formatTime(action.capacityAt)}</span>
                                             )}
                                         </div>
-                                        {action.currentPrice && (
-                                            <div className="action-footer">
-                                                <span className="price-label">Price:</span> ${action.currentPrice.dollarsPerKWH.toFixed(3)}/kWh
-                                                {action.futurePrice && action.futurePrice.dollarsPerKWH > 0 && (
-                                                    <span className="price-future"> · Peak: ${action.futurePrice.dollarsPerKWH.toFixed(3)}/kWh</span>
-                                                )}
-                                            </div>
-                                        )}
+                                        <div className="action-footer">
+                                            {action.currentPrice && (
+                                                <span>
+                                                    <span className="price-label">Price:</span> $ {action.currentPrice.dollarsPerKWH.toFixed(3)}/kWh
+                                                    {action.futurePrice && action.futurePrice.dollarsPerKWH > 0 && (
+                                                        <span className="price-future"> · Peak: $ {action.futurePrice.dollarsPerKWH.toFixed(3)}/kWh</span>
+                                                    )}
+                                                </span>
+                                            )}
+                                            {action.systemStatus && !!action.systemStatus.batterySOC && (
+                                                <span className="battery-soc">
+                                                    <span className="price-label">Battery:</span> {action.systemStatus.batterySOC.toFixed(1)}%
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                 </li>
                             );

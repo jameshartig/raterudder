@@ -233,80 +233,376 @@ button {
 }
 
 
-/* Savings Summary Card */
-.savings-summary {
+/* Savings Summary Card Redesign V2 */
+.savings-summary-v2 {
   background: var(--surface);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
-  padding: var(--spacing-md);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
 }
 
-.savings-header {
-  margin-bottom: var(--spacing-sm);
-  border-bottom: 1px solid var(--border);
-  padding-bottom: var(--spacing-xs);
+.overview-hero {
+  display: flex;
+  min-height: 160px;
+  /* Slightly more compact */
 }
 
-.savings-header h3 {
-  margin: 0;
-  font-size: 0.875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
+.net-savings-panel {
+  flex: 0 0 300px;
+  /* Slightly narrower */
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  padding: var(--spacing-md) var(--spacing-lg);
+  color: white;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.hero-label {
+  font-size: 0.75rem;
   font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #94a3b8;
+  margin-bottom: 0.5rem;
 }
 
-.savings-grid {
+.hero-value {
+  font-size: 2rem;
+  /* Balanced size */
+  font-weight: 800;
+  display: block;
+  margin-bottom: var(--spacing-sm);
+}
+
+.hero-value.positive {
+  color: #10b981;
+}
+
+.hero-value.negative {
+  color: #f87171;
+}
+
+.hero-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: var(--spacing-md);
+}
+
+.breakdown-item {
+  display: flex;
+  align-items: center;
+  font-size: 0.8125rem;
+}
+
+.breakdown-item .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 12px;
+}
+
+.dot.solar {
+  background: #f59e0b;
+}
+
+.dot.battery {
+  background: #10b981;
+}
+
+.dot.credit {
+  background: #0ea5e9;
+}
+
+.breakdown-item .label {
+  color: #94a3b8;
+  flex: 1;
+}
+
+.breakdown-item .value {
+  font-weight: 600;
+  font-family: 'Inter', tabular-nums;
+  margin-left: 1.5rem;
+  /* Increased space */
+}
+
+.breakdown-item .value.positive {
+  color: #10b981;
+}
+
+.breakdown-item .value.negative {
+  color: #f87171;
+}
+
+/* Responsive V2 */
+@media (max-width: 900px) {
+  .overview-hero {
+    flex-direction: column;
+    min-height: auto;
+  }
+
+  .net-savings-panel {
+    flex: none;
+    width: 100%;
+    padding: var(--spacing-lg);
+  }
+}
+
+.usage-stats-panel {
+  flex: 1;
+  padding: var(--spacing-md) var(--spacing-lg);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: var(--surface);
+  gap: var(--spacing-md);
+}
+
+.stats-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: var(--spacing-sm);
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--spacing-md);
+}
+
+.stats-row:not(:last-child) {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: var(--spacing-md);
   margin-bottom: var(--spacing-md);
 }
 
-.savings-item {
-  padding: var(--spacing-sm);
-  background: var(--bg-app);
-  border-radius: var(--radius-md);
+.stat-card {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  justify-content: space-between;
+  /* Align content to top and bottom */
+  min-height: 52px;
+  /* Ensure uniform height for value alignment */
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  transition: background 0.2s ease;
 }
 
-.savings-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-secondary);
+.stat-card:hover {
+  background: var(--surface-subtle);
+}
+
+.stat-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-muted);
   text-transform: uppercase;
+  letter-spacing: 0.075em;
+  display: block;
+  min-height: 14px;
+  /* Fix label height */
 }
 
-.savings-value {
+.stat-value {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  align-self: flex-start;
+}
+
+.stat-value.traffic-value {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.traffic-in {
+  color: #ef4444;
+  /* Red for import */
+}
+
+.traffic-out {
+  color: var(--accent);
+  /* Green for export */
+}
+
+.traffic-sep {
+  color: var(--text-muted);
+  font-weight: 400;
+  opacity: 0.5;
+}
+
+.stat-value.positive {
+  color: var(--accent);
+}
+
+.stat-value small {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-left: 2px;
+}
+
+
+/* Current Status Tweaks */
+.current-status-card {
+  margin-bottom: 0.5rem;
+  padding: var(--spacing-md) var(--spacing-lg);
+}
+
+
+/* Current Status Card */
+.current-status-card {
+  padding: var(--spacing-lg);
+  border-radius: var(--radius-lg);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--spacing-xl);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+  position: relative;
+  overflow: hidden;
+}
+
+.current-status-card.discharging {
+  border-left: 6px solid var(--accent);
+}
+
+.current-status-card.charging {
+  border-left: 6px solid var(--primary);
+}
+
+.current-status-card.standby {
+  border-left: 6px solid var(--warning);
+}
+
+.status-main {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.status-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--surface-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 1.5rem;
+}
+
+.current-status-card.discharging .status-icon {
+  background: #ecfdf5;
+  color: #10b981;
+}
+
+.current-status-card.charging .status-icon {
+  background: #f0f9ff;
+  color: #0ea5e9;
+}
+
+.current-status-card.standby .status-icon {
+  background: #fffbeb;
+  color: #f59e0b;
+}
+
+.status-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.status-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.status-value {
+  font-size: 1.25rem;
   font-weight: 700;
   color: var(--text-primary);
 }
 
-.savings-value.positive {
-  color: var(--accent);
+.status-metrics {
+  display: flex;
+  gap: var(--spacing-lg);
+  flex: 1;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  /* Allow wrapping on small screens */
 }
 
-.savings-value.negative {
-  color: var(--danger);
+.metric {
+  display: flex;
+  flex-direction: column;
+  min-width: 90px;
 }
 
-.savings-value.neutral {
+.metric-label {
+  font-size: 0.75rem;
+  font-weight: 600;
   color: var(--text-muted);
 }
 
-.savings-details {
+.metric-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--spacing-sm) var(--spacing-md);
-  font-size: 0.875rem;
-  color: var(--text-secondary);
-  padding-top: var(--spacing-sm);
-  border-top: 1px dashed var(--border);
+  align-items: baseline;
+  gap: 4px;
+  /* Slightly more space */
 }
+
+.metric-value small {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  margin-left: 2px;
+}
+
+.battery-bar {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  margin-top: 4px;
+  width: 100%;
+  overflow: hidden;
+}
+
+.battery-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.5s ease-out;
+}
+
+/* Animations for icons */
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.1);
+    opacity: 0.8;
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.current-status-card.charging .icon {
+  animation: pulse 2s infinite ease-in-out;
+}
+
 
 /* Action List Items */
 .action-list {
@@ -403,14 +699,14 @@ button {
   color: #64748b;
 }
 
-.solar-any {
-  background: #fefce8;
-  color: #a16207;
+.solar-export {
+  background: #f0fdf4;
+  color: #15803d;
 }
 
 .solar-no_export {
-  background: #fff1f2;
-  color: #be123c;
+  background: #fefce8;
+  color: #a16207;
 }
 
 .dry-run {
@@ -437,13 +733,14 @@ button {
 
 /* Footer info in action item */
 .action-footer {
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
   border-top: 1px solid var(--border);
   font-size: 0.8125rem;
   color: var(--text-muted);
   display: flex;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
 }
 
 .price-label {
@@ -505,6 +802,35 @@ button {
 }
 
 /* Responsive */
+@media (max-width: 768px) {
+  .current-status-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md);
+  }
+
+  .status-metrics {
+    justify-content: flex-start;
+    width: 100%;
+    gap: var(--spacing-md);
+  }
+
+  .metric {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .overview-hero {
+    flex-direction: column;
+  }
+
+  .net-savings-panel {
+    flex: none;
+    width: 100%;
+  }
+}
+
 @media (max-width: 640px) {
   .action-item {
     flex-direction: column;
@@ -513,9 +839,5 @@ button {
 
   .action-time {
     font-size: 0.75rem;
-  }
-
-  .savings-grid {
-    grid-template-columns: 1fr 1fr;
   }
 }

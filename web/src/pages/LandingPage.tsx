@@ -103,7 +103,7 @@ const LandingPage: React.FC = () => {
                     <div className="features-grid">
                         <div className="feature-item">
                             <div className="icon">⚡</div>
-                            <h3>AI-Driven Arbitrage</h3>
+                            <h3>Automated Arbitrage</h3>
                             <p>Our algorithms track utility rates in real-time, charging your battery when prices bottom out and discharging when they peak.</p>
                         </div>
                         <div className="feature-item">
