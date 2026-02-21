@@ -3,8 +3,18 @@ import { render, screen } from '@testing-library/react';
 import { Router } from 'wouter';
 import LandingPage from './LandingPage';
 import App from '../App';
-import { describe, it, expect } from 'vitest';
-import { fetchAuthStatus } from '../api';
+import { describe, it, expect, vi } from 'vitest';
+import * as api from '../api';
+
+vi.mock('../api', async (importOriginal) => {
+    const original = await importOriginal<typeof import('../api')>();
+    return {
+        ...original,
+        fetchAuthStatus: vi.fn(original.fetchAuthStatus),
+    };
+});
+
+const { fetchAuthStatus } = api;
 
 describe('LandingPage Component', () => {
     it('renders marketing copy', () => {

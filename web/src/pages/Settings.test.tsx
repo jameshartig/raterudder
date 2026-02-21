@@ -1,31 +1,26 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import App from '../App';
-import { fetchActions, fetchSavings, fetchAuthStatus, fetchSettings, updateSettings, login, logout } from '../api';
+import * as api from '../api';
+import { setupDefaultApiMocks, defaultAuthStatus } from '../test/apiMocks';
+
+const { fetchAuthStatus, fetchSettings, updateSettings, login, logout } = api;
 
 // Mock the API
-vi.mock('../api', () => ({
-    fetchActions: vi.fn(),
-    fetchSavings: vi.fn(),
-    fetchAuthStatus: vi.fn(),
-    fetchSettings: vi.fn(),
-    updateSettings: vi.fn(),
-    login: vi.fn(),
-    logout: vi.fn(),
-    fetchModeling: vi.fn(),
-    BatteryMode: {
-        NoChange: 0,
-        Standby: 1,
-        ChargeAny: 2,
-        ChargeSolar: 3,
-        Load: -1,
-    },
-    SolarMode: {
-        NoChange: 0,
-        NoExport: 1,
-        Any: 2,
-    },
-}));
+vi.mock('../api', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../api')>();
+    return {
+        ...actual,
+        fetchActions: vi.fn(),
+        fetchSavings: vi.fn(),
+        fetchAuthStatus: vi.fn(),
+        fetchSettings: vi.fn(),
+        updateSettings: vi.fn(),
+        login: vi.fn(),
+        logout: vi.fn(),
+        fetchModeling: vi.fn(),
+    };
+});
 
 // Mock Google OAuth
 vi.mock('@react-oauth/google', () => ({
@@ -48,62 +43,12 @@ describe('App & Settings', () => {
         });
 
         // Default mocks
-        (fetchActions as any).mockResolvedValue([]);
-        (fetchSavings as any).mockResolvedValue({
-            batterySavings: 0,
-            solarSavings: 0,
-            cost: 0,
-            credit: 0,
-            avoidedCost: 0,
-            chargingCost: 0,
-            solarGenerated: 0,
-            gridImported: 0,
-            gridExported: 0,
-            homeUsed: 0,
-            batteryUsed: 0,
-        });
-        (fetchAuthStatus as any).mockResolvedValue({
-            loggedIn: true,
-            authRequired: true,
-            clientID: 'test-client-id',
-            email: 'user@example.com',
-            siteIDs: ['site1']
-        });
-        (fetchSettings as any).mockResolvedValue({
-            dryRun: false,
-            pause: false,
-            minBatterySOC: 10,
-            gridExportSolar: false,
-            gridExportBatteries: false,
-            gridChargeBatteries: true,
-            solarTrendRatioMax: 3.0,
-            solarBellCurveMultiplier: 1.0,
-            ignoreHourUsageOverMultiple: 2,
-            alwaysChargeUnderDollarsPerKWH: 0.05,
-            minArbitrageDifferenceDollarsPerKWH: 0.03,
-            minDeficitPriceDifferenceDollarsPerKWH: 0.02,
-            utilityProvider: 'comed_besh',
-            utilityRateOptions: {
-                singleFamilyResidence: true,
-                multiFamilyResidence: false,
-                electricHeating: false,
-                flatRateDelivery: false,
-            },
-            hasCredentials: {
-                franklin: false
-            }
-        });
+        setupDefaultApiMocks(api);
     });
 
 
 
-    const defaultAuthStatus = {
-        loggedIn: true,
-        authRequired: true,
-        clientID: 'test-client-id',
-        email: 'user@example.com',
-        siteIDs: ['site1']
-    };
+
 
     it('shows login button when auth required and not logged in', async () => {
         (fetchAuthStatus as any).mockResolvedValue({

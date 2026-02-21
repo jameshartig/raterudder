@@ -2,30 +2,29 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Router } from 'wouter';
 import Forecast from './Forecast';
-import { fetchModeling } from '../api';
+import * as api from '../api';
+import { setupDefaultApiMocks } from '../test/apiMocks';
 import type { ModelingHour } from '../api';
 
-// Mock the API
-vi.mock('../api', () => ({
-    fetchModeling: vi.fn(),
-    fetchActions: vi.fn().mockResolvedValue([]),
-    fetchSavings: vi.fn().mockResolvedValue({}),
-    fetchAuthStatus: vi.fn().mockResolvedValue({ loggedIn: false, authRequired: false, clientID: '' }),
-    fetchSettings: vi.fn().mockResolvedValue({}),
-    updateSettings: vi.fn(),
-    login: vi.fn(),
-    logout: vi.fn(),
-    BatteryMode: { NoChange: 0, Standby: 1, ChargeAny: 2, ChargeSolar: 3, Load: -1 },
-    SolarMode: { NoChange: 0, NoExport: 1, Any: 2 },
-}));
+const { fetchModeling } = api;
 
-// Mock ResizeObserver for recharts
-class ResizeObserverMock {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-}
-(globalThis as any).ResizeObserver = ResizeObserverMock;
+// Mock the API
+vi.mock('../api', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../api')>();
+    return {
+        ...actual,
+        fetchModeling: vi.fn(),
+        fetchActions: vi.fn(),
+        fetchSavings: vi.fn(),
+        fetchAuthStatus: vi.fn(),
+        fetchSettings: vi.fn(),
+        updateSettings: vi.fn(),
+        login: vi.fn(),
+        logout: vi.fn(),
+    };
+});
+
+
 
 function makeSimHours(): ModelingHour[] {
     const hours: ModelingHour[] = [];
@@ -56,6 +55,7 @@ const renderForecast = () => render(<Router><Forecast /></Router>);
 describe('Forecast Page', () => {
     beforeEach(() => {
         vi.resetAllMocks();
+        setupDefaultApiMocks(api);
     });
 
     it('shows loading state initially', () => {

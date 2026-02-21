@@ -3,44 +3,26 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import Dashboard from './Dashboard';
 import { Router } from 'wouter';
-import { fetchActions, fetchSavings, fetchSettings } from '../api';
+import * as api from '../api';
+import { setupDefaultApiMocks } from '../test/apiMocks';
+
+const { fetchActions, fetchSavings, fetchSettings } = api;
 
 // Mock the API
-vi.mock('../api', () => ({
-    fetchActions: vi.fn(),
-    fetchSavings: vi.fn(),
-    fetchAuthStatus: vi.fn(),
-    fetchSettings: vi.fn(),
-    updateSettings: vi.fn(),
-    login: vi.fn(),
-    logout: vi.fn(),
-    BatteryMode: {
-        NoChange: 0,
-        Standby: 1,
-        ChargeAny: 2,
-        ChargeSolar: 3,
-        Load: -1,
-    },
-    SolarMode: {
-        NoChange: 0,
-        NoExport: 1,
-        Any: 2,
-    },
-    ActionReason: {
-        AlwaysChargeBelowThreshold: 'alwaysChargeBelowThreshold',
-        MissingBattery: 'missingBattery',
-        DeficitCharge: 'deficitCharge',
-        ArbitrageCharge: 'arbitrageCharge',
-        DischargeBeforeCapacity: 'dischargeBeforeCapacity',
-        DeficitSaveForPeak: 'deficitSaveForPeak',
-        ArbitrageSave: 'dischargeAtPeak',
-        NoChange: 'sufficientBattery',
-        EmergencyMode: 'emergencyMode',
-        DeficitSave: 'deficitSave',
-        ChargeSurvivePeak: 'chargeSurvivePeak',
-        WaitingToCharge: 'waitingToCharge',
-    },
-}));
+vi.mock('../api', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../api')>();
+    return {
+        ...actual,
+        fetchActions: vi.fn(),
+        fetchSavings: vi.fn(),
+        fetchAuthStatus: vi.fn(),
+        fetchSettings: vi.fn(),
+        updateSettings: vi.fn(),
+        login: vi.fn(),
+        logout: vi.fn(),
+        fetchModeling: vi.fn(),
+    };
+});
 
 const renderWithRouter = (component: React.ReactNode) => {
     return render(
@@ -53,6 +35,7 @@ const renderWithRouter = (component: React.ReactNode) => {
 describe('Dashboard', () => {
     beforeEach(() => {
         vi.resetAllMocks();
+        setupDefaultApiMocks(api);
     });
 
     it('renders loading state initially', () => {

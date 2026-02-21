@@ -102,7 +102,7 @@ func TestHandleHistorySavings(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 
-	var savings SavingsStats
+	var savings types.SavingsStats
 	err := json.Unmarshal(rr.Body.Bytes(), &savings)
 	assert.NoError(t, err)
 
