@@ -67,20 +67,22 @@ const (
 
 // Action represents a control decision made by the system.
 type Action struct {
-	Timestamp     time.Time    `json:"timestamp"`
-	BatteryMode   BatteryMode  `json:"batteryMode"`
-	SolarMode     SolarMode    `json:"solarMode"`
-	Reason        ActionReason `json:"reason"`
-	Description   string       `json:"description"`
-	CurrentPrice  *Price       `json:"currentPrice,omitempty"`
-	FuturePrice   *Price       `json:"futurePrice,omitempty"`
-	SystemStatus  SystemStatus `json:"systemStatus"`
-	HitDeficitAt  time.Time    `json:"deficitAt"`
-	HitCapacityAt time.Time    `json:"capacityAt"`
-	DryRun        bool         `json:"dryRun,omitempty"`
-	Fault         bool         `json:"fault,omitempty"`
-	Failed        bool         `json:"failed,omitempty"`
-	Error         string       `json:"error,omitempty"`
+	Timestamp         time.Time    `json:"timestamp"`
+	BatteryMode       BatteryMode  `json:"batteryMode"`
+	SolarMode         SolarMode    `json:"solarMode"`
+	TargetBatteryMode BatteryMode  `json:"targetBatteryMode"`
+	TargetSolarMode   SolarMode    `json:"targetSolarMode"`
+	Reason            ActionReason `json:"reason"`
+	Description       string       `json:"description"`
+	CurrentPrice      *Price       `json:"currentPrice,omitempty"`
+	FuturePrice       *Price       `json:"futurePrice,omitempty"`
+	SystemStatus      SystemStatus `json:"systemStatus"`
+	HitDeficitAt      time.Time    `json:"deficitAt"`
+	HitCapacityAt     time.Time    `json:"capacityAt"`
+	DryRun            bool         `json:"dryRun,omitempty"`
+	Fault             bool         `json:"fault,omitempty"`
+	Failed            bool         `json:"failed,omitempty"`
+	Error             string       `json:"error,omitempty"`
 }
 
 // EnergyStats represents aggregated energy statistics for an hourly period.

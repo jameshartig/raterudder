@@ -165,15 +165,18 @@ func (c *Controller) Decide(
 
 		return Decision{
 			Action: types.Action{
-				Timestamp:     now.UTC(),
-				BatteryMode:   finalBatMode,
-				SolarMode:     finalSolarMode,
-				Reason:        reason,
-				Description:   modeReason,
-				CurrentPrice:  &currentPrice,
-				FuturePrice:   futurePrice,
-				HitDeficitAt:  hitDeficitAt,
-				HitCapacityAt: hitCapacityAt,
+				Timestamp:         now.UTC(),
+				BatteryMode:       finalBatMode,
+				SolarMode:         finalSolarMode,
+				TargetBatteryMode: batteryMode,
+				TargetSolarMode:   solarMode,
+				Reason:            reason,
+				Description:       modeReason,
+				CurrentPrice:      &currentPrice,
+				FuturePrice:       futurePrice,
+				SystemStatus:      currentStatus,
+				HitDeficitAt:      hitDeficitAt,
+				HitCapacityAt:     hitCapacityAt,
 			},
 		}
 	}

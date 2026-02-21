@@ -47,6 +47,8 @@ export interface Action {
     timestamp: string;
     batteryMode: number;
     solarMode: number;
+    targetBatteryMode?: number;
+    targetSolarMode?: number;
     reason?: ActionReason;
     description: string;
     currentPrice?: PriceInfo;
