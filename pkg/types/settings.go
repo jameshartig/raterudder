@@ -89,6 +89,10 @@ type FranklinCredentials struct {
 	Username    string `json:"username"`
 	MD5Password string `json:"md5Password"`
 	GatewayID   string `json:"gatewayID,omitempty"`
+	// Token is the cached Franklin API session token. It is stored alongside
+	// the other credentials so we can skip login on every update cycle and only
+	// re-login when the token has expired (backend returns 401).
+	Token string `json:"token,omitempty"`
 }
 
 // MigrateSettings migrates the settings to the current version.

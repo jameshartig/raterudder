@@ -569,11 +569,10 @@ func TestFranklin(t *testing.T) {
 		}))
 		defer ts.Close()
 		f := &Franklin{
-			client:      ts.Client(),
-			baseURL:     ts.URL,
-			tokenStr:    "valid-token",
-			tokenExpiry: time.Now().Add(time.Hour),
-			gatewayID:   "anything",
+			client:    ts.Client(),
+			baseURL:   ts.URL,
+			tokenStr:  "valid-token",
+			gatewayID: "anything",
 		}
 		err := f.SetModes(context.Background(), types.BatteryModeNoChange, types.SolarModeNoChange)
 		require.NoError(t, err, "SetModes should succeed (noop)")
@@ -965,6 +964,14 @@ func TestFranklin(t *testing.T) {
 					})
 					return
 				}
+				if r.URL.Path == "/hes-gateway/terminal/getDeviceInfoV2" {
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"code":    200,
+						"success": true,
+						"result":  map[string]interface{}{"totalCap": 30.0},
+					})
+					return
+				}
 				http.Error(w, "not found: "+r.URL.Path, 404)
 			}))
 			defer ts.Close()
@@ -1003,6 +1010,14 @@ func TestFranklin(t *testing.T) {
 					})
 					return
 				}
+				if r.URL.Path == "/hes-gateway/terminal/getDeviceInfoV2" {
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"code":    200,
+						"success": true,
+						"result":  map[string]interface{}{"totalCap": 30.0},
+					})
+					return
+				}
 				http.Error(w, "not found: "+r.URL.Path, 404)
 			}))
 			defer ts.Close()
@@ -1022,8 +1037,152 @@ func TestFranklin(t *testing.T) {
 
 			newCreds, changed, err := f.Authenticate(context.Background(), creds)
 			require.NoError(t, err)
-			assert.False(t, changed)
+			// changed=true because a fresh token was obtained (no stored token)
+			assert.True(t, changed)
 			assert.Equal(t, existingID, newCreds.Franklin.GatewayID)
+			assert.Equal(t, token, newCreds.Franklin.Token, "token should be stored in credentials")
+		})
+
+		t.Run("TokenStoredInCredentials", func(t *testing.T) {
+			var loginCalls int
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/hes-gateway/terminal/initialize/appUserOrInstallerLogin" {
+					loginCalls++
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"code":    200,
+						"success": true,
+						"result":  map[string]interface{}{"token": "brand-new-token"},
+					})
+					return
+				}
+				if r.URL.Path == "/hes-gateway/terminal/getDeviceInfoV2" {
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"code":    200,
+						"success": true,
+						"result":  map[string]interface{}{"totalCap": 30.0},
+					})
+					return
+				}
+				http.Error(w, "not found: "+r.URL.Path, 404)
+			}))
+			defer ts.Close()
+
+			f := &Franklin{
+				client:  ts.Client(),
+				baseURL: ts.URL,
+			}
+
+			creds := types.Credentials{
+				Franklin: &types.FranklinCredentials{
+					Username:    "user@example.com",
+					MD5Password: "pass",
+					GatewayID:   "gw1",
+					// No Token — first call, must login
+				},
+			}
+
+			newCreds, changed, err := f.Authenticate(context.Background(), creds)
+			require.NoError(t, err)
+			assert.True(t, changed, "changed should be true because a new token was obtained")
+			assert.Equal(t, "brand-new-token", newCreds.Franklin.Token, "token should be written back into credentials")
+			assert.Equal(t, 1, loginCalls, "login should be called exactly once")
+			assert.Equal(t, "brand-new-token", f.tokenStr, "in-memory token should match")
+		})
+
+		t.Run("UsesStoredTokenSkipsLogin", func(t *testing.T) {
+			var loginCalls int
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/hes-gateway/terminal/initialize/appUserOrInstallerLogin" {
+					loginCalls++
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"code":    200,
+						"success": true,
+						"result":  map[string]interface{}{"token": "should-not-be-called"},
+					})
+					return
+				}
+				if r.URL.Path == "/hes-gateway/terminal/getDeviceInfoV2" {
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"code":    200,
+						"success": true,
+						"result":  map[string]interface{}{"totalCap": 30.0},
+					})
+					return
+				}
+				http.Error(w, "not found: "+r.URL.Path, 404)
+			}))
+			defer ts.Close()
+
+			f := &Franklin{
+				client:  ts.Client(),
+				baseURL: ts.URL,
+			}
+
+			creds := types.Credentials{
+				Franklin: &types.FranklinCredentials{
+					Username:    "user@example.com",
+					MD5Password: "pass",
+					GatewayID:   "gw1",
+					Token:       "stored-token-abc",
+				},
+			}
+
+			newCreds, changed, err := f.Authenticate(context.Background(), creds)
+			require.NoError(t, err)
+			assert.False(t, changed, "changed should be false — nothing new to persist")
+			assert.Equal(t, 0, loginCalls, "login should NOT be called when a stored token exists")
+			assert.Equal(t, "stored-token-abc", f.tokenStr, "in-memory token should be restored from credentials")
+			assert.Equal(t, "stored-token-abc", newCreds.Franklin.Token)
+		})
+
+		t.Run("StaleCredentialsForcesLogin", func(t *testing.T) {
+			var loginCalls int
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/hes-gateway/terminal/initialize/appUserOrInstallerLogin" {
+					loginCalls++
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"code":    200,
+						"success": true,
+						"result":  map[string]interface{}{"token": "fresh-token-xyz"},
+					})
+					return
+				}
+				if r.URL.Path == "/hes-gateway/terminal/getDeviceInfoV2" {
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"code":    200,
+						"success": true,
+						"result":  map[string]interface{}{"totalCap": 30.0},
+					})
+					return
+				}
+				http.Error(w, "not found: "+r.URL.Path, 404)
+			}))
+			defer ts.Close()
+
+			// Simulate a Franklin instance that already has a different user cached.
+			f := &Franklin{
+				client:      ts.Client(),
+				baseURL:     ts.URL,
+				username:    "old-user@example.com",
+				md5Password: "old-pass",
+				tokenStr:    "old-token",
+			}
+
+			creds := types.Credentials{
+				Franklin: &types.FranklinCredentials{
+					Username:    "new-user@example.com",
+					MD5Password: "new-pass",
+					GatewayID:   "gw1",
+					Token:       "old-stored-token", // stale — credentials changed
+				},
+			}
+
+			newCreds, changed, err := f.Authenticate(context.Background(), creds)
+			require.NoError(t, err)
+			assert.True(t, changed, "changed should be true because credentials changed and a new token was obtained")
+			assert.Equal(t, 1, loginCalls, "login should be called when credentials have changed")
+			assert.Equal(t, "fresh-token-xyz", newCreds.Franklin.Token, "new token should be written back into credentials")
+			assert.Equal(t, "fresh-token-xyz", f.tokenStr)
 		})
 	})
 
@@ -1070,8 +1229,6 @@ func TestFranklin(t *testing.T) {
 			username:    "user",
 			md5Password: "pass",
 			tokenStr:    "expired-token",
-			// Set expiry in future so ensureLogin doesn't trigger immediately
-			tokenExpiry: time.Now().Add(time.Hour),
 			gatewayID:   "g",
 		}
 

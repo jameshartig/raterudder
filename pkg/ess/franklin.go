@@ -33,7 +33,6 @@ type Franklin struct {
 	md5Password      string
 	gatewayID        string
 	tokenStr         string
-	tokenExpiry      time.Time
 	mu               sync.Mutex
 	settings         types.Settings
 	deviceInfoCache  deviceInfoV2Result
@@ -65,8 +64,12 @@ func (f *Franklin) ApplySettings(ctx context.Context, settings types.Settings) e
 	return nil
 }
 
-// Authenticate logs into franklin andfetches the default gateway if its not
-// filled in.
+// Authenticate logs into franklin and fetches the default gateway if its not
+// filled in. If a valid token is already stored in creds, it is restored to
+// avoid an unnecessary login round-trip. A fresh login is only performed when
+// the username/password has changed or no stored token is available. After a
+// successful login the new token is written back into creds so the caller can
+// persist it.
 func (f *Franklin) Authenticate(ctx context.Context, creds types.Credentials) (types.Credentials, bool, error) {
 	if creds.Franklin == nil {
 		return creds, false, errors.New("missing franklin credentials")
@@ -74,18 +77,40 @@ func (f *Franklin) Authenticate(ctx context.Context, creds types.Credentials) (t
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.username != creds.Franklin.Username || f.md5Password != creds.Franklin.MD5Password {
-		token, tokenExpiry, err := f.login(ctx, creds.Franklin.Username, creds.Franklin.MD5Password)
+
+	var changed bool
+	// Determine if we need a fresh login. We need one when:
+	// - There is no cached token in the supplied credentials (first time), OR
+	// - The username/password in the incoming credentials differ from what we
+	//   already have verified (detected by comparing against stored struct state
+	//   only when we have previously authenticated with those credentials).
+	needLogin := creds.Franklin.Token == ""
+	if !needLogin && f.username != "" {
+		// We've previously authenticated; check if credentials have changed.
+		needLogin = f.username != creds.Franklin.Username || f.md5Password != creds.Franklin.MD5Password
+	}
+
+	if needLogin {
+		log.Ctx(ctx).DebugContext(ctx, "logging in to franklin")
+		// Credentials changed or no cached token — must login fresh.
+		token, err := f.login(ctx, creds.Franklin.Username, creds.Franklin.MD5Password)
 		if err != nil {
 			return creds, false, err
 		}
 		f.username = creds.Franklin.Username
 		f.md5Password = creds.Franklin.MD5Password
 		f.tokenStr = token
-		f.tokenExpiry = tokenExpiry
+		// Persist the new token so we can skip login next time.
+		creds.Franklin.Token = token
+		changed = true
+	} else {
+		log.Ctx(ctx).DebugContext(ctx, "restored franklin credentials from cache")
+		// Restore the token from credentials so we can skip login.
+		f.username = creds.Franklin.Username
+		f.md5Password = creds.Franklin.MD5Password
+		f.tokenStr = creds.Franklin.Token
 	}
 
-	var changed bool
 	if creds.Franklin.GatewayID == "" {
 		id, err := f.getDefaultGatewayID(ctx)
 		if err != nil {
@@ -96,6 +121,15 @@ func (f *Franklin) Authenticate(ctx context.Context, creds types.Credentials) (t
 		changed = true
 	}
 	f.gatewayID = creds.Franklin.GatewayID
+
+	// Validate the credentials by fetching device info. This confirms the token
+	// and gateway ID are working. The result is cached so the subsequent
+	// GetStatus call will reuse it for free.
+	if _, err := f.getDeviceInfoWithCache(ctx); err != nil {
+		log.Ctx(ctx).WarnContext(ctx, "franklin credential validation failed", slog.Any("error", err))
+		return creds, false, fmt.Errorf("credential validation failed: %w", err)
+	}
+
 	return creds, changed, nil
 }
 
@@ -107,13 +141,12 @@ type loginResult struct {
 
 // ensureLogin will not login again if the token we have cached is still valid
 func (f *Franklin) ensureLogin(ctx context.Context) error {
-	if f.tokenStr == "" || !time.Now().Before(f.tokenExpiry) {
-		token, tokenExpiry, err := f.login(ctx, f.username, f.md5Password)
+	if f.tokenStr == "" {
+		token, err := f.login(ctx, f.username, f.md5Password)
 		if err != nil {
 			return fmt.Errorf("failed to login: %w", err)
 		}
 		f.tokenStr = token
-		f.tokenExpiry = tokenExpiry
 	}
 
 	if f.gatewayID == "" {
@@ -127,12 +160,12 @@ func (f *Franklin) ensureLogin(ctx context.Context) error {
 	return nil
 }
 
-func (f *Franklin) login(ctx context.Context, username, md5Password string) (string, time.Time, error) {
+func (f *Franklin) login(ctx context.Context, username, md5Password string) (string, error) {
 	if username == "" {
-		return "", time.Time{}, errors.New("missing username")
+		return "", errors.New("missing username")
 	}
 	if md5Password == "" {
-		return "", time.Time{}, errors.New("missing password")
+		return "", errors.New("missing password")
 	}
 
 	data := url.Values{}
@@ -142,18 +175,18 @@ func (f *Franklin) login(ctx context.Context, username, md5Password string) (str
 
 	req, err := f.newPostFormRequest(ctx, franklinLoginPath, data)
 	if err != nil {
-		return "", time.Time{}, err
+		return "", err
 	}
 
 	var res loginResult
 	if err := f.doRequest(req, &res); err != nil {
 		log.Ctx(ctx).ErrorContext(ctx, "franklin login failed", slog.Any("error", err))
-		return "", time.Time{}, fmt.Errorf("login failed: %w", err)
+		return "", fmt.Errorf("login failed: %w", err)
 	}
 	log.Ctx(ctx).DebugContext(ctx, "franklin login success", slog.String("username", username))
 
 	// TODO: what is the actual expiry of the token?
-	return res.Token, time.Now().Add(24 * time.Hour), nil
+	return res.Token, nil
 }
 
 func (f *Franklin) newPostFormRequest(ctx context.Context, endpoint string, data url.Values) (*http.Request, error) {
@@ -250,6 +283,14 @@ func (f *Franklin) doRequest(req *http.Request, dest interface{}) error {
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
+			if resp.StatusCode == http.StatusUnauthorized && !isLogin && f.tokenStr != "" {
+				log.Ctx(req.Context()).DebugContext(req.Context(), "franklin token expired")
+				f.tokenStr = ""
+				if err := f.ensureLogin(req.Context()); err != nil {
+					return err
+				}
+				continue
+			}
 			return fmt.Errorf("status %d", resp.StatusCode)
 		}
 
@@ -269,7 +310,7 @@ func (f *Franklin) doRequest(req *http.Request, dest interface{}) error {
 			// need to get another token
 			if fr.Code == 401 && !isLogin && f.tokenStr != "" {
 				log.Ctx(req.Context()).DebugContext(req.Context(), "franklin token expired", slog.String("message", fr.Message))
-				f.tokenExpiry = time.Now().Add(-time.Second)
+				f.tokenStr = ""
 				if err := f.ensureLogin(req.Context()); err != nil {
 					return err
 				}
@@ -372,6 +413,21 @@ func (f *Franklin) getDeviceInfo(ctx context.Context) (deviceInfoV2Result, error
 	return res, nil
 }
 
+// getDeviceInfoWithCache returns cached device info if still fresh, otherwise
+// fetches it from the API and updates the cache. Must be called with f.mu held.
+func (f *Franklin) getDeviceInfoWithCache(ctx context.Context) (deviceInfoV2Result, error) {
+	if time.Now().Before(f.deviceInfoExpiry) {
+		return f.deviceInfoCache, nil
+	}
+	di, err := f.getDeviceInfo(ctx)
+	if err != nil {
+		return deviceInfoV2Result{}, err
+	}
+	f.deviceInfoCache = di
+	f.deviceInfoExpiry = time.Now().Add(time.Minute)
+	return di, nil
+}
+
 // GetStatus returns the status of the franklin system
 func (f *Franklin) GetStatus(ctx context.Context) (types.SystemStatus, error) {
 	log.Ctx(ctx).DebugContext(ctx, "getting franklin system status")
@@ -387,16 +443,9 @@ func (f *Franklin) GetStatus(ctx context.Context) (types.SystemStatus, error) {
 		return types.SystemStatus{}, err
 	}
 
-	var di deviceInfoV2Result
-	if time.Now().Before(f.deviceInfoExpiry) {
-		di = f.deviceInfoCache
-	} else {
-		di, err = f.getDeviceInfo(ctx)
-		if err != nil {
-			return types.SystemStatus{}, err
-		}
-		f.deviceInfoCache = di
-		f.deviceInfoExpiry = time.Now().Add(time.Minute)
+	di, err := f.getDeviceInfoWithCache(ctx)
+	if err != nil {
+		return types.SystemStatus{}, err
 	}
 
 	modes, err := f.getAvailableModes(ctx)
