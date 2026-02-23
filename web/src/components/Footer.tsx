@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link } from 'wouter';
+import { Separator } from '@base-ui/react/separator';
 import './Footer.css';
 
 const Footer: React.FC = () => {
@@ -13,7 +14,7 @@ const Footer: React.FC = () => {
                 </div>
                 <div className="footer-links">
                     <Link to="/privacy">Privacy Policy</Link>
-                    <span className="separator">|</span>
+                    <Separator className="separator" />
                     <Link to="/terms">Terms of Service</Link>
                 </div>
                 <div className="copyright">

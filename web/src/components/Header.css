@@ -58,6 +58,10 @@
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  text-align: left;
 }
 
 .site-selector-header:hover {

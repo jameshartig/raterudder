@@ -21,3 +21,4 @@ Code Style
 - Tests should live in a file with the same name as the file they test, with suffix _test
 - Tests should be named Test<FunctionName> and all related tests should live as subtests in that function with t.Run()
 - Use assert.ErrorContains for error messages
+- Review web/llms.txt for available base-ui components and their props

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useLocation, useSearch, Link } from 'wouter';
 import { fetchActions, fetchSavings, fetchSettings, type Action, type SavingsStats, type Settings, BatteryMode, SolarMode, ActionReason } from '../api';
+import { Meter } from '@base-ui/react/meter';
 
 const getBatteryModeLabel = (mode: number) => {
     switch (mode) {
@@ -193,9 +194,11 @@ const CurrentStatus: React.FC<{ action: Action }> = ({ action }) => {
                     <div className="metric">
                         <span className="metric-label">Battery</span>
                         <span className="metric-value">{soc.toFixed(1)}%</span>
-                        <div className="battery-bar">
-                            <div className="battery-fill" style={{ width: `${soc}%` }}></div>
-                        </div>
+                        <Meter.Root className="battery-bar" value={soc} min={0} max={100}>
+                            <Meter.Track className="battery-track">
+                                <Meter.Indicator className="battery-fill" />
+                            </Meter.Track>
+                        </Meter.Root>
                     </div>
                     <div className="metric">
                         <span className="metric-label">Price</span>
@@ -233,9 +236,11 @@ const CurrentStatus: React.FC<{ action: Action }> = ({ action }) => {
                 <div className="metric">
                     <span className="metric-label">Battery</span>
                     <span className="metric-value">{soc.toFixed(1)}%</span>
-                    <div className="battery-bar">
-                        <div className="battery-fill" style={{ width: `${soc}%` }}></div>
-                    </div>
+                    <Meter.Root className="battery-bar" value={soc} min={0} max={100}>
+                        <Meter.Track className="battery-track">
+                            <Meter.Indicator className="battery-fill" />
+                        </Meter.Track>
+                    </Meter.Root>
                 </div>
                 <div className="metric">
                     <span className="metric-label">Price</span>

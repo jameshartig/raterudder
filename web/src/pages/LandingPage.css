@@ -383,7 +383,6 @@
 .faq-section {
     width: 100%;
     padding: 6rem 0;
-    /* Removed white background to fix "box in a box" look */
     background: transparent;
 }
 
@@ -401,10 +400,9 @@
     padding: 0 1.5rem;
     transition: all 0.2s ease;
     background: #fff;
-    /* Ensuring adequate contrast against background if transparent, but it's on light bg so white is good */
 }
 
-.faq-item.active {
+.faq-item[data-open] {
     border-color: #cbd5e1;
     background: #f8fafc;
 }
@@ -419,6 +417,11 @@
     color: #334155;
     padding: 1.25rem 0;
     transition: color 0.2s;
+    background: none;
+    border: none;
+    width: 100%;
+    text-align: left;
+    font-family: inherit;
 }
 
 .faq-question:hover {
@@ -437,27 +440,35 @@
     justify-content: center;
     border-radius: 50%;
     transition: transform 0.3s ease, background 0.3s ease;
+    flex-shrink: 0;
 }
 
-.faq-item.active .toggle-icon {
-    /* transform: rotate(45deg); Removed rotation logic if we are using +/- text characters */
+.toggle-icon::after {
+    content: '+';
+}
+
+.faq-question[data-panel-open] .toggle-icon {
     background: #e0f2fe;
     color: #0284c7;
 }
 
-.faq-answer {
-    max-height: 0;
-    overflow: hidden;
-    transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    opacity: 0;
+.faq-question[data-panel-open] .toggle-icon::after {
+    content: '−';
 }
 
-.faq-item.active .faq-answer {
-    max-height: 200px;
-    opacity: 1;
+.faq-answer {
+    overflow: hidden;
+    height: var(--accordion-panel-height);
+    transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.faq-answer:not([data-open]) {
+    height: 0;
+}
+
+.faq-answer[data-open] {
     padding-bottom: 1.25rem;
     border-top: 1px solid #e2e8f0;
-    margin-top: -0.5rem;
     padding-top: 1rem;
 }
 

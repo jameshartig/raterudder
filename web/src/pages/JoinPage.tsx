@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Link } from 'wouter';
 import { joinSite } from '../api';
+import { Field } from '@base-ui/react/field';
+import { Input } from '@base-ui/react/input';
 import './JoinPage.css';
 
 interface JoinPageProps {
@@ -40,9 +42,9 @@ const JoinPage: React.FC<JoinPageProps> = ({ onJoinSuccess }) => {
                 <p>Enter the Site ID and Invite Code provided by the site owner.</p>
 
                 <form onSubmit={handleSubmit} className="join-form">
-                    <div className="join-field">
-                        <label htmlFor="join-site-id">Site ID</label>
-                        <input
+                    <Field.Root className="join-field">
+                        <Field.Label htmlFor="join-site-id">Site ID</Field.Label>
+                        <Input
                             id="join-site-id"
                             type="text"
                             value={siteID}
@@ -51,11 +53,11 @@ const JoinPage: React.FC<JoinPageProps> = ({ onJoinSuccess }) => {
                             autoComplete="off"
                             disabled={loading}
                         />
-                    </div>
+                    </Field.Root>
 
-                    <div className="join-field">
-                        <label htmlFor="join-invite-code">Invite Code</label>
-                        <input
+                    <Field.Root className="join-field">
+                        <Field.Label htmlFor="join-invite-code">Invite Code</Field.Label>
+                        <Input
                             id="join-invite-code"
                             type="text"
                             value={inviteCode}
@@ -64,7 +66,7 @@ const JoinPage: React.FC<JoinPageProps> = ({ onJoinSuccess }) => {
                             autoComplete="off"
                             disabled={loading}
                         />
-                    </div>
+                    </Field.Root>
 
                     {error && <div className="join-error">{error}</div>}
 

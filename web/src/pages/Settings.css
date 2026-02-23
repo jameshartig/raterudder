@@ -27,7 +27,7 @@
   margin-bottom: 1.25rem;
 }
 
-/* Form Groups */
+/* Field / Form Groups */
 .form-group {
   margin-bottom: 1.5rem;
   display: flex;
@@ -44,8 +44,7 @@
 .form-group input[type="number"],
 .form-group input[type="text"],
 .form-group input[type="email"],
-.form-group input[type="password"],
-.form-group select {
+.form-group input[type="password"] {
   width: 100%;
   padding: 0.75rem 1rem;
   font-family: inherit;
@@ -56,7 +55,6 @@
   border-radius: var(--radius-md);
   transition: all 0.2s ease;
   box-sizing: border-box;
-  /* Update: Ensure padding doesn't overflow */
 }
 
 .form-group input:focus {
@@ -72,33 +70,175 @@
   border-color: var(--border);
 }
 
-/* Checkbox Groups */
-.checkbox-group {
-  flex-direction: column;
+/* Field.Description styling */
+.form-group [data-field="description"] {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* Switch Groups */
+.switch-group {
   gap: 0.25rem;
 }
 
-.checkbox-group label {
+.switch-row {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+}
+
+.switch-row label {
   cursor: pointer;
   font-size: 1rem;
 }
 
-.checkbox-group input[type="checkbox"] {
-  width: 1.25rem;
-  height: 1.25rem;
-  border-radius: 4px;
-  accent-color: var(--primary);
+/* Switch Component */
+.switch-root {
+  width: 2.75rem;
+  height: 1.5rem;
+  padding: 2px;
+  border-radius: 99px;
+  border: none;
+  background: #cbd5e1;
   cursor: pointer;
+  transition: background 0.2s ease;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 
-/* Help Text */
-.help-text {
-  font-size: 0.875rem;
+.switch-root[data-checked] {
+  background: var(--primary);
+}
+
+.switch-thumb {
+  display: block;
+  width: 1.125rem;
+  height: 1.125rem;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.switch-root[data-checked] .switch-thumb {
+  transform: translateX(1.25rem);
+}
+
+/* Select Component */
+.select-trigger {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-family: inherit;
+  font-size: 1rem;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+}
+
+.select-trigger:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+}
+
+.select-positioner {
+  z-index: 1000;
+}
+
+.select-popup {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  padding: 0.25rem;
+  max-height: 20rem;
+  overflow-y: auto;
+}
+
+.select-item {
+  padding: 0.625rem 0.75rem;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  border-radius: calc(var(--radius-md) - 2px);
+  cursor: pointer;
+  transition: background 0.15s ease;
+  display: flex;
+  align-items: center;
+}
+
+.select-item:hover,
+.select-item[data-highlighted] {
+  background: var(--surface-subtle);
+}
+
+.select-item[data-selected] {
+  font-weight: 600;
+  background: rgba(14, 165, 233, 0.1);
+}
+
+/* Collapsible (Advanced Settings) */
+.advanced-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-top: 2rem;
+  background: var(--surface-subtle);
+}
+
+.advanced-trigger {
+  cursor: pointer;
+  padding: 1rem;
+  font-weight: 600;
+  font-size: 1rem;
   color: var(--text-secondary);
-  line-height: 1.5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  font-family: inherit;
+}
+
+.advanced-trigger::after {
+  content: '▼';
+  font-size: 0.75rem;
+  transition: transform 0.2s;
+}
+
+.advanced-trigger[data-open]::after {
+  transform: rotate(180deg);
+}
+
+.advanced-panel {
+  overflow: hidden;
+  padding: 0 1rem;
+  height: var(--collapsible-panel-height);
+  transition: height 0.3s ease;
+}
+
+.advanced-panel:not([data-open]) {
+  height: 0;
+}
+
+.advanced-panel[data-open] {
+  padding-bottom: 1rem;
+}
+
+.advanced-panel h3 {
+  margin-top: 1.5rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.5rem;
+  font-size: 0.8rem;
 }
 
 /* Messages */
@@ -156,61 +296,4 @@
 
 .save-button:active {
   transform: translateY(0);
-}
-
-
-/* Advanced Settings Section */
-details {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 0.5rem;
-  margin-top: 2rem;
-  background: var(--surface-subtle);
-}
-
-details[open] {
-  padding-bottom: 1rem;
-}
-
-summary {
-  cursor: pointer;
-  padding: 0.5rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-  list-style: none;
-  /* Hide default triangle */
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-summary::-webkit-details-marker {
-  display: none;
-}
-
-summary::after {
-  content: '▼';
-  font-size: 0.75rem;
-  transition: transform 0.2s;
-}
-
-details[open] summary>span::after {
-  transform: rotate(180deg);
-}
-
-/* Rotate the arrow which is actually ::after on summary */
-details[open] summary::after {
-  transform: rotate(180deg);
-}
-
-details h3 {
-  margin-top: 1.5rem;
-  padding-left: 0.5rem;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 0.5rem;
-  font-size: 0.8rem;
-}
-
-details .form-group {
-  padding: 0 0.5rem;
 }

@@ -1,5 +1,6 @@
 import React from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, LineChart, Line } from 'recharts';
+import { Accordion } from '@base-ui/react/accordion';
 import './LandingPage.css';
 
 const LandingPage: React.FC = () => {
@@ -29,12 +30,6 @@ const LandingPage: React.FC = () => {
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
     }, []);
-
-    const [activeAccordion, setActiveAccordion] = React.useState<number | null>(null);
-
-    const toggleAccordion = (index: number) => {
-        setActiveAccordion(activeAccordion === index ? null : index);
-    };
 
     const faqData = [
         {
@@ -194,23 +189,21 @@ const LandingPage: React.FC = () => {
                     <div className="section-header">
                         <h2>Frequently Asked Questions</h2>
                     </div>
-                    <div className="faq-container">
+                    <Accordion.Root className="faq-container">
                         {faqData.map((item, index) => (
-                            <div
-                                key={index}
-                                className={`faq-item ${activeAccordion === index ? 'active' : ''}`}
-                                onClick={() => toggleAccordion(index)}
-                            >
-                                <div className="faq-question">
-                                    <span>{item.question}</span>
-                                    <span className="toggle-icon">{activeAccordion === index ? '−' : '+'}</span>
-                                </div>
-                                <div className="faq-answer">
+                            <Accordion.Item key={index} className="faq-item" value={index}>
+                                <Accordion.Header>
+                                    <Accordion.Trigger className="faq-question">
+                                        <span>{item.question}</span>
+                                        <span className="toggle-icon" />
+                                    </Accordion.Trigger>
+                                </Accordion.Header>
+                                <Accordion.Panel className="faq-answer">
                                     <p>{item.answer}</p>
-                                </div>
-                            </div>
+                                </Accordion.Panel>
+                            </Accordion.Item>
                         ))}
-                    </div>
+                    </Accordion.Root>
                     <p className="marketing-disclaimer">
                         *Actual savings vary by utility plan, battery capacity, and household usage.
                     </p>

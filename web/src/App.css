@@ -566,11 +566,14 @@ button {
 }
 
 .battery-bar {
+  margin-top: 4px;
+  width: 100%;
+}
+
+.battery-track {
   height: 6px;
   background: var(--border);
   border-radius: 3px;
-  margin-top: 4px;
-  width: 100%;
   overflow: hidden;
 }
 

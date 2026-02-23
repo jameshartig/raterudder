@@ -1,6 +1,7 @@
 import React from 'react';
 import { GoogleLogin } from '@react-oauth/google';
 import { Link } from 'wouter';
+import { Separator } from '@base-ui/react/separator';
 import './LoginPage.css';
 
 interface LoginPageProps {
@@ -36,7 +37,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onLoginError, aut
                 </div>
                 <div className="login-footer">
                     <Link to="/privacy">Privacy Policy</Link>
-                    <span className="separator">|</span>
+                    <Separator className="separator" />
                     <Link to="/terms">Terms of Service</Link>
                 </div>
             </div>

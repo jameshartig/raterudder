@@ -71,5 +71,9 @@
 }
 
 .login-footer .separator {
-  color: var(--border);
+  border: none;
+  width: 1px;
+  height: 0.875em;
+  background: var(--border);
+  margin: 0;
 }

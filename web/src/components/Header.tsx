@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link } from 'wouter';
+import { Select } from '@base-ui/react/select';
 import './Header.css';
 
 interface HeaderProps {
@@ -26,15 +27,25 @@ const Header: React.FC<HeaderProps> = ({ loggedIn, siteIDs, selectedSiteID, onSi
                         RateRudder
                     </Link>
                     {loggedIn && siteIDs.length > 1 && (
-                        <select
+                        <Select.Root
                             value={selectedSiteID}
-                            onChange={(e) => onSiteChange(e.target.value)}
-                            className="site-selector-header"
+                            onValueChange={(value) => onSiteChange(value as string)}
                         >
-                            {siteIDs.map(id => (
-                                <option key={id} value={id}>{id}</option>
-                            ))}
-                        </select>
+                            <Select.Trigger className="site-selector-header">
+                                <Select.Value />
+                            </Select.Trigger>
+                            <Select.Portal>
+                                <Select.Positioner className="select-positioner">
+                                    <Select.Popup className="select-popup">
+                                        {siteIDs.map(id => (
+                                            <Select.Item key={id} className="select-item" value={id}>
+                                                <Select.ItemText>{id}</Select.ItemText>
+                                            </Select.Item>
+                                        ))}
+                                    </Select.Popup>
+                                </Select.Positioner>
+                            </Select.Portal>
+                        </Select.Root>
                     )}
                 </div>
 

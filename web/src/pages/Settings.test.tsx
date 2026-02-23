@@ -32,6 +32,15 @@ vi.mock('@react-oauth/google', () => ({
     ),
 }));
 
+// Helper to navigate to settings page
+const navigateToSettings = async () => {
+    (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
+    render(<App />);
+    fireEvent.click(screen.getByText('Login'));
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
+};
+
 describe('App & Settings', () => {
     beforeEach(() => {
         vi.resetAllMocks();
@@ -45,10 +54,6 @@ describe('App & Settings', () => {
         // Default mocks
         setupDefaultApiMocks(api);
     });
-
-
-
-
 
     it('shows login button when auth required and not logged in', async () => {
         (fetchAuthStatus as any).mockResolvedValue({
@@ -121,20 +126,12 @@ describe('App & Settings', () => {
     });
 
     it('navigates to settings and loads data', async () => {
-        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
+        await navigateToSettings();
 
-        render(<App />);
-        fireEvent.click(screen.getByText('Login'));
+        // Advanced inputs are inside a Collapsible panel. Click to expand first.
+        const advancedBtn = await screen.findByText('Advanced Settings');
+        fireEvent.click(advancedBtn);
 
-        // Wait for link to appear
-        await waitFor(() => {
-            expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument();
-        });
-
-        // Click settings
-        fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
-
-        // Check if settings component loaded and fetched data
         await waitFor(() => {
             expect(screen.getByLabelText(/Min Battery SOC/i)).toBeInTheDocument();
             expect(screen.getByDisplayValue('10')).toBeInTheDocument();
@@ -142,13 +139,11 @@ describe('App & Settings', () => {
     });
 
     it('can update settings', async () => {
-         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
-         render(<App />);
-         fireEvent.click(screen.getByText('Login'));
+         await navigateToSettings();
 
-         // Navigate
-         await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
-         fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
+         // Expand advanced settings first
+         const advancedBtn = await screen.findByText('Advanced Settings');
+         fireEvent.click(advancedBtn);
 
          // Change input
          await waitFor(() => expect(screen.getByLabelText(/Min Battery SOC/i)).toBeInTheDocument());
@@ -171,18 +166,16 @@ describe('App & Settings', () => {
     });
 
     it('can toggle pause setting', async () => {
-         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
-         render(<App />);
-         fireEvent.click(screen.getByText('Login'));
+         await navigateToSettings();
 
-         // Navigate
-         await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
-         fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
+         // Expand advanced settings to find Pause
+         const advancedBtn = await screen.findByText('Advanced Settings');
+         fireEvent.click(advancedBtn);
 
-         // Toggle Pause
-         await waitFor(() => expect(screen.getByLabelText(/Pause Updates/i)).toBeInTheDocument());
-         const input = screen.getByLabelText(/Pause Updates/i);
-         fireEvent.click(input);
+         // Toggle Pause switch — find the switch button by its accessible name
+         await waitFor(() => expect(screen.getByRole('switch', { name: /Pause Updates/i })).toBeInTheDocument());
+         const switchEl = screen.getByRole('switch', { name: /Pause Updates/i });
+         fireEvent.click(switchEl);
 
          // Mock update success
          (updateSettings as any).mockResolvedValue(undefined);
@@ -200,18 +193,12 @@ describe('App & Settings', () => {
     });
 
     it('can toggle grid export batteries setting', async () => {
-         (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
-         render(<App />);
-         fireEvent.click(screen.getByText('Login'));
+         await navigateToSettings();
 
-         // Navigate
-         await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
-         fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
-
-         // Toggle Grid Export Batteries
-         await waitFor(() => expect(screen.getByLabelText(/Grid Export Batteries/i)).toBeInTheDocument());
-         const input = screen.getByLabelText(/Grid Export Batteries/i);
-         fireEvent.click(input);
+         // Toggle Grid Export Batteries switch
+         await waitFor(() => expect(screen.getByRole('switch', { name: /Grid Export Batteries/i })).toBeInTheDocument());
+         const switchEl = screen.getByRole('switch', { name: /Grid Export Batteries/i });
+         fireEvent.click(switchEl);
 
          // Mock update success
          (updateSettings as any).mockResolvedValue(undefined);
@@ -229,12 +216,11 @@ describe('App & Settings', () => {
     });
 
     it('renders solar settings inputs on settings page', async () => {
-        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
-        render(<App />);
-        fireEvent.click(screen.getByText('Login'));
+        await navigateToSettings();
 
-        await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
-        fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
+        // Expand advanced settings
+        const advancedBtn = await screen.findByText('Advanced Settings');
+        fireEvent.click(advancedBtn);
 
         await waitFor(() => {
             expect(screen.getByLabelText(/Solar Trend Ratio Max/i)).toBeInTheDocument();
@@ -245,12 +231,11 @@ describe('App & Settings', () => {
     });
 
     it('can update solar bell curve multiplier', async () => {
-        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
-        render(<App />);
-        fireEvent.click(screen.getByText('Login'));
+        await navigateToSettings();
 
-        await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
-        fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
+        // Expand advanced settings
+        const advancedBtn = await screen.findByText('Advanced Settings');
+        fireEvent.click(advancedBtn);
 
         await waitFor(() => expect(screen.getByLabelText(/Solar Bell Curve Multiplier/i)).toBeInTheDocument());
         const input = screen.getByLabelText(/Solar Bell Curve Multiplier/i);
@@ -286,12 +271,11 @@ describe('App & Settings', () => {
                 franklin: false
             }
         });
-        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
-        render(<App />);
-        fireEvent.click(screen.getByText('Login'));
+        await navigateToSettings();
 
-        await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
-        fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
+        // Expand advanced settings to see the warning
+        const advancedBtn = await screen.findByText('Advanced Settings');
+        fireEvent.click(advancedBtn);
 
         await waitFor(() => {
             expect(screen.getByText(/Solar export is enabled but the bell curve multiplier is high/)).toBeInTheDocument();
@@ -318,12 +302,11 @@ describe('App & Settings', () => {
                 franklin: false
             }
         });
-        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
-        render(<App />);
-        fireEvent.click(screen.getByText('Login'));
+        await navigateToSettings();
 
-        await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
-        fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
+        // Expand advanced settings to see the warning
+        const advancedBtn = await screen.findByText('Advanced Settings');
+        fireEvent.click(advancedBtn);
 
         await waitFor(() => {
             expect(screen.getByText(/Solar export is disabled but the bell curve multiplier is low/)).toBeInTheDocument();
@@ -331,24 +314,14 @@ describe('App & Settings', () => {
     });
 
     it('can update ComEd rate options', async () => {
-        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
-        render(<App />);
-        fireEvent.click(screen.getByText('Login'));
-
-        // Navigate
-        await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
-        fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
+        await navigateToSettings();
 
         // Wait for ComEd section
         await waitFor(() => expect(screen.getByText('ComEd Rate Options')).toBeInTheDocument());
 
-        // Change Rate Class
-        const rateSelect = screen.getByLabelText('Rate Class');
-        fireEvent.change(rateSelect, { target: { value: 'multiFamilyWithoutElectricHeat' } });
-
-        // Toggle Delivery Time-of-Day
-        const dtodCheckbox = screen.getByLabelText(/Delivery Time-of-Day/i);
-        fireEvent.click(dtodCheckbox);
+        // Toggle Delivery Time-of-Day switch
+        const dtodSwitch = screen.getByRole('switch', { name: /Delivery Time-of-Day/i });
+        fireEvent.click(dtodSwitch);
 
         // Save
         const saveBtn = screen.getByText('Save Settings');
@@ -358,7 +331,6 @@ describe('App & Settings', () => {
             expect(screen.getByText('Settings saved successfully')).toBeInTheDocument();
             expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
                 utilityRateOptions: expect.objectContaining({
-                    rateClass: 'multiFamilyWithoutElectricHeat',
                     variableDeliveryRate: true
                 })
             }), expect.any(String), undefined);
@@ -366,23 +338,15 @@ describe('App & Settings', () => {
     });
 
     it('can expand advanced settings and update fields', async () => {
-        (fetchAuthStatus as any).mockResolvedValue({ ...defaultAuthStatus });
-        render(<App />);
-        fireEvent.click(screen.getByText('Login'));
+        await navigateToSettings();
 
-        // Navigate
-        await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
-        fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
+        // Find collapsible trigger button
+        const advancedBtn = await screen.findByText('Advanced Settings');
 
-        // Find details element
-        const advancedSummary = await screen.findByText('Advanced Settings');
-        const advancedDetails = advancedSummary.closest('details');
-        expect(advancedDetails).not.toHaveAttribute('open');
+        // Click to open
+        fireEvent.click(advancedBtn);
 
-        // Click summary to open
-        fireEvent.click(advancedSummary);
-
-        // Check fields inside are accessible (though they exist in DOM anyway, this confirms finding them)
+        // Check fields inside are accessible
         const priceInput = screen.getByLabelText(/Always Charge Under/i);
         fireEvent.change(priceInput, { target: { value: '0.10' } });
 

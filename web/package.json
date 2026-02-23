@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@base-ui/react": "^1.2.0",
     "@react-oauth/google": "^0.13.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
