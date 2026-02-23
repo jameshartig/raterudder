@@ -35,15 +35,18 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	if action != nil {
+		if status == "" {
+			status = "success"
+		}
 		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"status": "success",
+			"status": status,
 			"action": action,
 			"price":  action.CurrentPrice,
 		}); err != nil {
 			panic(http.ErrAbortHandler)
 		}
 	} else {
-		// No action taken (e.g. paused or emergency mode)
+		// No action taken
 		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"status": status,
 		}); err != nil {
@@ -107,6 +110,7 @@ func (s *Server) performSiteUpdate(
 	// get ESS System
 	essSystem, err := s.getESSSystem(ctx, siteID, settings, creds)
 	if err != nil {
+		// TODO: how should we alert the user when this fails?
 		return nil, "", fmt.Errorf("failed to get ESS system: %w", err)
 	}
 
@@ -129,11 +133,6 @@ func (s *Server) performSiteUpdate(
 
 	log.Ctx(ctx).DebugContext(ctx, "update: energy history synced")
 
-	if settings.Pause {
-		log.Ctx(ctx).InfoContext(ctx, "update: paused")
-		return nil, "paused", nil
-	}
-
 	// fetch current ESS status
 	status, err := essSystem.GetStatus(ctx)
 	if err != nil {
@@ -141,6 +140,29 @@ func (s *Server) performSiteUpdate(
 	}
 
 	log.Ctx(ctx).DebugContext(ctx, "update: ess status fetched")
+
+	// get current price (fetched early so all actions can include the latest price)
+	currentPrice, err := utility.GetCurrentPrice(ctx)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get price: %w", err)
+	}
+
+	log.Ctx(ctx).DebugContext(ctx, "update: current price fetched", slog.Float64("price", currentPrice.DollarsPerKWH), slog.Time("start", currentPrice.TSStart))
+
+	if settings.Pause {
+		log.Ctx(ctx).InfoContext(ctx, "update: paused")
+		action := types.Action{
+			Timestamp:    time.Now(),
+			Description:  "Automation is paused",
+			SystemStatus: status,
+			CurrentPrice: &currentPrice,
+			Paused:       true,
+		}
+		if err := s.storage.InsertAction(ctx, siteID, action); err != nil {
+			log.Ctx(ctx).ErrorContext(ctx, "failed to insert paused action", slog.Any("error", err))
+		}
+		return &action, "paused", nil
+	}
 
 	// don't update if we're in emergency mode
 	if status.EmergencyMode {
@@ -151,6 +173,7 @@ func (s *Server) performSiteUpdate(
 			Reason:       types.ActionReasonEmergencyMode,
 			SystemStatus: status,
 			Fault:        true,
+			CurrentPrice: &currentPrice,
 		}
 		if err := s.storage.InsertAction(ctx, siteID, action); err != nil {
 			log.Ctx(ctx).ErrorContext(ctx, "failed to insert action", slog.Any("error", err))
@@ -166,20 +189,13 @@ func (s *Server) performSiteUpdate(
 			Reason:       types.ActionReasonHasAlarms,
 			SystemStatus: status,
 			Fault:        true,
+			CurrentPrice: &currentPrice,
 		}
 		if err := s.storage.InsertAction(ctx, siteID, action); err != nil {
 			log.Ctx(ctx).ErrorContext(ctx, "failed to insert action", slog.Any("error", err))
 		}
 		return nil, "alarms present", nil
 	}
-
-	// get Current Price for controller
-	currentPrice, err := utility.GetCurrentPrice(ctx)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to get price: %w", err)
-	}
-
-	log.Ctx(ctx).DebugContext(ctx, "update: current price fetched")
 
 	// get Future Prices for controller
 	futurePrices, err := utility.GetFuturePrices(ctx)

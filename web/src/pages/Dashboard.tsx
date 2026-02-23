@@ -57,52 +57,160 @@ const formatTime = (ts: string) => {
     }
 };
 
+// gridChargeCost returns the effective grid charging cost (base price + delivery adder).
+const gridChargeCost = (price: { dollarsPerKWH: number; gridUseDollarsPerKWH?: number }): number =>
+    price.dollarsPerKWH + (price.gridUseDollarsPerKWH ?? 0);
+
 const getReasonText = (action: Action): string => {
     const reason = action.reason;
     if (!reason) {
         return action.description;
     }
-    const currentPriceStr = action.currentPrice ? formatPrice(action.currentPrice.dollarsPerKWH) : '';
-    const futurePriceStr = action.futurePrice && action.futurePrice.dollarsPerKWH ? formatPrice(action.futurePrice.dollarsPerKWH) : '';
+
+    const currentPrice = action.currentPrice;
+    const futurePrice = action.futurePrice;
+    const nowCost = currentPrice ? gridChargeCost(currentPrice) : null;
+    const futureCost = futurePrice ? gridChargeCost(futurePrice) : null;
+    const nowCostStr = nowCost !== null ? formatPrice(nowCost) : '';
+    const futureCostStr = futureCost !== null ? formatPrice(futureCost) : '';
     const deficitTimeStr = action.deficitAt ? formatTime(action.deficitAt) : '';
     const capacityTimeStr = action.capacityAt ? formatTime(action.capacityAt) : '';
+    const isNegativePrice = currentPrice && currentPrice.dollarsPerKWH < 0;
+    const solarMode = action.targetSolarMode || action.solarMode ;
+
+    const suffixParts = [];
+
+    if (isNegativePrice && solarMode === SolarMode.NoExport) {
+        suffixParts.push('Disabled solar export because the price is negative.');
+    }
 
     switch (reason) {
-        case ActionReason.AlwaysChargeBelowThreshold:
-            return `Price is low (${currentPriceStr}). Charging batteries.`;
+        case ActionReason.AlwaysChargeBelowThreshold: {
+            // Rule 2: price dropped below the always-charge threshold (settings.AlwaysChargeUnderDollarsPerKWH)
+            const parts = [
+                `Current price (${nowCostStr}) is below your always-charge threshold.`,
+                `Charging the battery now to lock in this low rate.`,
+            ];
+            return parts.concat(suffixParts).join(' ');
+        }
         case ActionReason.MissingBattery:
-            return 'Battery configuration missing or capacity is 0. Standing by.';
-        case ActionReason.DeficitCharge:
-            return `Battery deficit predicted${deficitTimeStr ? ` at ${deficitTimeStr}` : ''}. Charging now at ${currentPriceStr}${futurePriceStr ? ` (peak later: ${futurePriceStr})` : ''}.`;
-        case ActionReason.ArbitrageCharge:
-            return `Arbitrage opportunity: charging at ${currentPriceStr}${futurePriceStr ? `, peak later at ${futurePriceStr}` : ''}.`;
-        case ActionReason.DischargeBeforeCapacity:
-            return `Battery will reach capacity${capacityTimeStr ? ` at ${capacityTimeStr}` : ''} before deficit${deficitTimeStr ? ` at ${deficitTimeStr}` : ''}. Using battery now.`;
+            return 'No battery capacity was detected. The system is standing by until battery information is available.';
+        case ActionReason.DeficitCharge: {
+            // Rule 3: deficit predicted and charging now is cheaper than the cheapest future slot
+            const delta = nowCost !== null && futureCost !== null ? futureCost - nowCost : null;
+            const parts = [
+                `The battery will deplete${deficitTimeStr ? ` around ${deficitTimeStr}` : ''}.`,
+                `Charging now at ${nowCostStr} is cheaper than the best future window${futureCostStr ? ` (${futureCostStr})` : ''}.`,
+            ];
+            if (delta !== null) parts.push(`Estimated savings: ${formatPrice(delta)}/kWh.`);
+            return parts.concat(suffixParts).join(' ');
+        }
+        case ActionReason.ArbitrageCharge: {
+            // Rule 3: buy-low / sell-or-save-high arbitrage opportunity
+            const delta = nowCost !== null && futureCost !== null ? futureCost - nowCost : null;
+            const parts = [
+                `Forecast shows higher prices later${futureCostStr ? ` (${futureCostStr})` : ''} compared to right now (${nowCostStr}).`,
+                `Charging the battery cheaply now so we can use the battery later during the expensive window.`,
+            ];
+            if (delta !== null) parts.push(`Estimated savings: ${formatPrice(delta)}/kWh.`);
+            return parts.concat(suffixParts).join(' ');
+        }
+        case ActionReason.DischargeBeforeCapacity: {
+            // Rule 4 optimization: will hit full capacity before hitting deficit
+            // — energy is "use it or lose it" so there's no reason to hold back
+            const parts = [
+                `Solar generation will fill the battery${capacityTimeStr ? ` by ${capacityTimeStr}` : ''} before battery depletion${deficitTimeStr ? ` (expected ${deficitTimeStr})` : ''}.`,
+                `Using the battery now rather than letting it go to waste.`,
+            ];
+            return parts.concat(suffixParts).join(' ');
+        }
         case ActionReason.DeficitSave:
-            return `Battery deficit predicted${deficitTimeStr ? ` at ${deficitTimeStr}` : ''}. Saving battery for higher prices${futurePriceStr ? ` (peak: ${futurePriceStr})` : ''}.`;
-        case ActionReason.DeficitSaveForPeak:
-            return `Battery deficit predicted${deficitTimeStr ? ` at ${deficitTimeStr}` : ''}. Saving battery for higher prices${futurePriceStr ? ` (peak: ${futurePriceStr})` : ''}.`;
-        case ActionReason.WaitingToCharge:
-            return `Delaying charge for lower prices${futurePriceStr ? ` (expected: ${futurePriceStr})` : ''}.`;
-        case ActionReason.ChargeSurvivePeak:
-            return `Battery won't survive upcoming peak. Charging now${futurePriceStr ? ` (peak: ${futurePriceStr})` : ''}.`;
-        case ActionReason.ArbitrageSave:
-            return `Current price is peak (${currentPriceStr}). Using battery to offset grid costs.`;
-        case ActionReason.NoChange:
-            return 'Battery is sufficient. Using battery normally.';
+        case ActionReason.DeficitSaveForPeak: {
+            // Rule 4: deficit predicted but prices are higher later — hold battery for peak
+            const delta = nowCost !== null && futureCost !== null ? futureCost - nowCost : null;
+            const parts = [
+                `The battery will deplete${deficitTimeStr ? ` around ${deficitTimeStr}` : ''}, but forecasted electricity prices are higher${futureCostStr ? ` (${futureCostStr})` : ''} than now (${nowCostStr}).`,
+                `Holding the battery in reserve so it can offset those higher costs.`,
+            ];
+            if (delta !== null) parts.push(`Estimated savings: ${formatPrice(delta)}/kWh.`);
+            return parts.concat(suffixParts).join(' ');
+        }
+        case ActionReason.WaitingToCharge: {
+            // Rule 4: a cheaper charge window is on the horizon — don't charge yet
+            const delta = nowCost !== null && futureCost !== null ? futureCost - nowCost : null;
+            const parts = [
+                `A cheaper charging window is coming up${futureCostStr ? ` at ${futureCostStr}` : ''} which is cheaper than now (${nowCostStr}).`,
+                `Holding off charging the batteries until then.`,
+            ];
+            if (delta !== null) parts.push(`Estimated savings: ${formatPrice(delta)}/kWh.`);
+            return parts.concat(suffixParts).join(' ');
+        }
+        case ActionReason.ChargeSurvivePeak: {
+            // Rule 3 (peak survival): battery won't make it through the upcoming expensive window
+            const delta = nowCost !== null && futureCost !== null ? futureCost - nowCost : null;
+            const parts = [
+                `Battery will deplete before forecasted high-price period${futureCostStr ? ` (${futureCostStr})` : ''}.`,
+                `Charging now at the current rate (${nowCostStr}) so we can use the battery later during the expensive window.`,
+            ];
+            if (delta !== null) parts.push(`Estimated savings: ${formatPrice(delta)}/kWh.`);
+            return parts.concat(suffixParts).join(' ');
+        }
+        case ActionReason.ArbitrageSave: {
+            // Rule 4 peak: current price is at or above the future max — discharge now
+            const parts = [
+                `Electricity prices are at their peak${nowCostStr ? ` (${nowCostStr})` : ''}. Using the battery to avoid paying the highest rates of the day.`
+            ];
+            return parts.concat(suffixParts).join(' ');
+        }
+        case ActionReason.SufficientBattery:
+            // No deficit predicted — battery has plenty of charge; use it freely
+            const parts = [
+                'The battery has enough stored energy to meet predicted demand. Using the battery normally to reduce grid usage.'
+            ];
+            return parts.concat(suffixParts).join(' ');
         default:
             return action.description || `Unknown reason: ${reason}`;
     }
 };
 
 const CurrentStatus: React.FC<{ action: Action }> = ({ action }) => {
+    const soc = action.systemStatus?.batterySOC ?? 0;
+    const price = action.currentPrice?.dollarsPerKWH ?? 0;
+
+    if (action.paused) {
+        return (
+            <div className="current-status-card paused">
+                <div className="status-main">
+                    <div className="status-icon">
+                        <span className="icon">⏸️</span>
+                    </div>
+                    <div className="status-info">
+                        <span className="status-label">System Paused</span>
+                        <span className="status-value">Automation is currently paused</span>
+                    </div>
+                </div>
+                <div className="status-metrics">
+                    <div className="metric">
+                        <span className="metric-label">Battery</span>
+                        <span className="metric-value">{soc.toFixed(1)}%</span>
+                        <div className="battery-bar">
+                            <div className="battery-fill" style={{ width: `${soc}%` }}></div>
+                        </div>
+                    </div>
+                    <div className="metric">
+                        <span className="metric-label">Price</span>
+                        <span className="metric-value">$ {price.toFixed(3)}<small>/kWh</small></span>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     const effectiveBatteryMode = action.targetBatteryMode
         ? action.targetBatteryMode
         : action.batteryMode;
     const mode = effectiveBatteryMode;
     const kw = action.systemStatus?.batteryKW || 0;
-    const soc = action.systemStatus?.batterySOC ?? 0;
-    const price = action.currentPrice?.dollarsPerKWH ?? 0;
 
     let state: 'charging' | 'discharging' | 'standby' = 'standby';
     if (mode === BatteryMode.Load || kw > 0.1) state = 'discharging';
@@ -221,9 +329,13 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
     const netSavings = savings ? savings.batterySavings + savings.solarSavings + savings.credit : 0;
     const isToday = currentDate.toDateString() === new Date().toDateString();
     const latestAction = actions.length > 0 ? actions[actions.length - 1] : null;
+    // Filter out paused actions from the displayed timeline — they are captured for
+    // status tracking only and should not appear as regular action items.
+    const visibleActions = actions.filter(a => !a.paused);
 
     const groupedActions = useMemo(() => {
         type SummaryType = 'no_change' | 'fault';
+        // Note: visibleActions has paused items stripped out
 
         interface ActionSummary {
             isSummary: true;
@@ -256,7 +368,7 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
         const accumulator: (Action | ActionSummaryAccumulator)[] = [];
         let currentSummary: ActionSummaryAccumulator | null = null;
 
-        for (const action of actions) {
+        for (const action of visibleActions) {
             const isFault = !!action.fault;
             const isNoChange = !isFault && action.batteryMode === BatteryMode.NoChange && action.solarMode === SolarMode.NoChange;
             // currentPrice wasn't always optional so check tsStart as well
@@ -384,7 +496,7 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
             }
             return item;
         });
-    }, [actions]);
+    }, [visibleActions]);
 
     return (
         <div className="content-container action-list-container">
@@ -499,7 +611,7 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                     )}
 
 
-                    {actions && actions.length === 0 && <p className="no-actions">No actions recorded for this day.</p>}
+                    {visibleActions.length === 0 && <p className="no-actions">No actions recorded for this day.</p>}
 
                     <ul className="action-list">
                         {groupedActions.map((item, index) => {
@@ -515,7 +627,7 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
 
                                 if (isEmergency) {
                                     if (hasStorms) {
-                                        title = 'Storm Protection Mode';
+                                        title = 'Storm Hedge Mode';
                                         description = 'Franklin is charging the battery to prepare for the storm.';
                                     } else {
                                         title = 'Emergency Mode';
@@ -588,10 +700,21 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                                 );
                             }
                             const action = item as Action;
-                            let reasonText = getReasonText(action);
-                            if (action.solarMode === SolarMode.NoExport && action.currentPrice && action.currentPrice.dollarsPerKWH < 0) {
-                                reasonText += " Disabled solar export because the price is negative.";
-                            }
+                            const reasonText = getReasonText(action);
+                            const isNegPrice = action.currentPrice && action.currentPrice.dollarsPerKWH < 0;
+                            const showDeficit = action.deficitAt && action.deficitAt !== '0001-01-01T00:00:00Z';
+                            const showCapacity = action.capacityAt && action.capacityAt !== '0001-01-01T00:00:00Z';
+                            // Show deficit/capacity tags only when they add context relevant to the action
+                            const deficitReasons: string[] = [
+                                ActionReason.DeficitCharge,
+                                ActionReason.DeficitSaveForPeak,
+                                ActionReason.DeficitSave,
+                                ActionReason.WaitingToCharge,
+                                ActionReason.DischargeBeforeCapacity,
+                                ActionReason.ChargeSurvivePeak,
+                            ];
+                            const showDeficitTag = showDeficit && action.reason && deficitReasons.includes(action.reason);
+                            const showCapacityTag = showCapacity && action.reason === ActionReason.DischargeBeforeCapacity;
                             return (
                                 <li key={index} className="action-item">
                                     <div className="action-time">
@@ -607,22 +730,28 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                                             {(action.solarMode !== SolarMode.NoChange || (action.targetSolarMode !== undefined && action.targetSolarMode !== SolarMode.NoChange)) && (
                                                 <span className={`tag solar-${getSolarModeClass(action.targetSolarMode || action.solarMode)}`}>{getSolarModeLabel(action.targetSolarMode || action.solarMode)}</span>
                                             )}
+                                            {isNegPrice && (
+                                                <span className="tag tag-warning">Negative Price</span>
+                                            )}
+                                            {showDeficitTag && (
+                                                <span className="tag tag-info">Deficit: {formatTime(action.deficitAt!)}</span>
+                                            )}
+                                            {showCapacityTag && (
+                                                <span className="tag tag-info">Full by: {formatTime(action.capacityAt!)}</span>
+                                            )}
                                             {action.dryRun && (
                                                 <span className="tag dry-run">Dry Run</span>
-                                            )}
-                                            {action.deficitAt && action.deficitAt !== '0001-01-01T00:00:00Z' && (
-                                                <span className="tag tag-info">Deficit: {formatTime(action.deficitAt)}</span>
-                                            )}
-                                            {action.capacityAt && action.capacityAt !== '0001-01-01T00:00:00Z' && (
-                                                <span className="tag tag-info">Capacity: {formatTime(action.capacityAt)}</span>
                                             )}
                                         </div>
                                         <div className="action-footer">
                                             {action.currentPrice && (
                                                 <span>
                                                     <span className="price-label">Price:</span> $ {action.currentPrice.dollarsPerKWH.toFixed(3)}/kWh
+                                                    {(action.currentPrice.gridUseDollarsPerKWH ?? 0) > 0 && (
+                                                        <span className="price-delivery"> + $ {action.currentPrice.gridUseDollarsPerKWH.toFixed(3)} delivery = $ {gridChargeCost(action.currentPrice).toFixed(3)}/kWh total</span>
+                                                    )}
                                                     {action.futurePrice && action.futurePrice.dollarsPerKWH > 0 && (
-                                                        <span className="price-future"> · Peak: $ {action.futurePrice.dollarsPerKWH.toFixed(3)}/kWh</span>
+                                                        <span className="price-future"> · Peak: $ {gridChargeCost(action.futurePrice).toFixed(3)}/kWh</span>
                                                     )}
                                                 </span>
                                             )}

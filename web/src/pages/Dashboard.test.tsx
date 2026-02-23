@@ -60,7 +60,7 @@ describe('Dashboard', () => {
 
         await waitFor(() => {
             // Should show reason-based text, not description
-            expect(screen.getByText(/Price is low.*\$ 0\.040/)).toBeInTheDocument();
+            expect(screen.getByText(/Current price.*\$ 0\.040/)).toBeInTheDocument();
             // Legacy description should NOT be shown
             expect(screen.queryByText('This is a legacy description')).not.toBeInTheDocument();
         });
@@ -377,11 +377,8 @@ describe('Dashboard', () => {
 
         await waitFor(() => {
             // Should show the templatized deficit charge text
-            expect(screen.getByText(/Battery deficit predicted/)).toBeInTheDocument();
-            expect(screen.getByText(/Charging now.*\$ 0\.100/)).toBeInTheDocument();
-            expect(screen.getByText(/peak later.*\$ 0\.500/)).toBeInTheDocument();
-            // Should show the future price in footer
-            expect(screen.getByText(/Peak:.*\$ 0\.500/)).toBeInTheDocument();
+            expect(screen.getByText(/The battery will deplete.*Charging now.*\$ 0\.100.*cheaper than.*\$ 0\.500/)).toBeInTheDocument();
+            expect(screen.getByText(/Estimated savings: \$ 0\.400\/kWh/)).toBeInTheDocument();
         });
     });
 
@@ -400,8 +397,8 @@ describe('Dashboard', () => {
         renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
-            expect(screen.getByText(/Battery won't survive upcoming peak. Charging now.*\$ 0\.500/)).toBeInTheDocument();
-            expect(screen.getByText(/peak:.*\$ 0\.500/)).toBeInTheDocument();
+            expect(screen.getByText(/Battery will deplete before forecasted.*\$ 0\.500.*Charging now.*\$ 0\.100/)).toBeInTheDocument();
+            expect(screen.getByText(/Estimated savings: \$ 0\.400\/kWh/)).toBeInTheDocument();
         });
     });
 
@@ -418,7 +415,7 @@ describe('Dashboard', () => {
         renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
-            expect(screen.getByText('Battery is sufficient. Using battery normally.')).toBeInTheDocument();
+            expect(screen.getByText(/battery has enough stored energy to meet predicted demand/)).toBeInTheDocument();
         });
     });
 
@@ -437,8 +434,8 @@ describe('Dashboard', () => {
         renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
-            expect(screen.getByText(/Arbitrage opportunity.*charging at.*\$ 0\.100/)).toBeInTheDocument();
-            expect(screen.getByText(/peak later at.*\$ 0\.500/)).toBeInTheDocument();
+            expect(screen.getByText(/Forecast shows higher prices.*\$ 0\.500.*compared to right now.*\$ 0\.100/)).toBeInTheDocument();
+            expect(screen.getByText(/Estimated savings: \$ 0\.400\/kWh/)).toBeInTheDocument();
         });
     });
 
@@ -456,7 +453,7 @@ describe('Dashboard', () => {
         renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
-            expect(screen.getByText('Battery is sufficient. Using battery normally. Disabled solar export because the price is negative.')).toBeInTheDocument();
+            expect(screen.getByText(/battery has enough stored energy to meet predicted demand.*Disabled solar export/)).toBeInTheDocument();
         });
     });
 
@@ -580,7 +577,7 @@ describe('Dashboard', () => {
         renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
-            expect(screen.getByRole('heading', { name: /Storm Protection Mode/ })).toBeInTheDocument();
+            expect(screen.getByRole('heading', { name: /Storm Hedge Mode/ })).toBeInTheDocument();
             expect(screen.getByText('Franklin is charging the battery to prepare for the storm.')).toBeInTheDocument();
             expect(screen.getByText(/Storm Duration: 12:00 PM - 3:00 PM/)).toBeInTheDocument();
         });
@@ -787,6 +784,72 @@ describe('Dashboard', () => {
             const tagTexts = Array.from(tags).map(t => t.textContent);
             expect(tagTexts.some(t => t?.includes('Deficit:'))).toBe(true);
             expect(tagTexts.some(t => t?.includes('Capacity:'))).toBe(true);
+        });
+    });
+
+    it('hides paused actions from the dashboard timeline', async () => {
+        const now = new Date();
+        const actions = [
+            {
+                reason: 'sufficientBattery',
+                description: 'Normal action',
+                timestamp: new Date(now.getTime() - 60000).toISOString(),
+                batteryMode: -1, // Load
+                solarMode: 0,
+                currentPrice: { dollarsPerKWH: 0.10, tsStart: '', tsEnd: '' },
+                paused: false,
+            },
+            {
+                description: 'Automation is paused',
+                timestamp: now.toISOString(),
+                batteryMode: 0,
+                solarMode: 0,
+                currentPrice: { dollarsPerKWH: 0.12, tsStart: '', tsEnd: '' },
+                paused: true,
+            }
+        ];
+        (fetchActions as any).mockResolvedValue(actions);
+
+        renderWithRouter(<Dashboard />);
+
+        await waitFor(() => {
+            // The paused action description should NOT appear in the action list
+            expect(screen.queryByText('Automation is paused')).not.toBeInTheDocument();
+        });
+    });
+
+    it('shows paused indicator in CurrentStatus when last action is paused', async () => {
+        const now = new Date();
+        const actions = [
+            {
+                description: 'Automation is paused',
+                timestamp: now.toISOString(),
+                batteryMode: 0,
+                solarMode: 0,
+                currentPrice: { dollarsPerKWH: 0.12, tsStart: '', tsEnd: '' },
+                systemStatus: {
+                    batterySOC: 65,
+                    batteryKW: 0,
+                },
+                paused: true,
+            }
+        ];
+        (fetchActions as any).mockResolvedValue(actions);
+
+        renderWithRouter(<Dashboard />);
+
+        await waitFor(() => {
+            // CurrentStatus card should show "System Paused"
+            expect(screen.getByText('System Paused')).toBeInTheDocument();
+            expect(screen.getByText('Automation is currently paused')).toBeInTheDocument();
+
+            // The status card should have the "paused" CSS class
+            const statusCard = document.querySelector('.current-status-card');
+            expect(statusCard).toBeInTheDocument();
+            expect(statusCard?.classList.contains('paused')).toBe(true);
+
+            // Should still show battery SOC and price
+            expect(screen.getAllByText(/65\.0%/).length).toBeGreaterThan(0);
         });
     });
 });

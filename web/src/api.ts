@@ -26,7 +26,7 @@ export const ActionReason = {
     DischargeBeforeCapacity: 'dischargeBeforeCapacity',
     DeficitSaveForPeak: 'deficitSaveForPeak',
     ArbitrageSave: 'dischargeAtPeak',
-    NoChange: 'sufficientBattery',
+    SufficientBattery: 'sufficientBattery',
     EmergencyMode: 'emergencyMode',
     HasAlarms: 'hasAlarms',
     WaitingToCharge: 'waitingToCharge',
@@ -41,6 +41,7 @@ export interface PriceInfo {
     tsStart: string;
     tsEnd: string;
     dollarsPerKWH: number;
+    gridUseDollarsPerKWH: number; // delivery adder; true grid charge cost = dollarsPerKWH + gridUseDollarsPerKWH
 }
 
 export interface Action {
@@ -58,6 +59,7 @@ export interface Action {
     systemStatus?: SystemStatus;
     dryRun?: boolean;
     fault?: boolean;
+    paused?: boolean;
 }
 
 export const BatteryMode = {

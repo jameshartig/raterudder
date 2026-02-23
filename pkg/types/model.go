@@ -58,7 +58,7 @@ const (
 	ActionReasonDischargeBeforeCapacityNow ActionReason = "dischargeBeforeCapacity"
 	ActionReasonDeficitSaveForPeak         ActionReason = "deficitSaveForPeak"
 	ActionReasonArbitrageSave              ActionReason = "dischargeAtPeak"
-	ActionReasonNoChange                   ActionReason = "sufficientBattery"
+	ActionReasonSufficientBattery          ActionReason = "sufficientBattery"
 	ActionReasonEmergencyMode              ActionReason = "emergencyMode"
 	ActionReasonHasAlarms                  ActionReason = "hasAlarms"
 	ActionReasonWaitingToCharge            ActionReason = "waitingToCharge"
@@ -82,6 +82,7 @@ type Action struct {
 	DryRun            bool         `json:"dryRun,omitempty"`
 	Fault             bool         `json:"fault,omitempty"`
 	Failed            bool         `json:"failed,omitempty"`
+	Paused            bool         `json:"paused,omitempty"`
 	Error             string       `json:"error,omitempty"`
 }
 

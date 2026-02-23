@@ -241,6 +241,8 @@ func TestHandleUpdate(t *testing.T) {
 		mockES.On("ApplySettings", mock.Anything, mock.Anything).Return(nil)
 		mockES.On("Authenticate", mock.Anything, mock.Anything).Return(types.Credentials{}, false, nil)
 		mockES.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
+		// GetStatus should be called even when paused
+		mockES.On("GetStatus", mock.Anything).Return(types.SystemStatus{BatterySOC: 75}, nil)
 
 		mockP := ess.NewMap()
 		mockP.SetSystem(types.SiteIDNone, mockES)
@@ -253,6 +255,11 @@ func TestHandleUpdate(t *testing.T) {
 
 		mockUMap := utility.NewMap()
 		mockUMap.SetProvider("test", mockU)
+
+		// Expect a paused action to be inserted with paused=true
+		mockS.On("InsertAction", mock.Anything, mock.Anything, mock.MatchedBy(func(a types.Action) bool {
+			return a.Paused && a.Description == "Automation is paused"
+		})).Return(nil)
 
 		srv := &Server{
 			utilities:  mockUMap,
@@ -273,9 +280,18 @@ func TestHandleUpdate(t *testing.T) {
 
 		var resp map[string]interface{}
 		_ = json.NewDecoder(w.Body).Decode(&resp)
+		// Status should still be "paused"
 		assert.Equal(t, "paused", resp["status"])
+		// An action should be returned with the paused flag
+		require.NotNil(t, resp["action"], "a paused action should be returned")
+		actionMap, ok := resp["action"].(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, true, actionMap["paused"], "action should have paused=true")
 
-		mockES.AssertNotCalled(t, "GetStatus")
+		// GetStatus and GetCurrentPrice should have been called even when paused
+		mockES.AssertCalled(t, "GetStatus", mock.Anything)
+		mockU.AssertCalled(t, "GetCurrentPrice", mock.Anything)
+		// SetModes should NOT be called
 		mockES.AssertNotCalled(t, "SetModes")
 	})
 
@@ -303,6 +319,7 @@ func TestHandleUpdate(t *testing.T) {
 
 		mockU := &mockUtility{}
 		mockU.On("ApplySettings", mock.Anything, mock.Anything).Return(nil)
+		mockU.On("GetCurrentPrice", mock.Anything).Return(types.Price{DollarsPerKWH: 0.10, TSStart: time.Now()}, nil)
 		mockU.On("GetConfirmedPrices", mock.Anything, mock.Anything, mock.Anything).Return([]types.Price{}, nil)
 
 		mockUMap := utility.NewMap()
@@ -327,7 +344,7 @@ func TestHandleUpdate(t *testing.T) {
 		_ = json.NewDecoder(w.Body).Decode(&resp)
 		assert.Equal(t, "emergency mode", resp["status"])
 
-		mockU.AssertNotCalled(t, "GetCurrentPrice")
+		mockU.AssertCalled(t, "GetCurrentPrice", mock.Anything)
 		mockES.AssertNotCalled(t, "SetModes")
 	})
 
@@ -357,6 +374,7 @@ func TestHandleUpdate(t *testing.T) {
 
 		mockU := &mockUtility{}
 		mockU.On("ApplySettings", mock.Anything, mock.Anything).Return(nil)
+		mockU.On("GetCurrentPrice", mock.Anything).Return(types.Price{DollarsPerKWH: 0.10, TSStart: time.Now()}, nil)
 		mockU.On("GetConfirmedPrices", mock.Anything, mock.Anything, mock.Anything).Return([]types.Price{}, nil)
 
 		mockUMap := utility.NewMap()
@@ -381,7 +399,7 @@ func TestHandleUpdate(t *testing.T) {
 		_ = json.NewDecoder(w.Body).Decode(&resp)
 		assert.Equal(t, "alarms present", resp["status"])
 
-		mockU.AssertNotCalled(t, "GetCurrentPrice")
+		mockU.AssertCalled(t, "GetCurrentPrice", mock.Anything)
 		mockES.AssertNotCalled(t, "SetModes")
 	})
 

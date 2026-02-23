@@ -99,7 +99,7 @@ func main() {
 				desc = "Overnight charging"
 			} else {
 				mode = types.BatteryModeStandby
-				reason = types.ActionReasonNoChange
+				reason = types.ActionReasonSufficientBattery
 				desc = "Overnight standby"
 			}
 		} else if hour < 9 {
@@ -112,12 +112,12 @@ func main() {
 			// Day time solar charging
 			if solarKW > homeKW && currentSOC < 95 {
 				mode = types.BatteryModeChargeSolar
-				reason = types.ActionReasonNoChange
+				reason = types.ActionReasonSufficientBattery
 				desc = "Solar charging"
 				hitCapacityAt = t.Add(3 * time.Hour)
 			} else {
 				mode = types.BatteryModeStandby
-				reason = types.ActionReasonNoChange
+				reason = types.ActionReasonSufficientBattery
 				desc = "Daytime standby"
 			}
 		} else if hour < 22 {
@@ -127,7 +127,7 @@ func main() {
 			desc = "Evening peak discharge"
 		} else {
 			mode = types.BatteryModeStandby
-			reason = types.ActionReasonNoChange
+			reason = types.ActionReasonSufficientBattery
 			desc = "Post-peak standby"
 		}
 

@@ -457,14 +457,6 @@ func (c *Controller) Decide(
 					slog.Float64("diff", value-gridChargeNowCost),
 				)
 				break
-			} else {
-				log.Ctx(ctx).DebugContext(
-					ctx,
-					"arbitrage opportunity too small",
-					slog.Float64("buyAt", gridChargeNowCost),
-					slog.Float64("sellAt", value),
-					slog.Float64("minDiff", settings.MinArbitrageDifferenceDollarsPerKWH),
-				)
 			}
 		}
 	}
@@ -544,5 +536,5 @@ func (c *Controller) Decide(
 		slog.Float64("minEnergy", minEnergy),
 		slog.Float64("maxEnergy", maxEnergy),
 	)
-	return finalizeAction(types.BatteryModeLoad, types.ActionReasonNoChange, "Sufficient battery.", nil, hitDeficitAt, hitCapacityAt), nil
+	return finalizeAction(types.BatteryModeLoad, types.ActionReasonSufficientBattery, "Sufficient battery.", nil, hitDeficitAt, hitCapacityAt), nil
 }

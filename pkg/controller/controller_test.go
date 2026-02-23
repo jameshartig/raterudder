@@ -490,7 +490,7 @@ func TestDecide(t *testing.T) {
 
 		assert.Equal(t, types.BatteryModeLoad, decision.Action.BatteryMode)
 		assert.Contains(t, decision.Action.Description, "Sufficient battery")
-		assert.Equal(t, types.ActionReasonNoChange, decision.Action.Reason)
+		assert.Equal(t, types.ActionReasonSufficientBattery, decision.Action.Reason)
 		assert.Equal(t, elevatedSOCStatus.BatterySOC, decision.Action.SystemStatus.BatterySOC)
 		assert.True(t, decision.Action.HitDeficitAt.IsZero(), "HitDeficitAt should be zero for sufficient battery")
 		assert.Zero(t, decision.Action.FuturePrice, "FuturePrice should be zero for sufficient battery")
