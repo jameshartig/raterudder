@@ -8,21 +8,7 @@ import type { ModelingHour } from '../api';
 
 const { fetchModeling } = api;
 
-// Mock the API
-vi.mock('../api', async (importOriginal) => {
-    const actual = await importOriginal<typeof import('../api')>();
-    return {
-        ...actual,
-        fetchModeling: vi.fn(),
-        fetchActions: vi.fn(),
-        fetchSavings: vi.fn(),
-        fetchAuthStatus: vi.fn(),
-        fetchSettings: vi.fn(),
-        updateSettings: vi.fn(),
-        login: vi.fn(),
-        logout: vi.fn(),
-    };
-});
+vi.mock('../api');
 
 
 

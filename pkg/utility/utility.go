@@ -9,8 +9,8 @@ import (
 	"github.com/raterudder/raterudder/pkg/types"
 )
 
-// Utility defines the interface for a utility provider.
-type Utility interface {
+// UtilityPrices defines the interface for a utility prices provider.
+type UtilityPrices interface {
 	// GetCurrentPrice returns the current price of electricity.
 	GetCurrentPrice(ctx context.Context) (types.Price, error)
 
@@ -20,6 +20,11 @@ type Utility interface {
 	// GetConfirmedPrices returns confirmed prices for a specific time range.
 	// This should be used for syncing historical data.
 	GetConfirmedPrices(ctx context.Context, start, end time.Time) ([]types.Price, error)
+}
+
+// Utility defines the interface for a utility provider.
+type Utility interface {
+	UtilityPrices
 
 	// ApplySettings updates the system using the provided global settings.
 	ApplySettings(ctx context.Context, settings types.Settings) error
@@ -30,15 +35,15 @@ func Configured() *Map {
 	m := NewMap()
 	// Initialize supported providers
 	// For now, we only support ComEd
-	m.baseComEd = configuredComEd()
+	m.baseComEdHourly = configuredComEdHourly()
 	return m
 }
 
 // Map manages utility providers.
 type Map struct {
-	mu        sync.Mutex
-	baseComEd *BaseComEd
-	utilities map[string]Utility
+	mu              sync.Mutex
+	baseComEdHourly *BaseComEdHourly
+	utilities       map[string]Utility
 }
 
 // NewMap creates a new Utility Map.
@@ -61,12 +66,16 @@ func (m *Map) Site(ctx context.Context, siteID string, settings types.Settings) 
 	}
 
 	switch settings.UtilityProvider {
-	case "comed_besh":
-		if m.baseComEd == nil {
-			return nil, fmt.Errorf("comed_besh provider not configured")
+	case "comed":
+		if m.baseComEdHourly == nil {
+			return nil, fmt.Errorf("comed provider not configured")
+		}
+		// For now we only support BESH
+		if settings.UtilityRate != "comed_besh" {
+			return nil, fmt.Errorf("unsupported comed rate: %s", settings.UtilityRate)
 		}
 		u := &SiteComEd{
-			base:   m.baseComEd,
+			base:   m.baseComEdHourly,
 			siteID: siteID,
 		}
 		if err := u.ApplySettings(ctx, settings); err != nil {
@@ -84,4 +93,11 @@ func (m *Map) SetProvider(name string, provider Utility) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.utilities[name] = provider
+}
+
+// ListUtilities returns metadata for all supported utility providers.
+func (m *Map) ListUtilities() []types.UtilityProviderInfo {
+	return []types.UtilityProviderInfo{
+		ComEdUtilityInfo(),
+	}
 }

@@ -1,26 +1,13 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import App from '../App';
 import * as api from '../api';
-import { setupDefaultApiMocks, defaultAuthStatus } from '../test/apiMocks';
+import { setupDefaultApiMocks, defaultAuthStatus, defaultSettings } from '../test/apiMocks';
 
 const { fetchAuthStatus, fetchSettings, updateSettings, login, logout } = api;
 
-// Mock the API
-vi.mock('../api', async (importOriginal) => {
-    const actual = await importOriginal<typeof import('../api')>();
-    return {
-        ...actual,
-        fetchActions: vi.fn(),
-        fetchSavings: vi.fn(),
-        fetchAuthStatus: vi.fn(),
-        fetchSettings: vi.fn(),
-        updateSettings: vi.fn(),
-        login: vi.fn(),
-        logout: vi.fn(),
-        fetchModeling: vi.fn(),
-    };
-});
+vi.mock('../api');
 
 // Mock Google OAuth
 vi.mock('@react-oauth/google', () => ({
@@ -39,19 +26,12 @@ const navigateToSettings = async () => {
     fireEvent.click(screen.getByText('Login'));
     await waitFor(() => expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
+    await screen.findByRole('heading', { name: /Settings/i });
 };
 
 describe('App & Settings', () => {
     beforeEach(() => {
         vi.resetAllMocks();
-
-        const originalError = console.error;
-        vi.spyOn(console, 'error').mockImplementation((msg, ...args) => {
-            if (typeof msg === 'string' && msg.includes('was not wrapped in act')) return;
-            originalError(msg, ...args);
-        });
-
-        // Default mocks
         setupDefaultApiMocks(api);
     });
 
@@ -128,12 +108,8 @@ describe('App & Settings', () => {
     it('navigates to settings and loads data', async () => {
         await navigateToSettings();
 
-        // Advanced inputs are inside a Collapsible panel. Click to expand first.
-        const advancedBtn = await screen.findByText('Advanced Settings');
-        fireEvent.click(advancedBtn);
-
         await waitFor(() => {
-            expect(screen.getByLabelText(/Min Battery SOC/i)).toBeInTheDocument();
+            expect(screen.getByLabelText(/Minimum Battery %/i)).toBeInTheDocument();
             expect(screen.getByDisplayValue('10')).toBeInTheDocument();
         });
     });
@@ -141,13 +117,8 @@ describe('App & Settings', () => {
     it('can update settings', async () => {
          await navigateToSettings();
 
-         // Expand advanced settings first
-         const advancedBtn = await screen.findByText('Advanced Settings');
-         fireEvent.click(advancedBtn);
-
          // Change input
-         await waitFor(() => expect(screen.getByLabelText(/Min Battery SOC/i)).toBeInTheDocument());
-         const input = screen.getByLabelText(/Min Battery SOC/i);
+         const input = await screen.findByLabelText(/Minimum Battery %/i);
          fireEvent.change(input, { target: { value: '20' } });
 
          // Mock update success
@@ -168,13 +139,8 @@ describe('App & Settings', () => {
     it('can toggle pause setting', async () => {
          await navigateToSettings();
 
-         // Expand advanced settings to find Pause
-         const advancedBtn = await screen.findByText('Advanced Settings');
-         fireEvent.click(advancedBtn);
-
-         // Toggle Pause switch — find the switch button by its accessible name
-         await waitFor(() => expect(screen.getByRole('switch', { name: /Pause Updates/i })).toBeInTheDocument());
-         const switchEl = screen.getByRole('switch', { name: /Pause Updates/i });
+         // Toggle Pause switch
+         const switchEl = await screen.findByRole('switch', { name: /Pause Automation/i });
          fireEvent.click(switchEl);
 
          // Mock update success
@@ -192,12 +158,11 @@ describe('App & Settings', () => {
          });
     });
 
-    it('can toggle grid export batteries setting', async () => {
+    it('can toggle grid strategy settings', async () => {
          await navigateToSettings();
 
-         // Toggle Grid Export Batteries switch
-         await waitFor(() => expect(screen.getByRole('switch', { name: /Grid Export Batteries/i })).toBeInTheDocument());
-         const switchEl = screen.getByRole('switch', { name: /Grid Export Batteries/i });
+         // Toggle Export Battery switch
+         const switchEl = await screen.findByRole('switch', { name: /Export Battery to Grid/i });
          fireEvent.click(switchEl);
 
          // Mock update success
@@ -218,8 +183,8 @@ describe('App & Settings', () => {
     it('renders solar settings inputs on settings page', async () => {
         await navigateToSettings();
 
-        // Expand advanced settings
-        const advancedBtn = await screen.findByText('Advanced Settings');
+        // Expand advanced tuning settings
+        const advancedBtn = await screen.findByText('Advanced Tuning Settings');
         fireEvent.click(advancedBtn);
 
         await waitFor(() => {
@@ -233,8 +198,8 @@ describe('App & Settings', () => {
     it('can update solar bell curve multiplier', async () => {
         await navigateToSettings();
 
-        // Expand advanced settings
-        const advancedBtn = await screen.findByText('Advanced Settings');
+        // Expand advanced tuning settings
+        const advancedBtn = await screen.findByText('Advanced Tuning Settings');
         fireEvent.click(advancedBtn);
 
         await waitFor(() => expect(screen.getByLabelText(/Solar Bell Curve Multiplier/i)).toBeInTheDocument());
@@ -265,7 +230,8 @@ describe('App & Settings', () => {
             alwaysChargeUnderDollarsPerKWH: 0.05,
             minArbitrageDifferenceDollarsPerKWH: 0.03,
             minDeficitPriceDifferenceDollarsPerKWH: 0.02,
-            utilityProvider: 'comed_besh',
+            utilityProvider: 'comed',
+            utilityRate: 'comed_besh',
             utilityRateOptions: {},
             hasCredentials: {
                 franklin: false
@@ -273,12 +239,12 @@ describe('App & Settings', () => {
         });
         await navigateToSettings();
 
-        // Expand advanced settings to see the warning
-        const advancedBtn = await screen.findByText('Advanced Settings');
+        // Expand advanced tuning settings to see the warning
+        const advancedBtn = await screen.findByText('Advanced Tuning Settings');
         fireEvent.click(advancedBtn);
 
         await waitFor(() => {
-            expect(screen.getByText(/Solar export is enabled but the bell curve multiplier is high/)).toBeInTheDocument();
+            expect(screen.getByText(/export is enabled but the bell curve multiplier is high/)).toBeInTheDocument();
         });
     });
 
@@ -296,7 +262,8 @@ describe('App & Settings', () => {
             alwaysChargeUnderDollarsPerKWH: 0.05,
             minArbitrageDifferenceDollarsPerKWH: 0.03,
             minDeficitPriceDifferenceDollarsPerKWH: 0.02,
-            utilityProvider: 'comed_besh',
+            utilityProvider: 'comed',
+            utilityRate: 'comed_besh',
             utilityRateOptions: {},
             hasCredentials: {
                 franklin: false
@@ -304,20 +271,23 @@ describe('App & Settings', () => {
         });
         await navigateToSettings();
 
-        // Expand advanced settings to see the warning
-        const advancedBtn = await screen.findByText('Advanced Settings');
+        // Expand advanced tuning settings to see the warning
+        const advancedBtn = await screen.findByText('Advanced Tuning Settings');
         fireEvent.click(advancedBtn);
 
         await waitFor(() => {
-            expect(screen.getByText(/Solar export is disabled but the bell curve multiplier is low/)).toBeInTheDocument();
+            expect(screen.getByText(/export is disabled but the bell curve multiplier is low/)).toBeInTheDocument();
         });
     });
 
     it('can update ComEd rate options', async () => {
         await navigateToSettings();
 
-        // Wait for ComEd section
-        await waitFor(() => expect(screen.getByText('ComEd Rate Options')).toBeInTheDocument());
+        // Wait for Utility Options section
+        await screen.findByText('Configured');
+        fireEvent.click(screen.getByText('Change'));
+
+        await waitFor(() => expect(screen.getByRole('switch', { name: /Delivery Time-of-Day/i })).toBeInTheDocument());
 
         // Toggle Delivery Time-of-Day switch
         const dtodSwitch = screen.getByRole('switch', { name: /Delivery Time-of-Day/i });
@@ -337,17 +307,11 @@ describe('App & Settings', () => {
         });
     });
 
-    it('can expand advanced settings and update fields', async () => {
+    it('can update price threshold fields', async () => {
         await navigateToSettings();
 
-        // Find collapsible trigger button
-        const advancedBtn = await screen.findByText('Advanced Settings');
-
-        // Click to open
-        fireEvent.click(advancedBtn);
-
-        // Check fields inside are accessible
-        const priceInput = screen.getByLabelText(/Always Charge Under/i);
+        // Check fields are accessible
+        const priceInput = await screen.findByLabelText(/Always Charge Below/i);
         fireEvent.change(priceInput, { target: { value: '0.10' } });
 
         // Save
@@ -358,6 +322,39 @@ describe('App & Settings', () => {
             expect(screen.getByText('Settings saved successfully')).toBeInTheDocument();
             expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
                 alwaysChargeUnderDollarsPerKWH: 0.10
+            }), expect.any(String), undefined);
+        });
+    });
+
+    it('can select utility provider and then rate', async () => {
+        const user = userEvent.setup();
+        (fetchSettings as any).mockResolvedValue({
+            ...defaultSettings,
+            utilityProvider: '',
+            utilityRate: '',
+            utilityRateOptions: {}
+        });
+        await navigateToSettings();
+
+        // Select Service (Provider)
+        const serviceSelect = await screen.findByLabelText(/Service/i);
+        await user.click(serviceSelect);
+        const comedOption = await screen.findByRole('option', { name: 'ComEd' });
+        await user.click(comedOption);
+
+        // Rate/Plan should be auto-selected since ComEd only has one in the mock
+        await screen.findByText(/Hourly Pricing Program/i);
+
+        // Verify options appear - wait for the label to be stable
+        const switchEl = await screen.findByRole('switch', { name: /Delivery Time-of-Day/i });
+        expect(switchEl).toBeInTheDocument();
+
+        // Save and verify
+        fireEvent.click(screen.getByText('Save Settings'));
+        await waitFor(() => {
+            expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+                utilityProvider: 'comed',
+                utilityRate: 'comed_besh'
             }), expect.any(String), undefined);
         });
     });

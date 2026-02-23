@@ -378,7 +378,7 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
             const isNoChange = !isFault && action.batteryMode === BatteryMode.NoChange && action.solarMode === SolarMode.NoChange;
             // currentPrice wasn't always optional so check tsStart as well
             const hasPrice = !!action.currentPrice && action.currentPrice.tsStart !== "0001-01-01T00:00:00Z";
-            const price = action.currentPrice ? action.currentPrice.dollarsPerKWH : 0;
+            const price = action.currentPrice ? gridChargeCost(action.currentPrice) : 0;
 
             const updateSummary = (summary: ActionSummaryAccumulator) => {
                 summary.count++;
@@ -622,7 +622,6 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                         {groupedActions.map((item, index) => {
                             if ('isSummary' in item) {
                                 const summary = item as any;
-                                const showRange = summary.hasPrice && summary.min !== summary.max;
                                 const isFault = summary.type === 'fault';
                                 const isEmergency = isFault && summary.reason === ActionReason.EmergencyMode;
                                 const hasStorms = isEmergency && summary.storms && summary.storms.size > 0;
@@ -688,9 +687,8 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                                                 <div className="action-footer">
                                                     {summary.hasPrice && (
                                                         <span>
-                                                            <span className="price-label">Avg Price:</span> $ {summary.avgPrice.toFixed(3)}/kWh
-                                                            {showRange && <span className="price-range"> (Range: $ {summary.min.toFixed(3)} - $ {summary.max.toFixed(3)})</span>}
-                                                        </span>
+                                                            <span className="price-label">Avg Price:</span>{formatPrice(summary.avgPrice)}
+                                                            {summary.hasPrice && summary.min !== summary.max && <span className="price-range"> (Range: $ {summary.min.toFixed(3)} - $ {summary.max.toFixed(3)})</span>}                                                        </span>
                                                     )}
                                                     {summary.hasSOC && (
                                                         <span>
@@ -751,12 +749,9 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                                         <div className="action-footer">
                                             {action.currentPrice && (
                                                 <span>
-                                                    <span className="price-label">Price:</span> $ {action.currentPrice.dollarsPerKWH.toFixed(3)}/kWh
-                                                    {(action.currentPrice.gridUseDollarsPerKWH ?? 0) > 0 && (
-                                                        <span className="price-delivery"> + $ {action.currentPrice.gridUseDollarsPerKWH.toFixed(3)} delivery = $ {gridChargeCost(action.currentPrice).toFixed(3)}/kWh total</span>
-                                                    )}
+                                                    <span className="price-label">Price:</span>{formatPrice(gridChargeCost(action.currentPrice))}
                                                     {action.futurePrice && action.futurePrice.dollarsPerKWH > 0 && (
-                                                        <span className="price-future"> · Peak: $ {gridChargeCost(action.futurePrice).toFixed(3)}/kWh</span>
+                                                        <span className="price-future"> · Peak: {formatPrice(gridChargeCost(action.futurePrice))}</span>
                                                     )}
                                                 </span>
                                             )}

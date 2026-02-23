@@ -2,29 +2,11 @@ package types
 
 import (
 	"fmt"
-	"time"
 )
 
 // CurrentSettingsVersion is the current version of the settings struct.
 // Increment this value when adding new fields that require default values.
-const CurrentSettingsVersion = 6
-
-// UtilityRateOptions represents the options for the utility rate.
-type UtilityRateOptions struct {
-	RateClass            string `json:"rateClass"`
-	VariableDeliveryRate bool   `json:"variableDeliveryRate"`
-}
-
-// UtilityAdditionalFeesPeriod represents a period of time with an additional fee.
-type UtilityAdditionalFeesPeriod struct {
-	Start          time.Time `json:"start"`
-	End            time.Time `json:"end"`
-	HourStart      int       `json:"hourStart"`
-	HourEnd        int       `json:"hourEnd"`
-	DollarsPerKWH  float64   `json:"dollarsPerKWH"`
-	GridAdditional bool      `json:"gridAdditional"`
-	Description    string    `json:"description"`
-}
+const CurrentSettingsVersion = 7
 
 // Settings represents the configuration stored in the database.
 // These are dynamic settings that can be changed without redeploying.
@@ -42,6 +24,7 @@ type Settings struct {
 
 	// Utility Provider
 	UtilityProvider    string             `json:"utilityProvider"`
+	UtilityRate        string             `json:"utilityRate"`
 	UtilityRateOptions UtilityRateOptions `json:"utilityRateOptions"`
 
 	// Price Settings
@@ -149,6 +132,12 @@ func MigrateSettings(s Settings, currentVersion int) (Settings, bool, error) {
 		case 6:
 			if s.Release == "" {
 				s.Release = "production"
+				migrated = true
+			}
+		case 7:
+			if s.UtilityProvider == "comed_besh" {
+				s.UtilityProvider = "comed"
+				s.UtilityRate = "comed_besh"
 				migrated = true
 			}
 		default:

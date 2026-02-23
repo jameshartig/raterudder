@@ -45,11 +45,45 @@ const (
 	ComEdRateClassMultiFamilyResidenceWithElectricSpaceHeat     = "multiFamilyElectricHeat"
 )
 
+// ComEdUtilityInfo returns metadata about ComEd and its supported rate plans.
+func ComEdUtilityInfo() types.UtilityProviderInfo {
+	return types.UtilityProviderInfo{
+		ID:   "comed",
+		Name: "ComEd",
+		Rates: []types.UtilityRateInfo{
+			{
+				ID:   "comed_besh",
+				Name: "Hourly Pricing Program (BESH)",
+				Options: []types.UtilityRateOption{
+					{
+						Field: "rateClass",
+						Name:  "Rate Class",
+						Type:  types.UtilityOptionTypeSelect,
+						Choices: []types.UtilityOptionChoice{
+							{Value: ComEdRateClassSingleFamilyResidenceWithoutElectricSpaceHeat, Name: "Residential Single Family Without Electric Space Heat"},
+							{Value: ComEdRateClassMultiFamilyResidenceWithoutElectricSpaceHeat, Name: "Residential Multi Family Without Electric Space Heat"},
+							{Value: ComEdRateClassSingleFamilyResidenceWithElectricSpaceHeat, Name: "Residential Single Family With Electric Space Heat"},
+							{Value: ComEdRateClassMultiFamilyResidenceWithElectricSpaceHeat, Name: "Residential Multi Family With Electric Space Heat"},
+						},
+						Default: ComEdRateClassSingleFamilyResidenceWithoutElectricSpaceHeat,
+					},
+					{
+						Field:       "variableDeliveryRate",
+						Name:        "Delivery Time-of-Day (DTOD)",
+						Type:        types.UtilityOptionTypeSwitch,
+						Description: "Enable if you are enrolled in ComEd's Delivery Time-of-Day pricing. 30%-47% cheaper than fixed delivery rates in off-peak hours but 2x more expensive in on-peak hours (1pm-7pm).",
+						Default:     false,
+					},
+				},
+			},
+		},
+	}
+}
+
 const pjmComedPNodeID = "33092371"
 
-// BaseComEd implements the Provider interface for ComEd (Commonwealth Edison) hourly pricing API.
-// It retrieves real-time and predicted electricity prices.
-type BaseComEd struct {
+// BaseComEdHourly implements the UtilityPrices interface for ComEd Hourly Energy Pricing (BESH).
+type BaseComEdHourly struct {
 	apiURL    string
 	pjmAPIKey string
 	pjmAPIURL string
@@ -65,8 +99,8 @@ type BaseComEd struct {
 
 // configuredComEd sets up flags for ComEd and returns the instance.
 // It uses lflag to register command-line flags for configuration.
-func configuredComEd() *BaseComEd {
-	c := &BaseComEd{
+func configuredComEdHourly() *BaseComEdHourly {
+	c := &BaseComEdHourly{
 		client:           common.HTTPClient(time.Minute),
 		historicalPrices: make(map[int64]types.Price),
 	}
@@ -84,7 +118,7 @@ func configuredComEd() *BaseComEd {
 }
 
 // Validate ensures the configuration is valid.
-func (c *BaseComEd) Validate() error {
+func (c *BaseComEdHourly) Validate() error {
 	if c.apiURL == "" {
 		return fmt.Errorf("comed-api-url is required")
 	}
@@ -107,7 +141,7 @@ type comedPriceEntry struct {
 
 // fetchPrices retrieves prices from the ComEd API with specific parameters.
 // It caches the result for 5 minutes.
-func (c *BaseComEd) getCachedCurrentPrices(ctx context.Context) ([]types.Price, error) {
+func (c *BaseComEdHourly) getCachedCurrentPrices(ctx context.Context) ([]types.Price, error) {
 	now := time.Now().In(ctLocation)
 
 	c.mu.Lock()
@@ -137,7 +171,7 @@ func (c *BaseComEd) getCachedCurrentPrices(ctx context.Context) ([]types.Price, 
 
 // GetConfirmedPrices returns confirmed prices for a specific time range.
 // This requests 5-minute feed data and averages it into hourly buckets.
-func (c *BaseComEd) GetConfirmedPrices(ctx context.Context, start, end time.Time) ([]types.Price, error) {
+func (c *BaseComEdHourly) GetConfirmedPrices(ctx context.Context, start, end time.Time) ([]types.Price, error) {
 	ctx = log.With(ctx, log.Ctx(ctx).With(slog.Time("start", start), slog.Time("end", end)))
 
 	// Check if all needed hours are in cache
@@ -228,7 +262,7 @@ func (c *BaseComEd) GetConfirmedPrices(ctx context.Context, start, end time.Time
 }
 
 // fetchPricesRange retrieves prices from the ComEd API for a specific range.
-func (c *BaseComEd) fetchPricesRange(ctx context.Context, start, end time.Time) ([]types.Price, error) {
+func (c *BaseComEdHourly) fetchPricesRange(ctx context.Context, start, end time.Time) ([]types.Price, error) {
 	start = start.In(ctLocation)
 	end = end.In(ctLocation)
 
@@ -332,7 +366,7 @@ func (c *BaseComEd) fetchPricesRange(ctx context.Context, start, end time.Time) 
 }
 
 // GetCurrentPrice returns the latest hourly-averaged price.
-func (c *BaseComEd) GetCurrentPrice(ctx context.Context) (types.Price, error) {
+func (c *BaseComEdHourly) GetCurrentPrice(ctx context.Context) (types.Price, error) {
 	log.Ctx(ctx).DebugContext(ctx, "getting current price")
 
 	prices, err := c.getCachedCurrentPrices(ctx)
@@ -357,7 +391,7 @@ func (c *BaseComEd) GetCurrentPrice(ctx context.Context) (types.Price, error) {
 
 // GetFuturePrices returns predicted or day-ahead prices.
 // Prefers PJM API if configured, otherwise returns nothing
-func (c *BaseComEd) GetFuturePrices(ctx context.Context) ([]types.Price, error) {
+func (c *BaseComEdHourly) GetFuturePrices(ctx context.Context) ([]types.Price, error) {
 	if c.pjmAPIKey == "" {
 		return nil, nil
 	}
@@ -393,7 +427,7 @@ type pjmItem struct {
 	TotalLMPDA           float64 `json:"total_lmp_da"`
 }
 
-func (c *BaseComEd) fetchPJMDayAhead(ctx context.Context, pnodeID string) ([]types.Price, error) {
+func (c *BaseComEdHourly) fetchPJMDayAhead(ctx context.Context, pnodeID string) ([]types.Price, error) {
 	now := time.Now().In(etLocation)
 	today := now.Format("2006-01-02")
 	tomorrow := now.AddDate(0, 0, 1).Format("2006-01-02")
@@ -492,7 +526,7 @@ func (c *BaseComEd) fetchPJMDayAhead(ctx context.Context, pnodeID string) ([]typ
 
 // SiteComEd wraps BaseComEd to apply site-specific settings and fees.
 type SiteComEd struct {
-	base     *BaseComEd
+	base     UtilityPrices
 	mu       sync.Mutex
 	siteID   string
 	settings types.Settings
@@ -503,8 +537,11 @@ func (s *SiteComEd) ApplySettings(ctx context.Context, settings types.Settings) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if settings.UtilityProvider != "comed_besh" {
+	if settings.UtilityProvider != "comed" {
 		return fmt.Errorf("invalid utility provider for ComEd: %s", settings.UtilityProvider)
+	}
+	if settings.UtilityRate != "comed_besh" {
+		return fmt.Errorf("invalid utility rate for ComEd: %s", settings.UtilityRate)
 	}
 
 	switch settings.UtilityRateOptions.RateClass {

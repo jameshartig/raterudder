@@ -8,21 +8,7 @@ import { setupDefaultApiMocks } from '../test/apiMocks';
 
 const { fetchActions, fetchSavings, fetchSettings, ActionReason } = api;
 
-// Mock the API
-vi.mock('../api', async (importOriginal) => {
-    const actual = await importOriginal<typeof import('../api')>();
-    return {
-        ...actual,
-        fetchActions: vi.fn(),
-        fetchSavings: vi.fn(),
-        fetchAuthStatus: vi.fn(),
-        fetchSettings: vi.fn(),
-        updateSettings: vi.fn(),
-        login: vi.fn(),
-        logout: vi.fn(),
-        fetchModeling: vi.fn(),
-    };
-});
+vi.mock('../api');
 
 const renderWithRouter = (component: React.ReactNode) => {
     return render(
@@ -176,12 +162,6 @@ describe('Dashboard', () => {
             // Solar mode should be visible
             expect(screen.getByText('Use & No Export')).toBeInTheDocument();
             // Battery mode (NoChange) should NOT be visible as a badge/tag
-            // However, the label might be used elsewhere?
-            // In Dashboard.tsx:
-            // <h3>{getBatteryModeLabel(action.batteryMode)}</h3> renders the label in h3.
-            // But the badges are in .tags span.
-
-            // Let's check specifically for the badge
             const badges = screen.queryAllByText((content, element) => {
                 return element !== null && element.classList.contains('tag') && content === 'No Change';
             });

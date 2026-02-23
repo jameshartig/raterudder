@@ -7,10 +7,10 @@ import { describe, it, expect, vi } from 'vitest';
 import * as api from '../api';
 
 vi.mock('../api', async (importOriginal) => {
-    const original = await importOriginal<typeof import('../api')>();
+    const actual = await importOriginal<typeof import('../api')>();
     return {
-        ...original,
-        fetchAuthStatus: vi.fn(original.fetchAuthStatus),
+        ...actual,
+        fetchAuthStatus: vi.fn(),
     };
 });
 

@@ -30,7 +30,7 @@ func TestComEd(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		c := &BaseComEd{
+		c := &BaseComEdHourly{
 			apiURL:           ts.URL,
 			client:           ts.Client(),
 			historicalPrices: make(map[int64]types.Price),
@@ -58,7 +58,7 @@ func TestComEd(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		c := &BaseComEd{
+		c := &BaseComEdHourly{
 			apiURL:           ts.URL,
 			client:           ts.Client(),
 			historicalPrices: make(map[int64]types.Price),
@@ -76,7 +76,7 @@ func TestComEd(t *testing.T) {
 	})
 
 	t.Run("GetFuturePrices_NoPJM", func(t *testing.T) {
-		c := &BaseComEd{
+		c := &BaseComEdHourly{
 			apiURL:           "http://example.com", // irrelevant
 			client:           &http.Client{},
 			historicalPrices: make(map[int64]types.Price),
@@ -112,7 +112,7 @@ func TestComEd(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		c := &BaseComEd{
+		c := &BaseComEdHourly{
 			pjmAPIKey:        "test-key",
 			pjmAPIURL:        ts.URL + "/api/v1/da_hrl_lmps", // Mock server address
 			client:           ts.Client(),
@@ -138,7 +138,7 @@ func TestComEd(t *testing.T) {
 	})
 
 	t.Run("Integration_RealAPI", func(t *testing.T) {
-		c := &BaseComEd{
+		c := &BaseComEdHourly{
 			apiURL:           "https://hourlypricing.comed.com/api?",
 			client:           &http.Client{Timeout: 10 * time.Second},
 			historicalPrices: make(map[int64]types.Price),
@@ -197,7 +197,7 @@ func TestComEd(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		c := &BaseComEd{
+		c := &BaseComEdHourly{
 			apiURL:           ts.URL,
 			client:           ts.Client(),
 			historicalPrices: make(map[int64]types.Price),
@@ -233,6 +233,8 @@ func TestComEd(t *testing.T) {
 			{
 				name: "time based fee - match",
 				settings: types.Settings{
+					UtilityProvider: "comed",
+					UtilityRate:     "comed_besh",
 					AdditionalFeesPeriods: []types.UtilityAdditionalFeesPeriod{
 						{
 							HourStart:      9,
@@ -255,6 +257,8 @@ func TestComEd(t *testing.T) {
 			{
 				name: "time based fee - no match",
 				settings: types.Settings{
+					UtilityProvider: "comed",
+					UtilityRate:     "comed_besh",
 					AdditionalFeesPeriods: []types.UtilityAdditionalFeesPeriod{
 						{
 							HourStart:      12,
@@ -277,6 +281,8 @@ func TestComEd(t *testing.T) {
 			{
 				name: "base price modification",
 				settings: types.Settings{
+					UtilityProvider: "comed",
+					UtilityRate:     "comed_besh",
 					AdditionalFeesPeriods: []types.UtilityAdditionalFeesPeriod{
 						{
 							HourStart:      0,

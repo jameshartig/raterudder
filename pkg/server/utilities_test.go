@@ -1,0 +1,144 @@
+package server
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/raterudder/raterudder/pkg/controller"
+	"github.com/raterudder/raterudder/pkg/ess"
+	"github.com/raterudder/raterudder/pkg/types"
+	"github.com/raterudder/raterudder/pkg/utility"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestHandleListUtilities(t *testing.T) {
+	mockUMap := utility.NewMap()
+	mockE := ess.NewMap()
+
+	srv := &Server{
+		utilities:  mockUMap,
+		ess:        mockE,
+		storage:    nil,
+		controller: controller.NewController(),
+		bypassAuth: true,
+		singleSite: true,
+	}
+
+	t.Run("Returns JSON array of utilities", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/utilities", nil)
+		w := httptest.NewRecorder()
+
+		srv.handleListUtilities(w, req)
+
+		resp := w.Result()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+
+		var utilities []types.UtilityProviderInfo
+		err := json.NewDecoder(w.Body).Decode(&utilities)
+		require.NoError(t, err)
+		assert.NotEmpty(t, utilities, "expected at least one utility in the response")
+	})
+
+	t.Run("Contains comed with correct structure", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/utilities", nil)
+		w := httptest.NewRecorder()
+
+		srv.handleListUtilities(w, req)
+
+		var utilities []types.UtilityProviderInfo
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&utilities))
+
+		var comedInfo *types.UtilityProviderInfo
+		for i := range utilities {
+			if utilities[i].ID == "comed" {
+				comedInfo = &utilities[i]
+				break
+			}
+		}
+		require.NotNil(t, comedInfo, "comed should be present in the utilities list")
+		assert.Equal(t, "ComEd", comedInfo.Name)
+		require.Len(t, comedInfo.Rates, 1)
+
+		rate := comedInfo.Rates[0]
+		assert.Equal(t, "comed_besh", rate.ID)
+		assert.NotEmpty(t, rate.Name)
+		require.Len(t, rate.Options, 2)
+
+		// rateClass option
+		rateClassOpt := rate.Options[0]
+		assert.Equal(t, "rateClass", rateClassOpt.Field)
+		assert.Equal(t, types.UtilityOptionTypeSelect, rateClassOpt.Type)
+		assert.NotEmpty(t, rateClassOpt.Choices)
+
+		// variableDeliveryRate option
+		dtodOpt := rate.Options[1]
+		assert.Equal(t, "variableDeliveryRate", dtodOpt.Field)
+		assert.Equal(t, types.UtilityOptionTypeSwitch, dtodOpt.Type)
+		assert.NotEmpty(t, dtodOpt.Description)
+	})
+
+	t.Run("All options have required fields", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/utilities", nil)
+		w := httptest.NewRecorder()
+
+		srv.handleListUtilities(w, req)
+
+		var utilities []types.UtilityProviderInfo
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&utilities))
+
+		for _, u := range utilities {
+			assert.NotEmpty(t, u.ID, "utility must have an ID")
+			assert.NotEmpty(t, u.Name, "utility must have a name")
+			for _, rate := range u.Rates {
+				assert.NotEmpty(t, rate.ID, "rate must have an ID")
+				assert.NotEmpty(t, rate.Name, "rate must have a name")
+				for _, opt := range rate.Options {
+					assert.NotEmpty(t, opt.Field, "option must have a Field in rate %q", rate.ID)
+					assert.NotEmpty(t, opt.Name, "option must have a name in rate %q", rate.ID)
+					assert.True(t,
+						opt.Type == types.UtilityOptionTypeSelect || opt.Type == types.UtilityOptionTypeSwitch,
+						"option %q in rate %q has invalid type %q", opt.Field, rate.ID, opt.Type)
+
+					if opt.Type == types.UtilityOptionTypeSelect {
+						assert.NotEmpty(t, opt.Choices, "select option %q in rate %q must have choices", opt.Field, rate.ID)
+						for _, c := range opt.Choices {
+							assert.NotEmpty(t, c.Value)
+							assert.NotEmpty(t, c.Name)
+						}
+					}
+				}
+			}
+		}
+	})
+
+	t.Run("Accessible via setup handler through auth bypass", func(t *testing.T) {
+		mockStorage := &mockStorage{}
+		mockESS := &mockESS{}
+		mockP := ess.NewMap()
+		mockP.SetSystem(types.SiteIDNone, mockESS)
+
+		s := &Server{
+			utilities:  mockUMap,
+			ess:        mockP,
+			storage:    mockStorage,
+			controller: controller.NewController(),
+			bypassAuth: true,
+			singleSite: true,
+		}
+
+		handler := s.setupHandler()
+		req := httptest.NewRequest("GET", "/api/utilities", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+
+		var utilities []types.UtilityProviderInfo
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&utilities))
+		assert.NotEmpty(t, utilities)
+	})
+}

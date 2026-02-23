@@ -2,22 +2,6 @@ package types
 
 import "time"
 
-// Price represents the cost of electricity in a time interval.
-type Price struct {
-	Provider string    `json:"provider"`
-	TSStart  time.Time `json:"tsStart"`
-	TSEnd    time.Time `json:"tsEnd"`
-
-	// DollarsPerKWH is the base cost of electricity in the time interval.
-	DollarsPerKWH float64 `json:"dollarsPerKWH"`
-
-	// GridAddlDollarsPerKWH is the cost of electricity delivered to the home in the time interval.
-	// This is added to the base price for grid use.
-	GridAddlDollarsPerKWH float64 `json:"gridUseDollarsPerKWH"`
-
-	SampleCount int `json:"-"`
-}
-
 const (
 	CurrentEnergyStatsVersion  = 1
 	CurrentPriceHistoryVersion = 1

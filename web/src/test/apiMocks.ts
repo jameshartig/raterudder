@@ -36,7 +36,8 @@ export const defaultSettings = {
     alwaysChargeUnderDollarsPerKWH: 0.05,
     minArbitrageDifferenceDollarsPerKWH: 0.03,
     minDeficitPriceDifferenceDollarsPerKWH: 0.02,
-    utilityProvider: 'comed_besh',
+    utilityProvider: 'comed',
+    utilityRate: 'comed_besh',
     utilityRateOptions: {
         rateClass: 'singleFamilyWithoutElectricHeat',
         variableDeliveryRate: false,
@@ -46,13 +47,48 @@ export const defaultSettings = {
     }
 };
 
+export const defaultUtilities = [
+    {
+        id: 'comed',
+        name: 'ComEd',
+        rates: [
+            {
+                id: 'comed_besh',
+                name: 'Hourly Pricing Program (BESH)',
+                options: [
+                    {
+                        field: 'rateClass',
+                        name: 'Rate Class',
+                        type: 'select',
+                        choices: [
+                            { value: 'singleFamilyWithoutElectricHeat', name: 'Residential Single Family Without Electric Space Heat' },
+                            { value: 'multiFamilyWithoutElectricHeat', name: 'Residential Multi Family Without Electric Space Heat' },
+                            { value: 'singleFamilyElectricHeat', name: 'Residential Single Family With Electric Space Heat' },
+                            { value: 'multiFamilyElectricHeat', name: 'Residential Multi Family With Electric Space Heat' },
+                        ],
+                        default: 'singleFamilyWithoutElectricHeat',
+                    },
+                    {
+                        field: 'variableDeliveryRate',
+                        name: 'Delivery Time-of-Day (DTOD)',
+                        type: 'switch',
+                        description: "Enable if you are enrolled in ComEd's Delivery Time-of-Day pricing. 30%-47% cheaper than fixed delivery rates in off-peak hours but 2x more expensive in on-peak hours (1pm-7pm).",
+                        default: false,
+                    },
+                ],
+            },
+        ],
+    },
+];
+
 export const setupDefaultApiMocks = (api: any) => {
-    api.fetchActions.mockResolvedValue([]);
-    api.fetchSavings.mockResolvedValue(defaultSavings);
-    api.fetchAuthStatus.mockResolvedValue(defaultAuthStatus);
-    api.fetchSettings.mockResolvedValue(defaultSettings);
-    api.updateSettings.mockResolvedValue(undefined);
-    api.login.mockResolvedValue(undefined);
-    api.logout.mockResolvedValue(undefined);
-    api.fetchModeling.mockResolvedValue([]);
+    if (typeof api.fetchActions?.mockResolvedValue === 'function') api.fetchActions.mockResolvedValue([]);
+    if (typeof api.fetchSavings?.mockResolvedValue === 'function') api.fetchSavings.mockResolvedValue(defaultSavings);
+    if (typeof api.fetchAuthStatus?.mockResolvedValue === 'function') api.fetchAuthStatus.mockResolvedValue(defaultAuthStatus);
+    if (typeof api.fetchSettings?.mockResolvedValue === 'function') api.fetchSettings.mockResolvedValue(defaultSettings);
+    if (typeof api.fetchUtilities?.mockResolvedValue === 'function') api.fetchUtilities.mockResolvedValue(defaultUtilities);
+    if (typeof api.updateSettings?.mockResolvedValue === 'function') api.updateSettings.mockResolvedValue(undefined);
+    if (typeof api.login?.mockResolvedValue === 'function') api.login.mockResolvedValue(undefined);
+    if (typeof api.logout?.mockResolvedValue === 'function') api.logout.mockResolvedValue(undefined);
+    if (typeof api.fetchModeling?.mockResolvedValue === 'function') api.fetchModeling.mockResolvedValue([]);
 };

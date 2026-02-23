@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { fetchSettings, updateSettings, type Settings as SettingsType } from '../api';
+import { fetchSettings, updateSettings, fetchUtilities, type Settings as SettingsType, type UtilityProviderInfo, type UtilityRateOption } from '../api';
 import { Field } from '@base-ui/react/field';
 import { Input } from '@base-ui/react/input';
 import { Switch } from '@base-ui/react/switch';
@@ -8,26 +8,35 @@ import { Select } from '@base-ui/react/select';
 import './Settings.css';
 import SparkMD5 from 'spark-md5';
 
+
 const Settings = ({ siteID }: { siteID?: string }) => {
     const [settings, setSettings] = useState<SettingsType | null>(null);
+    const [utilities, setUtilities] = useState<UtilityProviderInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-    // Credentials State
     const [franklinUsername, setFranklinUsername] = useState("");
     const [franklinPassword, setFranklinPassword] = useState("");
     const [franklinGatewayID, setFranklinGatewayID] = useState("");
 
+    // UI State for consolidated views
+    const [editUtility, setEditUtility] = useState(false);
+    const [editFranklin, setEditFranklin] = useState(false);
+
     useEffect(() => {
-        loadSettings();
+        loadData();
     }, [siteID]);
 
-    const loadSettings = async () => {
+    const loadData = async () => {
         try {
             setLoading(true);
-            const data = await fetchSettings(siteID);
-            setSettings(data);
+            const [settingsData, utilitiesData] = await Promise.all([
+                fetchSettings(siteID),
+                fetchUtilities(siteID)
+            ]);
+            setSettings(settingsData);
+            setUtilities(utilitiesData);
             setError(null);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to load settings');
@@ -44,25 +53,35 @@ const Settings = ({ siteID }: { siteID?: string }) => {
             setError(null);
             setSuccessMessage(null);
 
-            let franklinHeaders = undefined;
+            let franklinCredentials = undefined;
             if (franklinUsername || franklinPassword || franklinGatewayID) {
                 // If any credential field is filled, we include credentials update
                 if (!franklinUsername || !franklinPassword) {
                     throw new Error("Franklin credential fields (Username, Password) must be filled to update credentials.");
                 }
 
-                franklinHeaders = {
+                franklinCredentials = {
                     username: franklinUsername,
                     md5Password: SparkMD5.hash(franklinPassword),
                     gatewayID: franklinGatewayID
                 };
             }
 
-            await updateSettings(settings, siteID, franklinHeaders);
+            await updateSettings(settings, siteID, franklinCredentials);
             setSuccessMessage('Settings saved successfully');
 
-            // Clear password field after save
-            setFranklinPassword("");
+            if (franklinCredentials) {
+                setSettings({
+                    ...settings,
+                    hasCredentials: {
+                        ...settings.hasCredentials,
+                        franklin: true
+                    }
+                });
+                setEditFranklin(false);
+                // Clear password field after save
+                setFranklinPassword("");
+            }
 
             setTimeout(() => setSuccessMessage(null), 3000);
         } catch (err) {
@@ -85,189 +104,379 @@ const Settings = ({ siteID }: { siteID?: string }) => {
             {successMessage && <div className="success-message">{successMessage}</div>}
 
             <form onSubmit={handleSubmit}>
-                {/* Utility Service - Primary Section */}
-                <h3>Utility Service</h3>
-                <Field.Root className="form-group">
-                    <Field.Label>Service</Field.Label>
-                    <Select.Root
-                        value={settings.utilityProvider}
-                        onValueChange={(value) => {
-                            const provider = value as string;
-                            let newSettings = { ...settings, utilityProvider: provider };
-                            if (provider === 'comed_besh') {
-                                if (!newSettings.utilityRateOptions.rateClass) {
-                                    newSettings = {
-                                        ...newSettings,
-                                        utilityRateOptions: {
-                                            ...newSettings.utilityRateOptions,
-                                            rateClass: 'singleFamilyWithoutElectricHeat',
-                                            variableDeliveryRate: false
-                                        }
-                                    };
-                                }
-                            }
-                            setSettings(newSettings);
-                        }}
-                    >
-                        <Select.Trigger className="select-trigger" id="utilityService">
-                            <Select.Value placeholder="Select a service..." />
-                        </Select.Trigger>
-                        <Select.Portal>
-                            <Select.Positioner className="select-positioner">
-                                <Select.Popup className="select-popup">
-                                    <Select.Item className="select-item" value="">
-                                        <Select.ItemText>Select a service...</Select.ItemText>
-                                    </Select.Item>
-                                    <Select.Item className="select-item" value="comed_besh">
-                                        <Select.ItemText>Basic Electric Service–Hourly Energy Pricing (BESH)</Select.ItemText>
-                                    </Select.Item>
-                                </Select.Popup>
-                            </Select.Positioner>
-                        </Select.Portal>
-                    </Select.Root>
-                    <Field.Description>Select your utility provider plan.</Field.Description>
+                {/* Pause Updates at the top */}
+                <div className="section-header pause-section">
+                    <h3>Automation Status</h3>
+                </div>
+                <Field.Root className="form-group switch-group">
+                    <div className="switch-row">
+                        <Switch.Root
+                            checked={settings.pause}
+                            onCheckedChange={(checked) => handleChange('pause', checked)}
+                            className="switch-root"
+                        >
+                            <Switch.Thumb className="switch-thumb" />
+                        </Switch.Root>
+                        <Field.Label>Pause Automation</Field.Label>
+                    </div>
+                    <Field.Description>If enabled, stop changing states but continue monitoring.</Field.Description>
                 </Field.Root>
 
-                {settings.utilityProvider === 'comed_besh' && (
-                    <div className="sub-section">
-                        <h4>ComEd Rate Options</h4>
+                {/* Utility Service Section */}
+                <div className="section-header">
+                    <h3>Utility Service</h3>
+                    {settings.utilityProvider && settings.utilityRate && !editUtility && (
+                        <button type="button" className="text-button" onClick={() => setEditUtility(true)}>Change</button>
+                    )}
+                </div>
+
+                {settings.utilityProvider && settings.utilityRate && !editUtility ? (
+                    <div className="configured-summary" onClick={() => setEditUtility(true)}>
+                        <div className="summary-info">
+                            <span className="summary-label">
+                                {utilities.find(u => u.id === settings.utilityProvider)?.name || settings.utilityProvider}
+                            </span>
+                            <span className="summary-sublabel">
+                                {utilities.find(u => u.id === settings.utilityProvider)?.rates.find(r => r.id === settings.utilityRate)?.name || settings.utilityRate}
+                            </span>
+                        </div>
+                        <div className="summary-status">Configured</div>
+                    </div>
+                ) : (
+                    <div className={editUtility ? "edit-section" : ""}>
                         <Field.Root className="form-group">
-                            <Field.Label>Rate Class</Field.Label>
+                            <Field.Label>Service</Field.Label>
                             <Select.Root
-                                value={settings.utilityRateOptions?.rateClass || 'singleFamilyWithoutElectricHeat'}
+                                value={settings.utilityProvider}
                                 onValueChange={(value) => {
-                                    const newOpts = {
-                                        ...settings.utilityRateOptions,
-                                        rateClass: value as string,
-                                        variableDeliveryRate: settings.utilityRateOptions?.variableDeliveryRate ?? false
+                                    setEditUtility(true);
+                                    const providerID = value as string;
+                                    const provider = utilities.find(u => u.id === providerID);
+                                    let newSettings = {
+                                        ...settings,
+                                        utilityProvider: providerID,
+                                        utilityRate: "",
+                                        utilityRateOptions: {}
                                     };
-                                    handleChange('utilityRateOptions', newOpts);
+
+                                    // If provider has only one rate, auto-select it
+                                    if (provider?.rates.length === 1) {
+                                        const rate = provider.rates[0];
+                                        newSettings.utilityRate = rate.id;
+                                        const newOpts: any = {};
+                                        rate.options.forEach((opt: UtilityRateOption) => {
+                                            newOpts[opt.field] = opt.default;
+                                        });
+                                        newSettings.utilityRateOptions = newOpts;
+                                    }
+
+                                    setSettings(newSettings);
                                 }}
                             >
-                                <Select.Trigger className="select-trigger" id="comedRateClass">
-                                    <Select.Value />
+                                <Select.Trigger className="select-trigger" id="utilityService" aria-label="Service">
+                                    <Select.Value>
+                                        {utilities.find(u => u.id === settings.utilityProvider)?.name || 'Select a service...'}
+                                    </Select.Value>
                                 </Select.Trigger>
                                 <Select.Portal>
                                     <Select.Positioner className="select-positioner">
                                         <Select.Popup className="select-popup">
-                                            <Select.Item className="select-item" value="singleFamilyWithoutElectricHeat">
-                                                <Select.ItemText>Residential Single Family Without Electric Space Heat</Select.ItemText>
+                                            <Select.Item className="select-item" value="">
+                                                <Select.ItemText>Select a service...</Select.ItemText>
                                             </Select.Item>
-                                            <Select.Item className="select-item" value="multiFamilyWithoutElectricHeat">
-                                                <Select.ItemText>Residential Multi Family Without Electric Space Heat</Select.ItemText>
-                                            </Select.Item>
-                                            <Select.Item className="select-item" value="singleFamilyElectricHeat">
-                                                <Select.ItemText>Residential Single Family With Electric Space Heat</Select.ItemText>
-                                            </Select.Item>
-                                            <Select.Item className="select-item" value="multiFamilyElectricHeat">
-                                                <Select.ItemText>Residential Multi Family With Electric Space Heat</Select.ItemText>
-                                            </Select.Item>
+                                            {utilities.map(u => (
+                                                <Select.Item key={u.id} className="select-item" value={u.id}>
+                                                    <Select.ItemText>{u.name}</Select.ItemText>
+                                                </Select.Item>
+                                            ))}
                                         </Select.Popup>
                                     </Select.Positioner>
                                 </Select.Portal>
                             </Select.Root>
                         </Field.Root>
-                        <Field.Root className="form-group switch-group">
-                            <div className="switch-row">
-                                <Switch.Root
-                                    checked={settings.utilityRateOptions?.variableDeliveryRate ?? false}
-                                    onCheckedChange={(checked) => {
-                                        const newOpts = {
-                                            ...settings.utilityRateOptions,
-                                            rateClass: settings.utilityRateOptions?.rateClass || 'singleFamilyWithoutElectricHeat',
-                                            variableDeliveryRate: checked
-                                        };
-                                        handleChange('utilityRateOptions', newOpts);
-                                    }}
-                                    className="switch-root"
-                                >
-                                    <Switch.Thumb className="switch-thumb" />
-                                </Switch.Root>
-                                <Field.Label>Delivery Time-of-Day (DTOD)</Field.Label>
-                            </div>
-                            <Field.Description>Enable if you are enrolled in ComEd's Delivery Time-of-Day pricing. 30%-47% cheaper than fixed delivery rates in off-peak hours but 2x more expensive in on-peak hours (1pm-7pm).</Field.Description>
-                        </Field.Root>
+
+                        {(() => {
+                            const provider = utilities.find(u => u.id === settings.utilityProvider);
+                            if (!provider) return null;
+
+                            return (
+                                <Field.Root className="form-group">
+                                    <Field.Label>Rate/Plan</Field.Label>
+                                    <Select.Root
+                                        value={settings.utilityRate}
+                                        onValueChange={(value) => {
+                                            const rateID = value as string;
+                                            const rate = provider.rates.find(r => r.id === rateID);
+                                            let newSettings = { ...settings, utilityRate: rateID };
+                                            if (rate) {
+                                                const newOpts: any = {};
+                                                rate.options.forEach((opt: UtilityRateOption) => {
+                                                    newOpts[opt.field] = opt.default;
+                                                });
+                                                newSettings.utilityRateOptions = newOpts;
+                                            }
+                                            setSettings(newSettings);
+                                        }}
+                                    >
+                                        <Select.Trigger className="select-trigger" id="utilityRate" aria-label="Rate/Plan">
+                                            <Select.Value>
+                                                {provider.rates.find(r => r.id === settings.utilityRate)?.name || 'Select a rate/plan...'}
+                                            </Select.Value>
+                                        </Select.Trigger>
+                                        <Select.Portal>
+                                            <Select.Positioner className="select-positioner">
+                                                <Select.Popup className="select-popup">
+                                                    <Select.Item className="select-item" value="">
+                                                        <Select.ItemText>Select a rate/plan...</Select.ItemText>
+                                                    </Select.Item>
+                                                    {provider.rates.map(r => (
+                                                        <Select.Item key={r.id} className="select-item" value={r.id}>
+                                                            <Select.ItemText>{r.name}</Select.ItemText>
+                                                        </Select.Item>
+                                                    ))}
+                                                </Select.Popup>
+                                            </Select.Positioner>
+                                        </Select.Portal>
+                                    </Select.Root>
+                                </Field.Root>
+                            );
+                        })()}
+
+                        {(() => {
+                            const provider = utilities.find(u => u.id === settings.utilityProvider);
+                            const rate = provider?.rates.find(r => r.id === settings.utilityRate);
+                            if (!rate || rate.options.length === 0) return null;
+
+                            return (
+                                <div className="sub-section">
+                                    {rate.options.map((opt: UtilityRateOption) => (
+                                        <Field.Root key={opt.field} className={`form-group ${opt.type === 'switch' ? 'switch-group' : ''}`}>
+                                            {opt.type === 'select' && (
+                                                <>
+                                                    <Field.Label>{opt.name}</Field.Label>
+                                                    <Select.Root
+                                                        value={settings.utilityRateOptions?.[opt.field] || opt.default}
+                                                        onValueChange={(value) => {
+                                                            const newOpts = {
+                                                                ...settings.utilityRateOptions,
+                                                                [opt.field]: value
+                                                            };
+                                                            handleChange('utilityRateOptions', newOpts);
+                                                        }}
+                                                    >
+                                                        <Select.Trigger className="select-trigger" id={`opt-${opt.field}`}>
+                                                            <Select.Value>
+                                                                {opt.choices?.find(c => c.value === (settings.utilityRateOptions?.[opt.field] || opt.default))?.name || (settings.utilityRateOptions?.[opt.field] || opt.default)}
+                                                            </Select.Value>
+                                                        </Select.Trigger>
+                                                        <Select.Portal>
+                                                            <Select.Positioner className="select-positioner">
+                                                                <Select.Popup className="select-popup">
+                                                                    {opt.choices?.map((choice) => (
+                                                                        <Select.Item key={choice.value} className="select-item" value={choice.value}>
+                                                                            <Select.ItemText>{choice.name}</Select.ItemText>
+                                                                        </Select.Item>
+                                                                    ))}
+                                                                </Select.Popup>
+                                                            </Select.Positioner>
+                                                        </Select.Portal>
+                                                    </Select.Root>
+                                                </>
+                                            )}
+                                            {opt.type === 'switch' && (
+                                                <>
+                                                    <div className="switch-row">
+                                                        <Switch.Root
+                                                            id={`opt-${opt.field}`}
+                                                            checked={settings.utilityRateOptions?.[opt.field] ?? !!opt.default}
+                                                            onCheckedChange={(checked) => {
+                                                                const newOpts = {
+                                                                    ...settings.utilityRateOptions,
+                                                                    [opt.field]: checked
+                                                                };
+                                                                handleChange('utilityRateOptions', newOpts);
+                                                            }}
+                                                            className="switch-root"
+                                                        >
+                                                            <Switch.Thumb className="switch-thumb" />
+                                                        </Switch.Root>
+                                                        <Field.Label htmlFor={`opt-${opt.field}`}>{opt.name}</Field.Label>
+                                                    </div>
+                                                </>
+                                            )}
+                                            {opt.description && <Field.Description>{opt.description}</Field.Description>}
+                                        </Field.Root>
+                                    ))}
+                                </div>
+                            );
+                        })()}
+                        {editUtility && (
+                            <button type="button" className="text-button cancel-button" onClick={() => setEditUtility(false)}>Done</button>
+                        )}
                     </div>
                 )}
 
-                {/* Franklin Credentials - Primary Section */}
-                <h3 id="franklin-credentials">Franklin Credentials</h3>
-                <Field.Root className="form-group">
-                    <Field.Label>Username (Email)</Field.Label>
-                    <Input
-                        id="franklinUsername"
-                        type="email"
-                        value={franklinUsername}
-                        onChange={(e) => setFranklinUsername(e.target.value)}
-                        placeholder="Enter FranklinWH email"
-                    />
-                </Field.Root>
-                <Field.Root className="form-group">
-                    <Field.Label>Password</Field.Label>
-                    <Input
-                        id="franklinPassword"
-                        type="password"
-                        value={franklinPassword}
-                        onChange={(e) => setFranklinPassword(e.target.value)}
-                        placeholder="Enter new password to update"
-                    />
-                </Field.Root>
-                <Field.Root className="form-group">
-                    <Field.Label>Gateway ID (Optional)</Field.Label>
-                    <Input
-                        id="franklinGatewayID"
-                        type="text"
-                        value={franklinGatewayID}
-                        onChange={(e) => setFranklinGatewayID(e.target.value)}
-                        placeholder="Enter FranklinWH Gateway ID"
-                    />
-                </Field.Root>
+                {/* Franklin Credentials Section */}
+                <div className="section-header">
+                    <h3 id="franklin-credentials">Franklin Credentials</h3>
+                    {settings.hasCredentials.franklin && !editFranklin && (
+                        <button type="button" className="text-button" onClick={() => setEditFranklin(true)}>Update</button>
+                    )}
+                </div>
 
-                <h3>Grid Settings</h3>
-                <Field.Root className="form-group switch-group">
-                    <div className="switch-row">
-                        <Switch.Root
-                            checked={settings.gridChargeBatteries}
-                            onCheckedChange={(checked) => handleChange('gridChargeBatteries', checked)}
-                            className="switch-root"
-                        >
-                            <Switch.Thumb className="switch-thumb" />
-                        </Switch.Root>
-                        <Field.Label>Grid Charge Batteries</Field.Label>
+                {settings.hasCredentials.franklin && !editFranklin ? (
+                    <div className="configured-summary" onClick={() => setEditFranklin(true)}>
+                        <div className="summary-info">
+                            <span className="summary-label">Franklin Energy System</span>
+                        </div>
+                        <div className="summary-status">Connected</div>
                     </div>
-                    <Field.Description>Allow charging batteries from the grid.</Field.Description>
-                </Field.Root>
-                <Field.Root className="form-group switch-group">
-                    <div className="switch-row">
-                        <Switch.Root
-                            checked={settings.gridExportSolar}
-                            onCheckedChange={(checked) => handleChange('gridExportSolar', checked)}
-                            className="switch-root"
-                        >
-                            <Switch.Thumb className="switch-thumb" />
-                        </Switch.Root>
-                        <Field.Label>Grid Export Solar</Field.Label>
+                ) : (
+                    <div className={editFranklin ? "edit-section" : ""}>
+                        <Field.Root className="form-group">
+                            <Field.Label>Username (Email)</Field.Label>
+                            <Input
+                                id="franklinUsername"
+                                type="email"
+                                value={franklinUsername}
+                                onChange={(e) => setFranklinUsername(e.target.value)}
+                                placeholder="Enter FranklinWH email"
+                            />
+                        </Field.Root>
+                        <Field.Root className="form-group">
+                            <Field.Label>Password</Field.Label>
+                            <Input
+                                id="franklinPassword"
+                                type="password"
+                                value={franklinPassword}
+                                onChange={(e) => setFranklinPassword(e.target.value)}
+                                placeholder="Enter new password to update"
+                            />
+                        </Field.Root>
+                        <Field.Root className="form-group">
+                            <Field.Label>Gateway ID (Optional)</Field.Label>
+                            <Input
+                                id="franklinGatewayID"
+                                type="text"
+                                value={franklinGatewayID}
+                                onChange={(e) => setFranklinGatewayID(e.target.value)}
+                                placeholder="Enter FranklinWH Gateway ID"
+                            />
+                        </Field.Root>
+                        {editFranklin && (
+                            <button type="button" className="text-button cancel-button" onClick={() => setEditFranklin(false)}>Done</button>
+                        )}
                     </div>
-                    <Field.Description>Allow exporting solar generation to the grid.</Field.Description>
-                </Field.Root>
-                <Field.Root className="form-group switch-group">
-                    <div className="switch-row">
-                        <Switch.Root
-                            checked={settings.gridExportBatteries}
-                            onCheckedChange={(checked) => handleChange('gridExportBatteries', checked)}
-                            className="switch-root"
-                        >
-                            <Switch.Thumb className="switch-thumb" />
-                        </Switch.Root>
-                        <Field.Label>Grid Export Batteries</Field.Label>
-                    </div>
-                    <Field.Description>Allow exporting battery energy to the grid.</Field.Description>
-                </Field.Root>
+                )}
+
+                <div className="section-header">
+                    <h3>Automation Thresholds</h3>
+                </div>
+                <div className="form-grid compact-grid">
+                    <Field.Root className="form-group compact">
+                        <Field.Label htmlFor="minBatterySOC">Minimum Battery %</Field.Label>
+                        <Input
+                            id="minBatterySOC"
+                            type="number"
+                            step="1"
+                            min="0"
+                            max="100"
+                            value={settings.minBatterySOC}
+                            onChange={(e) => handleChange('minBatterySOC', parseFloat(e.target.value))}
+                        />
+                        <Field.Description>Maintain battery charge at or above this level at all costs.</Field.Description>
+                    </Field.Root>
+
+                    <Field.Root className="form-group compact">
+                        <Field.Label htmlFor="alwaysChargeUnder">Always Charge Below ($/kWh)</Field.Label>
+                        <Input
+                            id="alwaysChargeUnder"
+                            type="number"
+                            step="0.01"
+                            value={settings.alwaysChargeUnderDollarsPerKWH}
+                            onChange={(e) => handleChange('alwaysChargeUnderDollarsPerKWH', parseFloat(e.target.value))}
+                        />
+                        <Field.Description>Charge battery whenever the price is less than this threshold.</Field.Description>
+                    </Field.Root>
+
+                    <Field.Root className="form-group compact">
+                        <Field.Label htmlFor="minArbitrage">Min Arbitrage Profit ($/kWh)</Field.Label>
+                        <Input
+                            id="minArbitrage"
+                            type="number"
+                            step="0.01"
+                            value={settings.minArbitrageDifferenceDollarsPerKWH}
+                            onChange={(e) => handleChange('minArbitrageDifferenceDollarsPerKWH', parseFloat(e.target.value))}
+                        />
+                        <Field.Description>Required profit margin to trigger immediate charging to later use/export at a higher prices.</Field.Description>
+                    </Field.Root>
+
+                    <Field.Root className="form-group compact">
+                        <Field.Label htmlFor="minDeficit">Charge for Deficit ($/kWh)</Field.Label>
+                        <Input
+                            id="minDeficit"
+                            type="number"
+                            step="0.01"
+                            value={settings.minDeficitPriceDifferenceDollarsPerKWH}
+                            onChange={(e) => handleChange('minDeficitPriceDifferenceDollarsPerKWH', parseFloat(e.target.value))}
+                        />
+                        <Field.Description>Price difference required to justify charging now to avoid a future battery depletion.</Field.Description>
+                    </Field.Root>
+                </div>
+
+                <div className="section-header">
+                    <h3>Grid Restrictions</h3>
+                </div>
+
+                <div className="grid-strategy-grid">
+                    <Field.Root className="form-group switch-group compact">
+                        <div className="switch-row">
+                            <Switch.Root
+                                id="gridChargeBatteries"
+                                checked={settings.gridChargeBatteries}
+                                onCheckedChange={(checked) => handleChange('gridChargeBatteries', checked)}
+                                className="switch-root"
+                            >
+                                <Switch.Thumb className="switch-thumb" />
+                            </Switch.Root>
+                            <Field.Label htmlFor="gridChargeBatteries">Grid Can Charge Battery</Field.Label>
+                        </div>
+                    </Field.Root>
+
+                    <Field.Root className="form-group switch-group compact">
+                        <div className="switch-row">
+                            <Switch.Root
+                                id="gridExportSolar"
+                                checked={settings.gridExportSolar}
+                                onCheckedChange={(checked) => handleChange('gridExportSolar', checked)}
+                                className="switch-root"
+                            >
+                                <Switch.Thumb className="switch-thumb" />
+                            </Switch.Root>
+                            <Field.Label htmlFor="gridExportSolar">Export Solar to Grid</Field.Label>
+                        </div>
+                    </Field.Root>
+
+                    <Field.Root className="form-group switch-group compact">
+                        <div className="switch-row">
+                            <Switch.Root
+                                id="gridExportBatteries"
+                                checked={settings.gridExportBatteries}
+                                onCheckedChange={(checked) => handleChange('gridExportBatteries', checked)}
+                                className="switch-root"
+                            >
+                                <Switch.Thumb className="switch-thumb" />
+                            </Switch.Root>
+                            <Field.Label htmlFor="gridExportBatteries">Export Battery to Grid</Field.Label>
+                        </div>
+                    </Field.Root>
+                </div>
+
+
 
                 <Collapsible.Root className="advanced-section">
-                    <Collapsible.Trigger className="advanced-trigger">Advanced Settings</Collapsible.Trigger>
+                    <Collapsible.Trigger className="advanced-trigger">Advanced Tuning Settings</Collapsible.Trigger>
                     <Collapsible.Panel className="advanced-panel">
-
                         <Field.Root className="form-group switch-group" style={{ marginTop: '1rem' }}>
                             <div className="switch-row">
                                 <Switch.Root
@@ -277,79 +486,16 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                                 >
                                     <Switch.Thumb className="switch-thumb" />
                                 </Switch.Root>
-                                <Field.Label>Dry Run</Field.Label>
+                                <Field.Label>Dry Run Mode</Field.Label>
                             </div>
-                            <Field.Description>Simulate actions without executing them</Field.Description>
-                        </Field.Root>
-
-                        <Field.Root className="form-group switch-group">
-                            <div className="switch-row">
-                                <Switch.Root
-                                    checked={settings.pause}
-                                    onCheckedChange={(checked) => handleChange('pause', checked)}
-                                    className="switch-root"
-                                >
-                                    <Switch.Thumb className="switch-thumb" />
-                                </Switch.Root>
-                                <Field.Label>Pause Updates</Field.Label>
-                            </div>
-                            <Field.Description>Stop automatic updates (prices and history will still sync)</Field.Description>
-                        </Field.Root>
-
-                        <h3>Battery Settings</h3>
-                        <Field.Root className="form-group">
-                            <Field.Label>Min Battery SOC (%)</Field.Label>
-                            <Input
-                                id="minBatterySOC"
-                                type="number"
-                                step="1"
-                                min="0"
-                                max="100"
-                                value={settings.minBatterySOC}
-                                onChange={(e) => handleChange('minBatterySOC', parseFloat(e.target.value))}
-                            />
-                            <Field.Description>Minimum State of Charge to maintain.</Field.Description>
-                        </Field.Root>
-
-                        <h3>Price Settings</h3>
-                        <Field.Root className="form-group">
-                            <Field.Label>Always Charge Under ($/kWh)</Field.Label>
-                            <Input
-                                id="alwaysChargeUnder"
-                                type="number"
-                                step="0.01"
-                                value={settings.alwaysChargeUnderDollarsPerKWH}
-                                onChange={(e) => handleChange('alwaysChargeUnderDollarsPerKWH', parseFloat(e.target.value))}
-                            />
-                            <Field.Description>Always charge the battery if the price (after fees) is below this threshold, regardless of forecast.</Field.Description>
-                        </Field.Root>
-                        <Field.Root className="form-group">
-                            <Field.Label>Min Arbitrage Difference ($/kWh)</Field.Label>
-                            <Input
-                                id="minArbitrage"
-                                type="number"
-                                step="0.01"
-                                value={settings.minArbitrageDifferenceDollarsPerKWH}
-                                onChange={(e) => handleChange('minArbitrageDifferenceDollarsPerKWH', parseFloat(e.target.value))}
-                            />
-                            <Field.Description>Minimum profit required to trigger charging for arbitrage.</Field.Description>
-                        </Field.Root>
-
-                        <Field.Root className="form-group">
-                            <Field.Label>Min Deficit Charge Diff ($/kWh)</Field.Label>
-                            <Input
-                                id="minDeficit"
-                                type="number"
-                                step="0.01"
-                                value={settings.minDeficitPriceDifferenceDollarsPerKWH}
-                                onChange={(e) => handleChange('minDeficitPriceDifferenceDollarsPerKWH', parseFloat(e.target.value))}
-                            />
-                            <Field.Description>Minimum price difference between now and later to justify charging now when there's a predicted battery deficit in the future.</Field.Description>
+                            <Field.Description>Simulate actions without executing them (useful for testing).</Field.Description>
                         </Field.Root>
 
 
 
-                        <h3>Solar Settings</h3>
+                        <div className="section-header">
+                            <h3>Solar Settings</h3>
+                        </div>
                         <Field.Root className="form-group">
                             <Field.Label>Solar Trend Ratio Max</Field.Label>
                             <Input
@@ -387,7 +533,9 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                             </div>
                         )}
 
-                        <h3>Power History Settings</h3>
+                        <div className="section-header">
+                            <h3>Power History Settings</h3>
+                        </div>
                         <Field.Root className="form-group">
                             <Field.Label>Ignore Usage Outlier Multiple</Field.Label>
                             <Input

@@ -29,6 +29,7 @@ const Header: React.FC<HeaderProps> = ({ loggedIn, siteIDs, selectedSiteID, onSi
                     {loggedIn && siteIDs.length > 1 && (
                         <Select.Root
                             value={selectedSiteID}
+                            items={Object.fromEntries(siteIDs.map(id => [id, id]))}
                             onValueChange={(value) => onSiteChange(value as string)}
                         >
                             <Select.Trigger className="site-selector-header">

@@ -154,8 +154,35 @@ export const fetchSavings = async (start: Date, end: Date, siteID?: string): Pro
 };
 
 export interface UtilityRateOptions {
-    rateClass: string;
-    variableDeliveryRate: boolean;
+    [key: string]: any;
+}
+
+export interface UtilityOptionChoice {
+    value: string;
+    name: string;
+}
+
+export type UtilityOptionType = 'select' | 'switch';
+
+export interface UtilityRateOption {
+    field: string;
+    name: string;
+    type: UtilityOptionType;
+    description?: string;
+    choices?: UtilityOptionChoice[];
+    default?: any;
+}
+
+export interface UtilityProviderInfo {
+  id: string;
+  name: string;
+  rates: UtilityRateInfo[];
+}
+
+export interface UtilityRateInfo {
+  id: string;
+  name: string;
+  options: UtilityRateOption[];
 }
 
 export interface Settings {
@@ -173,6 +200,7 @@ export interface Settings {
     solarTrendRatioMax: number;
     solarBellCurveMultiplier: number;
     utilityProvider: string;
+    utilityRate: string;
     utilityRateOptions: UtilityRateOptions;
     hasCredentials: {
         franklin: boolean;
@@ -305,4 +333,16 @@ export const joinSite = async (joinSiteID: string, inviteCode: string): Promise<
     if (!response.ok) {
         throw new Error(await extractError(response, 'Failed to join site'));
     }
+};
+
+export const fetchUtilities = async (siteID?: string): Promise<UtilityProviderInfo[]> => {
+    const query = new URLSearchParams();
+    if (siteID) {
+        query.append('siteID', siteID);
+    }
+    const response = await fetch(`/api/utilities?${query.toString()}`);
+    if (!response.ok) {
+        throw new Error(await extractError(response, 'Failed to fetch utilities'));
+    }
+    return response.json();
 };
