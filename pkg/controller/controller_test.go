@@ -880,3 +880,95 @@ func TestDecide(t *testing.T) {
 			"Should load (discharge) because battery will refill from solar")
 	})
 }
+
+func TestDecidePreventSolarCurtailment(t *testing.T) {
+	c := NewController()
+	ctx := context.Background()
+
+	now := time.Now()
+	// Noon on a sunny day
+	fixedNow := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, now.Location())
+
+	settings := types.Settings{
+		MinBatterySOC:                       20.0,
+		AlwaysChargeUnderDollarsPerKWH:      0.01,
+		GridChargeBatteries:                 false,
+		GridExportSolar:                     false, // EXPORT DISABLED
+		MinArbitrageDifferenceDollarsPerKWH: 2.0,   // High arbitrage to avoid interference
+		SolarFullyChargeHeadroomBatterySOC:  5.0,   // 5% headroom (hit 95%)
+		SolarBellCurveMultiplier:            1.0,
+	}
+
+	status := types.SystemStatus{
+		Timestamp:          fixedNow,
+		BatterySOC:         90.0, // Almost full
+		BatteryCapacityKWH: 10.0,
+		MaxBatteryChargeKW: 5.0,
+		HomeKW:             1.0,
+		SolarKW:            0.0, // Currently no solar (maybe just before solar hours)
+	}
+
+	// Current price is moderate
+	currentPrice := types.Price{TSStart: fixedNow, DollarsPerKWH: 0.10}
+
+	// Future prices: a huge peak 6 hours from now
+	futurePrices := []types.Price{}
+	for i := 1; i <= 24; i++ {
+		price := 0.10
+		if i == 6 {
+			price = 1.00 // HUGE PEAK
+		}
+		futurePrices = append(futurePrices, types.Price{
+			TSStart:       fixedNow.Add(time.Duration(i) * time.Hour),
+			DollarsPerKWH: price,
+		})
+	}
+
+	// History: 2kW load constant, but let's make it have some solar at Noon.
+	history := []types.EnergyStats{}
+	for i := -48; i < 0; i++ {
+		ts := fixedNow.Add(time.Duration(i) * time.Hour)
+		solar := 0.0
+		if ts.Hour() >= 13 && ts.Hour() <= 16 {
+			solar = 5.0 // High solar in afternoon
+		}
+		history = append(history, types.EnergyStats{
+			TSHourStart: ts,
+			HomeKWH:     1.0,
+			SolarKWH:    solar,
+		})
+	}
+
+	// In this scenario:
+	// 1. Current SOC 90% (9kWh)
+	// 2. Next hour (13:00): Solar 5kW, Home 1kW -> Net -4kW -> Charge 4kW -> SOC 130%? (Hit 100% capacity)
+	// 3. Since headroom is 5%, it will hit "Solar Capacity" at 95% (9.5kWh).
+	// 4. Hit Solar Capacity will be at 13:00 (approx after 0.5/(4) = 7.5 mins).
+	// 5. Deficit will be hit at Peak (6 hours from now) if we don't save energy.
+	// 6. 9kWh - 1kWh*6 = 3kWh. Still above 20% (2kWh).
+	//    Wait, I need to make sure we hit deficit!
+	//    Let's make load 2kW.
+	//    9kWh - 2kW*6 = -3kWh -> Deficit!
+
+	for i := range history {
+		history[i].HomeKWH = 1.0
+	}
+	status.HomeKW = 1.0
+
+	// In this scenario:
+	// Starting SOC: 90% (9.0kWh)
+	// Now is ~9:20 AM.
+	// H9: 9-1=8
+	// H10: 8-1=7
+	// H11: 7-1=6
+	// H12: 6-1=5
+	// H13: solar 5.0, load 1.0 -> Net -4.0. 5+4=9.0. (Wait, almost there)
+	// Let's make SOC 95% at start.
+	status.BatterySOC = 95.0
+
+	decision, err := c.Decide(ctx, status, currentPrice, futurePrices, history, settings)
+	require.NoError(t, err)
+
+	assert.Equal(t, types.ActionReasonPreventSolarCurtailment, decision.Action.Reason)
+	assert.Contains(t, decision.Action.Description, "Solar curtailment likely")
+}

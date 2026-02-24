@@ -506,7 +506,7 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                                 value={settings.solarTrendRatioMax}
                                 onChange={(e) => handleChange('solarTrendRatioMax', parseFloat(e.target.value))}
                             />
-                            <Field.Description>Maximum ratio for solar trend adjustment. Higher values allow more aggressive upward solar predictions. Default: 3.0</Field.Description>
+                            <Field.Description>Maximum ratio for solar trend adjustment. Higher values allow more aggressive upward solar predictions.</Field.Description>
                         </Field.Root>
                         <Field.Root className="form-group">
                             <Field.Label>Solar Bell Curve Multiplier</Field.Label>
@@ -515,23 +515,26 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                                 type="number"
                                 step="0.1"
                                 min="0"
-                                max="2"
+                                max="1"
                                 value={settings.solarBellCurveMultiplier}
                                 onChange={(e) => handleChange('solarBellCurveMultiplier', parseFloat(e.target.value))}
                             />
-                            <Field.Description>Multiplier for bell curve solar smoothing. 0 disables smoothing entirely. Default: 1.0</Field.Description>
+                            <Field.Description>Multiplier for bell curve solar smoothing. 0 disables smoothing entirely</Field.Description>
                         </Field.Root>
 
-                        {settings.gridExportSolar && settings.solarBellCurveMultiplier > 0.7 && (
-                            <div className="warning-notice">
-                                ⚠️ Solar export is enabled but the bell curve multiplier is high ({settings.solarBellCurveMultiplier}). Since solar readings are less likely curtailed with export on, consider lowering it (e.g. 0.5).
-                            </div>
-                        )}
-                        {!settings.gridExportSolar && settings.solarBellCurveMultiplier < 0.7 && settings.solarBellCurveMultiplier > 0 && (
-                            <div className="warning-notice">
-                                ⚠️ Solar export is disabled but the bell curve multiplier is low ({settings.solarBellCurveMultiplier}). Since solar readings may be curtailed without export, consider raising it (e.g. 1.0).
-                            </div>
-                        )}
+                        <Field.Root className="form-group">
+                            <Field.Label>Solar Fully Charge Headroom (%)</Field.Label>
+                            <Input
+                                id="solarFullyChargeHeadroomBatterySOC"
+                                type="number"
+                                step="1"
+                                value={settings.solarFullyChargeHeadroomBatterySOC}
+                                onChange={(e) => handleChange('solarFullyChargeHeadroomBatterySOC', parseFloat(e.target.value))}
+                            />
+                            <Field.Description>
+                                Battery percentage to leave as headroom during solar charging when export is disabled. Negative values will remove the headroom and ignore solar curtailment.
+                            </Field.Description>
+                        </Field.Root>
 
                         <div className="section-header">
                             <h3>Power History Settings</h3>

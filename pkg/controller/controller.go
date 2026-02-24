@@ -234,6 +234,7 @@ func (c *Controller) Decide(
 	continuousPeakLoadKWH := 0.0
 	var hitDeficitAt time.Time
 	var hitCapacityAt time.Time
+	var hitSolarCapacityAt time.Time
 	var plannedChargeTime time.Time
 	var plannedChargePrice types.Price
 	var plannedChargeCost float64
@@ -284,6 +285,17 @@ func (c *Controller) Decide(
 				slog.Int("simHour", slot.Hour),
 			)
 			hitCapacityAt = slot.TS
+		}
+
+		if slot.HitSolarCapacity && hitSolarCapacityAt.IsZero() {
+			log.Ctx(ctx).DebugContext(
+				ctx,
+				"simulated energy hit solar headroom capacity",
+				slog.Float64("batteryKWH", slot.BatteryKWH),
+				slog.Float64("capacityKWH", capacityKWH),
+				slog.Int("simHour", slot.Hour),
+			)
+			hitSolarCapacityAt = slot.TS
 		}
 
 		if minEnergy == -1 || slot.BatteryKWH < minEnergy {
@@ -476,25 +488,33 @@ func (c *Controller) Decide(
 		// Optimization: If we hit full capacity BEFORE we hit the deficit, then
 		// the current energy we have in the battery is "use it or lose it" effectively,
 		// because we will refill to 100% anyway. So we should NOT Standby to save THIS energy.
-		if !hitCapacityAt.IsZero() && hitCapacityAt.Before(hitDeficitAt) {
+		if (!hitCapacityAt.IsZero() && hitCapacityAt.Before(hitDeficitAt)) || (!hitSolarCapacityAt.IsZero() && hitSolarCapacityAt.Before(hitDeficitAt)) {
+			reason := types.ActionReasonDischargeBeforeCapacityNow
+			loadReason := fmt.Sprintf("Capacity hit at %s before deficit at %s.", hitCapacityAt.Format(time.Kitchen), hitDeficitAt.Format(time.Kitchen))
+
+			if !hitSolarCapacityAt.IsZero() && hitSolarCapacityAt.Before(hitDeficitAt) && (hitCapacityAt.IsZero() || !hitSolarCapacityAt.After(hitCapacityAt)) {
+				reason = types.ActionReasonPreventSolarCurtailment
+				loadReason = fmt.Sprintf("Solar curtailment likely at %s before deficit at %s.", hitSolarCapacityAt.Format(time.Kitchen), hitDeficitAt.Format(time.Kitchen))
+			}
+
 			log.Ctx(ctx).DebugContext(
 				ctx,
 				"deficit predicted but will refill to capacity before then",
 				slog.Time("hitCapacityAt", hitCapacityAt),
+				slog.Time("hitSolarCapacityAt", hitSolarCapacityAt),
 				slog.Time("hitDeficitAt", hitDeficitAt),
+				slog.String("reason", string(reason)),
 			)
-			loadReason := fmt.Sprintf("Capacity hit at %s before deficit at %s.", hitCapacityAt.Format(time.Kitchen), hitDeficitAt.Format(time.Kitchen))
-			return finalizeAction(types.BatteryModeLoad, types.ActionReasonDischargeBeforeCapacityNow, loadReason, nil, hitDeficitAt, hitCapacityAt), nil
+			return finalizeAction(types.BatteryModeLoad, reason, loadReason, nil, hitDeficitAt, hitCapacityAt), nil
 		}
 
 		// We are going to run out. Should we save it?
 		// Check if there is a significantly more expensive time later.
 		// If current price is lower than maxFuturePrice, we should probably save it.
-		currentChargeCost := currentPrice.DollarsPerKWH + currentPrice.GridAddlDollarsPerKWH
-		if currentChargeCost < maxFutureGridChargeCost {
+		if gridChargeNowCost < maxFutureGridChargeCost {
 			// if we have a planned charge time, we should record as waiting to charge
 			if !plannedChargeTime.IsZero() && plannedChargeTime.After(now) && plannedChargeTime.Before(maxFutureGridChargeTime) {
-				standbyReason := fmt.Sprintf("Waiting to charge at %s ($%.3f < $%.3f).", plannedChargeTime.Format(time.Kitchen), plannedChargeCost, currentChargeCost)
+				standbyReason := fmt.Sprintf("Waiting to charge at %s ($%.3f < $%.3f).", plannedChargeTime.Format(time.Kitchen), plannedChargeCost, gridChargeNowCost)
 				log.Ctx(ctx).DebugContext(
 					ctx,
 					"waiting to charge",
@@ -502,12 +522,12 @@ func (c *Controller) Decide(
 					slog.Time("plannedChargeTime", plannedChargeTime),
 					slog.Float64("plannedChargeCost", plannedChargeCost),
 					slog.Float64("maxFutureGridChargeCost", maxFutureGridChargeCost),
-					slog.Float64("currentChargeCost", currentChargeCost),
+					slog.Float64("gridChargeNowCost", gridChargeNowCost),
 				)
 				return finalizeAction(types.BatteryModeStandby, types.ActionReasonWaitingToCharge, standbyReason, &plannedChargePrice, hitDeficitAt, hitCapacityAt), nil
 			}
 
-			standbyReason := fmt.Sprintf("Deficit predicted at %s and higher prices at %s ($%.3f < $%.3f).", hitDeficitAt.Format(time.Kitchen), maxFutureGridChargeTime.Format(time.Kitchen), currentChargeCost, maxFutureGridChargeCost)
+			standbyReason := fmt.Sprintf("Deficit predicted at %s and higher prices at %s ($%.3f < $%.3f).", hitDeficitAt.Format(time.Kitchen), maxFutureGridChargeTime.Format(time.Kitchen), gridChargeNowCost, maxFutureGridChargeCost)
 			log.Ctx(ctx).DebugContext(
 				ctx,
 				"deficit predicted, saving for peak",

@@ -237,8 +237,10 @@ func TestComEd(t *testing.T) {
 					UtilityRate:     "comed_besh",
 					AdditionalFeesPeriods: []types.UtilityAdditionalFeesPeriod{
 						{
-							HourStart:      9,
-							HourEnd:        17,
+							UtilityPeriod: types.UtilityPeriod{
+								HourStart: 9,
+								HourEnd:   17,
+							},
 							DollarsPerKWH:  0.03,
 							GridAdditional: true,
 						},
@@ -261,8 +263,10 @@ func TestComEd(t *testing.T) {
 					UtilityRate:     "comed_besh",
 					AdditionalFeesPeriods: []types.UtilityAdditionalFeesPeriod{
 						{
-							HourStart:      12,
-							HourEnd:        17,
+							UtilityPeriod: types.UtilityPeriod{
+								HourStart: 12,
+								HourEnd:   17,
+							},
 							DollarsPerKWH:  0.03,
 							GridAdditional: true,
 						},
@@ -285,8 +289,10 @@ func TestComEd(t *testing.T) {
 					UtilityRate:     "comed_besh",
 					AdditionalFeesPeriods: []types.UtilityAdditionalFeesPeriod{
 						{
-							HourStart:      0,
-							HourEnd:        24,
+							UtilityPeriod: types.UtilityPeriod{
+								HourStart: 0,
+								HourEnd:   24,
+							},
 							DollarsPerKWH:  0.01,
 							GridAdditional: false, // Modifies base price
 						},

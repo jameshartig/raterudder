@@ -832,4 +832,26 @@ describe('Dashboard', () => {
             expect(screen.getAllByText(/65\.0%/).length).toBeGreaterThan(0);
         });
     });
+
+    it('renders prevent solar curtailment reason text', async () => {
+        const capacityTime = new Date('2026-02-15T18:00:00').toISOString();
+        const actions = [{
+            reason: ActionReason.PreventSolarCurtailment,
+            description: 'Solar curtailment likely',
+            timestamp: new Date().toISOString(),
+            batteryMode: -1, // Load
+            solarMode: 0,
+            capacityAt: capacityTime,
+        }];
+        (fetchActions as any).mockResolvedValue(actions);
+
+        renderWithRouter(<Dashboard />);
+
+        await waitFor(() => {
+            expect(screen.getByText(/Solar generation will exceed battery capacity/)).toBeInTheDocument();
+            expect(screen.getByText(/Using the battery now to create headroom/)).toBeInTheDocument();
+            // Should show capacity tag
+            expect(screen.getByText(/Full by:/)).toBeInTheDocument();
+        });
+    });
 });

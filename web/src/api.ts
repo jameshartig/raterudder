@@ -31,6 +31,7 @@ export const ActionReason = {
     HasAlarms: 'hasAlarms',
     WaitingToCharge: 'waitingToCharge',
     ChargeSurvivePeak: 'chargeSurvivePeak',
+    PreventSolarCurtailment: 'preventSolarCurtailment',
     // deprecated
     DeficitSave: 'deficitSave',
 } as const;
@@ -199,6 +200,7 @@ export interface Settings {
     gridExportBatteries: boolean;
     solarTrendRatioMax: number;
     solarBellCurveMultiplier: number;
+    solarFullyChargeHeadroomBatterySOC: number;
     utilityProvider: string;
     utilityRate: string;
     utilityRateOptions: UtilityRateOptions;

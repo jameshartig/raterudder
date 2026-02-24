@@ -27,6 +27,7 @@ type SimHour struct {
 	TotalBatteryDeficitKWH  float64     `json:"totalBatteryDeficitKWH"`
 	TodaySolarTrend         float64     `json:"todaySolarTrend"`
 	HitCapacity             bool        `json:"hitCapacity"`
+	HitSolarCapacity        bool        `json:"hitSolarCapacity"`
 	HitDeficit              bool        `json:"hitDeficit"`
 	Price                   types.Price `json:"price"`
 }
@@ -81,6 +82,7 @@ func (c *Controller) SimulateState(
 
 	var hitDeficit bool
 	var hitCapacity bool
+	var hitSolarCapacity bool
 	simTime := now
 	for i := 0; i < 24; i++ {
 		h := simTime.Hour()
@@ -88,6 +90,8 @@ func (c *Controller) SimulateState(
 		solarOppCost := price.DollarsPerKWH
 		if !settings.GridExportSolar {
 			solarOppCost = 0
+		} else if settings.UtilityRateOptions.NetMetering {
+			solarOppCost = price.DollarsPerKWH + price.GridAddlDollarsPerKWH
 		}
 
 		profile := model[h]
@@ -125,6 +129,17 @@ func (c *Controller) SimulateState(
 			}
 			// Solar > Load: We charge battery
 			simEnergy -= clampedNet
+
+			// If solar export is disabled, we might be curtailed if we hit capacity.
+			if !settings.GridExportSolar && predictedAvgSolar > 0.1 {
+				if settings.SolarFullyChargeHeadroomBatterySOC > -99.0 {
+					solarCapacityKWH := capacityKWH * (1.0 - settings.SolarFullyChargeHeadroomBatterySOC/100.0)
+					if simEnergy > solarCapacityKWH {
+						hitSolarCapacity = true
+					}
+				}
+			}
+
 			// make sure we don't simulate charging more than it can hold
 			if simEnergy > capacityKWH {
 				simEnergy = capacityKWH
@@ -153,6 +168,7 @@ func (c *Controller) SimulateState(
 			TotalBatteryDeficitKWH:  deficitKWH,
 			TodaySolarTrend:         currentSolarTrend,
 			HitCapacity:             hitCapacity,
+			HitSolarCapacity:        hitSolarCapacity,
 			HitDeficit:              hitDeficit,
 			Price:                   price,
 		})

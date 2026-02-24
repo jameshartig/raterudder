@@ -74,6 +74,13 @@ func ComEdUtilityInfo() types.UtilityProviderInfo {
 						Description: "Enable if you are enrolled in ComEd's Delivery Time-of-Day pricing. 30%-47% cheaper than fixed delivery rates in off-peak hours but 2x more expensive in on-peak hours (1pm-7pm).",
 						Default:     false,
 					},
+					{
+						Field:       "netMetering",
+						Name:        "Pre-2025 Full Net Metering",
+						Type:        types.UtilityOptionTypeSwitch,
+						Description: "Enable if you are grandfathered into ComEd's pre-2025 full net metering program. You are credited for your supply and delivery charges at the full retail rate.",
+						Default:     false,
+					},
 				},
 			},
 		},
@@ -616,10 +623,13 @@ func (s *SiteComEd) getDefaultAdditionalFees(ts time.Time, ro types.UtilityRateO
 
 	fees := []types.UtilityAdditionalFeesPeriod{
 		{
-			Start:          time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
-			End:            time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
-			HourStart:      0,
-			HourEnd:        24,
+			UtilityPeriod: types.UtilityPeriod{
+				Start:       time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
+				End:         time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+				HourStart:   0,
+				HourEnd:     24,
+				LocationPtr: ctLocation,
+			},
 			GridAdditional: true,
 			DollarsPerKWH:  iedtAdj,
 			Description:    "IL Electricity Distribution Charge - IEDT & ADJ",
@@ -644,10 +654,13 @@ func (s *SiteComEd) getDefaultAdditionalFees(ts time.Time, ro types.UtilityRateO
 		dfcAdj := dfc*(iduf+draf+edaf+tpaf+rbafd) + dgrad
 
 		return append(fees, types.UtilityAdditionalFeesPeriod{
-			Start:          time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
-			End:            time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
-			HourStart:      0,
-			HourEnd:        24,
+			UtilityPeriod: types.UtilityPeriod{
+				Start:       time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
+				End:         time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+				HourStart:   0,
+				HourEnd:     24,
+				LocationPtr: ctLocation,
+			},
 			GridAdditional: true,
 			DollarsPerKWH:  dfcAdj,
 			Description:    "Distribution Facilities Charge - DFC & ADJ",
@@ -691,50 +704,65 @@ func (s *SiteComEd) getDefaultAdditionalFees(ts time.Time, ro types.UtilityRateO
 		return append(fees, []types.UtilityAdditionalFeesPeriod{
 			// night (midnight - 6am)
 			{
-				Start:          time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
-				End:            time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
-				HourStart:      0,
-				HourEnd:        6,
+				UtilityPeriod: types.UtilityPeriod{
+					Start:       time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
+					End:         time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+					HourStart:   0,
+					HourEnd:     6,
+					LocationPtr: ctLocation,
+				},
 				GridAdditional: true,
 				DollarsPerKWH:  nightDFCAdj,
 				Description:    "TOU Distribution Facilities Charge (Night) - DFC & ADJ",
 			},
 			// morning (6am - 1pm)
 			{
-				Start:          time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
-				End:            time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
-				HourStart:      6,
-				HourEnd:        13,
+				UtilityPeriod: types.UtilityPeriod{
+					Start:       time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
+					End:         time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+					HourStart:   6,
+					HourEnd:     13,
+					LocationPtr: ctLocation,
+				},
 				GridAdditional: true,
 				DollarsPerKWH:  morningDFCAdj,
 				Description:    "TOU Distribution Facilities Charge (Morning) - DFC & ADJ",
 			},
 			// mid day (1pm - 7pm)
 			{
-				Start:          time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
-				End:            time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
-				HourStart:      13,
-				HourEnd:        19,
+				UtilityPeriod: types.UtilityPeriod{
+					Start:       time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
+					End:         time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+					HourStart:   13,
+					HourEnd:     19,
+					LocationPtr: ctLocation,
+				},
 				GridAdditional: true,
 				DollarsPerKWH:  midDayDFCAdj,
 				Description:    "TOU Distribution Facilities Charge (Mid Day) - DFC & ADJ",
 			},
 			// evening (7pm - 9pm)
 			{
-				Start:          time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
-				End:            time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
-				HourStart:      19,
-				HourEnd:        21,
+				UtilityPeriod: types.UtilityPeriod{
+					Start:       time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
+					End:         time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+					HourStart:   19,
+					HourEnd:     21,
+					LocationPtr: ctLocation,
+				},
 				GridAdditional: true,
 				DollarsPerKWH:  eveningDFCAdj,
 				Description:    "TOU Distribution Facilities Charge (Evening) - DFC & ADJ",
 			},
 			// night (9pm - midnight)
 			{
-				Start:          time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
-				End:            time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
-				HourStart:      21,
-				HourEnd:        24,
+				UtilityPeriod: types.UtilityPeriod{
+					Start:       time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
+					End:         time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+					HourStart:   21,
+					HourEnd:     24,
+					LocationPtr: ctLocation,
+				},
 				GridAdditional: true,
 				DollarsPerKWH:  nightDFCAdj,
 				Description:    "TOU Distribution Facilities Charge (Night) - DFC & ADJ",

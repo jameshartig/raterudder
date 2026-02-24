@@ -589,4 +589,63 @@ func TestSimulateState(t *testing.T) {
 		// Verify SolarTrend property is explicitly 1.0
 		assert.Equal(t, 1.0, day2Hour.TodaySolarTrend, "Day 2 SolarTrend should be explicitly 1.0")
 	})
+
+	t.Run("SolarOppCostNetMetering", func(t *testing.T) {
+		c := NewController()
+		ctx := context.Background()
+		now := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
+
+		currentStatus := types.SystemStatus{
+			BatteryCapacityKWH: 10.0,
+			BatterySOC:         50.0,
+			Timestamp:          now,
+		}
+
+		price := types.Price{
+			DollarsPerKWH:         0.10,
+			GridAddlDollarsPerKWH: 0.05,
+			TSStart:               now,
+		}
+
+		tests := []struct {
+			name            string
+			gridExportSolar bool
+			netMetering     bool
+			expectedOppCost float64
+		}{
+			{
+				name:            "Export Disabled",
+				gridExportSolar: false,
+				netMetering:     false,
+				expectedOppCost: 0.0,
+			},
+			{
+				name:            "Export Enabled No Net Metering",
+				gridExportSolar: true,
+				netMetering:     false,
+				expectedOppCost: 0.10, // Just DollarsPerKWH
+			},
+			{
+				name:            "Export Enabled With Net Metering",
+				gridExportSolar: true,
+				netMetering:     true,
+				expectedOppCost: 0.15, // DollarsPerKWH + GridAddlDollarsPerKWH
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				settings := types.Settings{
+					GridExportSolar: tt.gridExportSolar,
+					UtilityRateOptions: types.UtilityRateOptions{
+						NetMetering: tt.netMetering,
+					},
+				}
+
+				simData := c.SimulateState(ctx, now, currentStatus, price, nil, nil, settings)
+				assert.NotEmpty(t, simData)
+				assert.InDelta(t, tt.expectedOppCost, simData[0].SolarOppDollarsPerKWH, 0.001)
+			})
+		}
+	})
 }

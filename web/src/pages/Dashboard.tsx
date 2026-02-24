@@ -156,6 +156,13 @@ const getReasonText = (action: Action): string => {
             if (delta !== null) parts.push(`Estimated savings: ${formatPrice(delta)}/kWh.`);
             return parts.concat(suffixParts).join(' ');
         }
+        case ActionReason.PreventSolarCurtailment: {
+            const parts = [
+                `Solar generation will exceed battery capacity${capacityTimeStr ? ` by ${capacityTimeStr}` : ''}.`,
+                `Using the battery now to create headroom so we don't have to curtail solar production later.`,
+            ];
+            return parts.concat(suffixParts).join(' ');
+        }
         case ActionReason.ArbitrageSave: {
             // Rule 4 peak: current price is at or above the future max — discharge now
             const parts = [

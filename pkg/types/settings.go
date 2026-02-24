@@ -58,6 +58,12 @@ type Settings struct {
 	// 0 disables bell curve smoothing entirely. 1.0 = full weight.
 	SolarBellCurveMultiplier float64 `json:"solarBellCurveMultiplier"`
 
+	// Headroom for solar fully charging when export is disabled (in battery SOC %).
+	// A value of 5 means we ensure we have 95% capacity.
+	// A value of -5 means we hit capacity during the solar charging period.
+	// Setting it to something like -100 will effectively disable the feature.
+	SolarFullyChargeHeadroomBatterySOC float64 `json:"solarFullyChargeHeadroomBatterySOC"`
+
 	// Credentials for external systems (encrypted)
 	EncryptedCredentials []byte `json:"encryptedCredentials,omitempty"`
 }

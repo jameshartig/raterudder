@@ -47,6 +47,7 @@ const (
 	ActionReasonHasAlarms                  ActionReason = "hasAlarms"
 	ActionReasonWaitingToCharge            ActionReason = "waitingToCharge"
 	ActionReasonChargeSurvivePeak          ActionReason = "chargeSurvivePeak"
+	ActionReasonPreventSolarCurtailment    ActionReason = "preventSolarCurtailment"
 )
 
 // Action represents a control decision made by the system.

@@ -66,7 +66,7 @@ func TestHandleListUtilities(t *testing.T) {
 		rate := comedInfo.Rates[0]
 		assert.Equal(t, "comed_besh", rate.ID)
 		assert.NotEmpty(t, rate.Name)
-		require.Len(t, rate.Options, 2)
+		require.Len(t, rate.Options, 3)
 
 		// rateClass option
 		rateClassOpt := rate.Options[0]
@@ -79,6 +79,12 @@ func TestHandleListUtilities(t *testing.T) {
 		assert.Equal(t, "variableDeliveryRate", dtodOpt.Field)
 		assert.Equal(t, types.UtilityOptionTypeSwitch, dtodOpt.Type)
 		assert.NotEmpty(t, dtodOpt.Description)
+
+		// netMetering option
+		nmOpt := rate.Options[2]
+		assert.Equal(t, "netMetering", nmOpt.Field)
+		assert.Equal(t, types.UtilityOptionTypeSwitch, nmOpt.Type)
+		assert.NotEmpty(t, nmOpt.Description)
 	})
 
 	t.Run("All options have required fields", func(t *testing.T) {

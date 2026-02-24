@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // UtilityProviderInfo provides metadata about a utility provider.
 type UtilityProviderInfo struct {
@@ -49,8 +52,8 @@ type Price struct {
 	// DollarsPerKWH is the base cost of electricity in the time interval.
 	DollarsPerKWH float64 `json:"dollarsPerKWH"`
 
-	// GridAddlDollarsPerKWH is the cost of electricity delivered to the home in the time interval.
-	// This is added to the base price for grid use.
+	// GridAddlDollarsPerKWH is the cost of electricity delivered to the home in
+	// the time interval. This is added to the base price for grid use.
 	GridAddlDollarsPerKWH float64 `json:"gridUseDollarsPerKWH"`
 
 	SampleCount int `json:"-"`
@@ -60,15 +63,60 @@ type Price struct {
 type UtilityRateOptions struct {
 	RateClass            string `json:"rateClass"`
 	VariableDeliveryRate bool   `json:"variableDeliveryRate"`
+	NetMetering          bool   `json:"netMetering"`
+}
+
+// UtilityPeriod defines a particular schedule for some utility rate or fee
+type UtilityPeriod struct {
+	Start         time.Time      `json:"start"`
+	End           time.Time      `json:"end"`
+	HourStart     int            `json:"hourStart"`
+	HourEnd       int            `json:"hourEnd"`
+	DaysOfTheWeek []time.Weekday `json:"daysOfTheWeek"`
+	Location      string         `json:"location"`
+	LocationPtr   *time.Location `json:"-"`
+}
+
+// Contains checks if a time is within the period.
+func (p *UtilityPeriod) Contains(t time.Time) (bool, error) {
+	if p.LocationPtr != nil {
+		t = t.In(p.LocationPtr)
+	} else if p.Location != "" {
+		loc, err := time.LoadLocation(p.Location)
+		if err != nil {
+			return false, fmt.Errorf("failed to load location %s: %w", p.Location, err)
+		}
+		t = t.In(loc)
+	}
+	if !p.Start.IsZero() && t.Before(p.Start) {
+		return false, nil
+	}
+	if !p.End.IsZero() && t.After(p.End) {
+		return false, nil
+	}
+	if h := t.Hour(); h < p.HourStart || h >= p.HourEnd {
+		return false, nil
+	}
+	if len(p.DaysOfTheWeek) > 0 {
+		var found bool
+		dow := t.Weekday()
+		for _, d := range p.DaysOfTheWeek {
+			if d == dow {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // UtilityAdditionalFeesPeriod represents a period of time with an additional fee.
 type UtilityAdditionalFeesPeriod struct {
-	Start          time.Time `json:"start"`
-	End            time.Time `json:"end"`
-	HourStart      int       `json:"hourStart"`
-	HourEnd        int       `json:"hourEnd"`
-	DollarsPerKWH  float64   `json:"dollarsPerKWH"`
-	GridAdditional bool      `json:"gridAdditional"`
-	Description    string    `json:"description"`
+	UtilityPeriod
+	DollarsPerKWH  float64 `json:"dollarsPerKWH"`
+	GridAdditional bool    `json:"gridAdditional"`
+	Description    string  `json:"description"`
 }
