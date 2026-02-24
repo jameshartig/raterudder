@@ -36,7 +36,9 @@ type Settings struct {
 	MinArbitrageDifferenceDollarsPerKWH    float64                       `json:"minArbitrageDifferenceDollarsPerKWH"`
 	MinDeficitPriceDifferenceDollarsPerKWH float64                       `json:"minDeficitPriceDifferenceDollarsPerKWH"`
 	AdditionalFeesPeriods                  []UtilityAdditionalFeesPeriod `json:"additionalFeesPeriods"`
-	// TODO: add a setting for solar credit value (in $/kWh)
+
+	// How to value solar exports when net metering credits are active. Valid values: "", "lowest", "highest", "none". Default is "lowest".
+	SolarNetMeteringCreditsValue string `json:"solarNetMeteringCreditsValue"`
 
 	// The minimum battery SOC should be charged to at all times.
 	MinBatterySOC float64 `json:"minBatterySOC"`

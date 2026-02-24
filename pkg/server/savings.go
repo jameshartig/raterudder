@@ -62,8 +62,8 @@ func (s *Server) handleHistorySavings(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
-	// Set Cache-Control (copying pattern from history.go)
-	today := time.Now().Truncate(24 * time.Hour)
+	// Set Cache-Control
+	today := truncateDay(time.Now())
 	if end.Before(today) {
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 	} else {

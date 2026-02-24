@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"sync"
@@ -18,26 +19,6 @@ import (
 	"github.com/raterudder/raterudder/pkg/types"
 )
 
-var (
-	// PJM uses Eastern Time
-	etLocation = func() *time.Location {
-		loc, err := time.LoadLocation("America/New_York")
-		if err != nil {
-			panic(fmt.Errorf("failed to load eastern time location: %w", err))
-		}
-		return loc
-	}()
-
-	// ComEd uses Central Time
-	ctLocation = func() *time.Location {
-		loc, err := time.LoadLocation("America/Chicago")
-		if err != nil {
-			panic(fmt.Errorf("failed to load central time location: %w", err))
-		}
-		return loc
-	}()
-)
-
 const (
 	ComEdRateClassSingleFamilyResidenceWithoutElectricSpaceHeat = "singleFamilyWithoutElectricHeat"
 	ComEdRateClassMultiFamilyResidenceWithoutElectricSpaceHeat  = "multiFamilyWithoutElectricHeat"
@@ -45,8 +26,8 @@ const (
 	ComEdRateClassMultiFamilyResidenceWithElectricSpaceHeat     = "multiFamilyElectricHeat"
 )
 
-// ComEdUtilityInfo returns metadata about ComEd and its supported rate plans.
-func ComEdUtilityInfo() types.UtilityProviderInfo {
+// comEdUtilityInfo returns metadata about ComEd and its supported rate plans.
+func comEdUtilityInfo() types.UtilityProviderInfo {
 	return types.UtilityProviderInfo{
 		ID:   "comed",
 		Name: "ComEd",
@@ -75,7 +56,7 @@ func ComEdUtilityInfo() types.UtilityProviderInfo {
 						Default:     false,
 					},
 					{
-						Field:       "netMetering",
+						Field:       "netMeteringCredits",
 						Name:        "Pre-2025 Full Net Metering",
 						Type:        types.UtilityOptionTypeSwitch,
 						Description: "Enable if you are grandfathered into ComEd's pre-2025 full net metering program. You are credited for your supply and delivery charges at the full retail rate.",
@@ -87,7 +68,8 @@ func ComEdUtilityInfo() types.UtilityProviderInfo {
 	}
 }
 
-const pjmComedPNodeID = "33092371"
+// COMED_RESID_AGG
+const pjmComedPNodeID = "116472935"
 
 // BaseComEdHourly implements the UtilityPrices interface for ComEd Hourly Energy Pricing (BESH).
 type BaseComEdHourly struct {
@@ -117,27 +99,25 @@ func configuredComEdHourly() *BaseComEdHourly {
 
 	lflag.Do(func() {
 		c.apiURL = *apiURL
+		if c.apiURL == "" {
+			log.Ctx(context.Background()).Error("comed-api-url is required")
+			os.Exit(1)
+		}
+		if _, err := url.Parse(c.apiURL); err != nil {
+			log.Ctx(context.Background()).Error("failed to parse comed url", slog.String("url", c.apiURL), slog.Any("error", err))
+			os.Exit(1)
+		}
 		c.pjmAPIURL = *pjmURL
 		c.pjmAPIKey = *pjmKey
+		if c.pjmAPIURL != "" {
+			if _, err := url.Parse(c.pjmAPIURL); err != nil {
+				log.Ctx(context.Background()).Error("failed to parse pjm url", slog.String("url", c.pjmAPIURL), slog.Any("error", err))
+				os.Exit(1)
+			}
+		}
 	})
 
 	return c
-}
-
-// Validate ensures the configuration is valid.
-func (c *BaseComEdHourly) Validate() error {
-	if c.apiURL == "" {
-		return fmt.Errorf("comed-api-url is required")
-	}
-	if _, err := url.Parse(c.apiURL); err != nil {
-		return fmt.Errorf("failed to parse comed url (%s): %w", c.apiURL, err)
-	}
-	if c.pjmAPIURL != "" {
-		if _, err := url.Parse(c.pjmAPIURL); err != nil {
-			return fmt.Errorf("failed to parse pjm url (%s): %w", c.pjmAPIURL, err)
-		}
-	}
-	return nil
 }
 
 // apiResponse represents the structure of the JSON returned by ComEd.
@@ -146,8 +126,8 @@ type comedPriceEntry struct {
 	Price     string `json:"price"`
 }
 
-// fetchPrices retrieves prices from the ComEd API with specific parameters.
-// It caches the result for 5 minutes.
+// getCachedCurrentPrices retrieves prices from the ComEd API with specific
+// parameters and caches the result for 5 minutes.
 func (c *BaseComEdHourly) getCachedCurrentPrices(ctx context.Context) ([]types.Price, error) {
 	now := time.Now().In(ctLocation)
 
@@ -531,42 +511,8 @@ func (c *BaseComEdHourly) fetchPJMDayAhead(ctx context.Context, pnodeID string) 
 	return prices, nil
 }
 
-// SiteComEd wraps BaseComEd to apply site-specific settings and fees.
-type SiteComEd struct {
-	base     UtilityPrices
-	mu       sync.Mutex
-	siteID   string
-	settings types.Settings
-}
-
-// ApplySettings implements the Utility interface
-func (s *SiteComEd) ApplySettings(ctx context.Context, settings types.Settings) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if settings.UtilityProvider != "comed" {
-		return fmt.Errorf("invalid utility provider for ComEd: %s", settings.UtilityProvider)
-	}
-	if settings.UtilityRate != "comed_besh" {
-		return fmt.Errorf("invalid utility rate for ComEd: %s", settings.UtilityRate)
-	}
-
-	switch settings.UtilityRateOptions.RateClass {
-	case ComEdRateClassSingleFamilyResidenceWithoutElectricSpaceHeat,
-		ComEdRateClassMultiFamilyResidenceWithoutElectricSpaceHeat,
-		ComEdRateClassSingleFamilyResidenceWithElectricSpaceHeat,
-		ComEdRateClassMultiFamilyResidenceWithElectricSpaceHeat:
-		break
-	default:
-		return fmt.Errorf("invalid rate class for ComEd: %s", settings.UtilityRateOptions.RateClass)
-	}
-
-	s.settings = settings
-	return nil
-}
-
-func (s *SiteComEd) getDefaultAdditionalFees(ts time.Time, ro types.UtilityRateOptions) ([]types.UtilityAdditionalFeesPeriod, error) {
-	// TODO: use the ts to decide to use 2026 or 2027 prices
+func getComEdAdditionalFees(ro types.UtilityRateOptions) ([]types.UtilityAdditionalFeesPeriod, error) {
+	// TODO: include 2027 prices
 
 	// The incremental distribution uncollectible cost factor applicable for residential
 	// retail customers (IDUFR) equals the applicable IDUFR listed in Informational
@@ -596,7 +542,7 @@ func (s *SiteComEd) getDefaultAdditionalFees(ts time.Time, ro types.UtilityRateO
 	case ComEdRateClassMultiFamilyResidenceWithElectricSpaceHeat:
 		rbafd = 0.064486
 	default:
-		return nil, fmt.Errorf("unknown rate class: %s", ro.RateClass)
+		return nil, fmt.Errorf("unknown ComEd rate class: %s", ro.RateClass)
 	}
 
 	// DGRAD = The applicable Distributed Generation (DG) Rebate Adjustment listed in Informational
@@ -615,7 +561,7 @@ func (s *SiteComEd) getDefaultAdditionalFees(ts time.Time, ro types.UtilityRateO
 	case ComEdRateClassMultiFamilyResidenceWithElectricSpaceHeat:
 		iedt = 0.00124
 	default:
-		return nil, fmt.Errorf("unknown rate class: %s", ro.RateClass)
+		return nil, fmt.Errorf("unknown ComEd rate class: %s", ro.RateClass)
 	}
 	// IEDT & ADJ = IEDT x (IDUF + RBAFD)
 	//1.082178
@@ -648,7 +594,7 @@ func (s *SiteComEd) getDefaultAdditionalFees(ts time.Time, ro types.UtilityRateO
 		case ComEdRateClassMultiFamilyResidenceWithElectricSpaceHeat:
 			dfc = 0.02576
 		default:
-			return nil, fmt.Errorf("unknown rate class: %s", ro.RateClass)
+			return nil, fmt.Errorf("unknown ComEd rate class: %s", ro.RateClass)
 		}
 		// DFC & ADJ = DFC x (IDUF + DRAF + EDAF + TPAF + RBAFD) + DGRAD
 		dfcAdj := dfc*(iduf+draf+edaf+tpaf+rbafd) + dgrad
@@ -694,7 +640,7 @@ func (s *SiteComEd) getDefaultAdditionalFees(ts time.Time, ro types.UtilityRateO
 			eveningDFC = 0.01823
 			nightDFC = 0.01512
 		default:
-			return nil, fmt.Errorf("unknown rate class: %s", ro.RateClass)
+			return nil, fmt.Errorf("unknown ComEd rate class: %s", ro.RateClass)
 		}
 		// DFC & ADJ = DFC x (IDUF + DRAF + EDAF + TPAF + RBAFD) + DGRAD
 		morningDFCAdj := morningDFC*(iduf+draf+edaf+tpaf+rbafd) + dgrad
@@ -769,83 +715,4 @@ func (s *SiteComEd) getDefaultAdditionalFees(ts time.Time, ro types.UtilityRateO
 			},
 		}...), nil
 	}
-}
-
-func (s *SiteComEd) getPeriods(ts time.Time) ([]types.UtilityAdditionalFeesPeriod, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if len(s.settings.AdditionalFeesPeriods) == 0 {
-		return s.getDefaultAdditionalFees(ts, s.settings.UtilityRateOptions)
-	}
-	return s.settings.AdditionalFeesPeriods, nil
-}
-
-func (s *SiteComEd) applyFees(p types.Price) (types.Price, error) {
-	periods, err := s.getPeriods(p.TSStart)
-	if err != nil {
-		return p, err
-	}
-	for _, period := range periods {
-		// Calculate time-of-day in minutes for easier comparison if needed, or just use hour
-		// Check date range
-		if !period.Start.IsZero() && p.TSStart.Before(period.Start) {
-			continue
-		}
-		if !period.End.IsZero() && p.TSStart.After(period.End) {
-			continue
-		}
-
-		// Check hour range (inclusive start, exclusive end)
-		// Assuming p.TSStart is the start of the hour
-		h := p.TSStart.In(ctLocation).Hour()
-		if h < period.HourStart || h >= period.HourEnd {
-			continue
-		}
-
-		// Apply fee
-		if period.GridAdditional {
-			p.GridUseDollarsPerKWH += period.DollarsPerKWH
-		} else {
-			p.DollarsPerKWH += period.DollarsPerKWH
-		}
-	}
-	return p, nil
-}
-
-func (s *SiteComEd) GetConfirmedPrices(ctx context.Context, start, end time.Time) ([]types.Price, error) {
-	prices, err := s.base.GetConfirmedPrices(ctx, start, end)
-	if err != nil {
-		return nil, err
-	}
-	for i := range prices {
-		prices[i], err = s.applyFees(prices[i])
-		if err != nil {
-			return nil, err
-		}
-	}
-	return prices, nil
-}
-
-func (s *SiteComEd) GetCurrentPrice(ctx context.Context) (types.Price, error) {
-	p, err := s.base.GetCurrentPrice(ctx)
-	if err != nil {
-		return types.Price{}, err
-	}
-	return s.applyFees(p)
-}
-
-func (s *SiteComEd) GetFuturePrices(ctx context.Context) ([]types.Price, error) {
-	prices, err := s.base.GetFuturePrices(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]types.Price, len(prices))
-	for i, p := range prices {
-		out[i], err = s.applyFees(p)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
 }

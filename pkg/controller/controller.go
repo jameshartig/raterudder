@@ -43,7 +43,11 @@ func (c *Controller) Decide(
 		slog.Float64("currentPrice", currentPrice.DollarsPerKWH),
 	)
 
-	now := time.Now().In(currentStatus.Timestamp.Location())
+	now := currentStatus.Timestamp
+	if now.IsZero() {
+		now = time.Now()
+	}
+	now = now.In(currentStatus.Timestamp.Location())
 
 	solarMode := types.SolarModeAny
 	if !settings.GridExportSolar {

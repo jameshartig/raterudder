@@ -290,10 +290,8 @@ func (s *Server) updatePriceHistory(ctx context.Context, siteID string, provider
 
 	// Loop day by day
 	for t := syncStart; t.Before(now); t = t.Add(24 * time.Hour) {
+		// always fetch to the end of the day even if it's in the future
 		end := t.Add(24 * time.Hour)
-		if end.After(now) {
-			end = now
-		}
 
 		log.Ctx(ctx).DebugContext(ctx, "syncing price history batch", slog.Time("start", t), slog.Time("end", end))
 		newPrices, err := provider.GetConfirmedPrices(ctx, t, end)

@@ -80,18 +80,68 @@ func (c *Controller) SimulateState(
 	todaySolarTrend := c.calculateSolarTrend(ctx, now, history, model, settings)
 	log.Ctx(ctx).DebugContext(ctx, "solar trend calculated", slog.Float64("trend", todaySolarTrend))
 
+	// Find the maximum and minimum future grid charge cost within the 24h window for net metering valuation
+	maxFutureGridChargeCost := currentPrice.DollarsPerKWH + currentPrice.GridUseDollarsPerKWH
+	minFutureGridChargeCost := maxFutureGridChargeCost
+	for _, fp := range futurePrices {
+		cost := fp.DollarsPerKWH + fp.GridUseDollarsPerKWH
+		if cost > maxFutureGridChargeCost {
+			maxFutureGridChargeCost = cost
+		}
+		if cost < minFutureGridChargeCost {
+			minFutureGridChargeCost = cost
+		}
+	}
+
 	var hitDeficit bool
 	var hitCapacity bool
 	var hitSolarCapacity bool
 	simTime := now
-	for i := 0; i < 24; i++ {
+
+	simHours := 24
+	if len(futurePrices) > 0 {
+		var lastFuturePriceTime time.Time
+		for _, fp := range futurePrices {
+			end := fp.TSEnd
+			if end.IsZero() {
+				end = fp.TSStart.Add(time.Hour)
+			}
+			if end.After(lastFuturePriceTime) {
+				lastFuturePriceTime = end
+			}
+		}
+		if !lastFuturePriceTime.IsZero() && lastFuturePriceTime.After(now) {
+			hoursUntilEnd := int(math.Ceil(lastFuturePriceTime.Sub(now).Hours()))
+			if hoursUntilEnd > 0 && hoursUntilEnd < 24 {
+				simHours = hoursUntilEnd
+				log.Ctx(ctx).DebugContext(
+					ctx,
+					"simulation set to stop when running out of prices",
+					slog.Int("simHours", simHours),
+					slog.Time("lastFuturePriceTime", lastFuturePriceTime),
+				)
+			}
+		}
+	}
+
+	for i := 0; i < simHours; i++ {
 		h := simTime.Hour()
 		price := getPriceAt(simTime)
+		gridChargeCost := price.DollarsPerKWH + price.GridUseDollarsPerKWH
 		solarOppCost := price.DollarsPerKWH
+
 		if !settings.GridExportSolar {
 			solarOppCost = 0
-		} else if settings.UtilityRateOptions.NetMetering {
-			solarOppCost = price.DollarsPerKWH + price.GridUseDollarsPerKWH
+		} else if settings.UtilityRateOptions.NetMeteringCredits {
+			switch settings.SolarNetMeteringCreditsValue {
+			case "highest":
+				solarOppCost = maxFutureGridChargeCost
+			case "none":
+				solarOppCost = 0
+			default:
+				// Default to conservative value ("lowest")
+				solarOppCost = minFutureGridChargeCost
+			}
 		}
 
 		profile := model[h]
@@ -157,7 +207,7 @@ func (c *Controller) SimulateState(
 			Hour:                    h,
 			NetLoadSolarKWH:         netLoadSolar,
 			ClampedNetLoadSolarKWH:  clampedNet,
-			GridChargeDollarsPerKWH: price.DollarsPerKWH + price.GridUseDollarsPerKWH,
+			GridChargeDollarsPerKWH: gridChargeCost,
 			SolarOppDollarsPerKWH:   solarOppCost,
 			AvgHomeLoadKWH:          profile.avgHomeLoadKWH,
 			PredictedSolarKWH:       predictedAvgSolar,

@@ -10,6 +10,8 @@ import './Settings.css';
 
 const Settings = ({ siteID }: { siteID?: string }) => {
     const [settings, setSettings] = useState<SettingsType | null>(null);
+    const [isUtilityDirty, setIsUtilityDirty] = useState(false);
+    const [isESSDirty, setIsESSDirty] = useState(false);
     const [utilities, setUtilities] = useState<UtilityProviderInfo[]>([]);
     const [essProviders, setEssProviders] = useState<ESSProviderInfo[]>([]);
     const [loading, setLoading] = useState(true);
@@ -35,6 +37,8 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                 fetchESSList(siteID)
             ]);
             setSettings(settingsData);
+            setIsUtilityDirty(false);
+            setIsESSDirty(false);
             setUtilities(utilitiesData);
             setEssProviders(essProvidersData);
             setError(null);
@@ -73,25 +77,21 @@ const Settings = ({ siteID }: { siteID?: string }) => {
             await updateSettings(settings, siteID, credentialsPayload);
             setSuccessMessage('Settings saved successfully');
 
+            const updatedSettings = credentialsPayload && settings.ess ? {
+                ...settings,
+                hasCredentials: {
+                    ...settings.hasCredentials,
+                    [settings.ess]: true
+                }
+            } : settings;
+
             if (credentialsPayload && settings.ess) {
-                setSettings({
-                    ...settings,
-                    hasCredentials: {
-                        ...settings.hasCredentials,
-                        [settings.ess]: true
-                    }
-                });
+                setSettings(updatedSettings);
                 setEditESS(false);
-                // Clear password fields after save
-                const clearedCreds = { ...essCredentials };
-                const provider = essProviders.find(p => p.id === settings.ess);
-                provider?.credentials.forEach(c => {
-                    if (c.type === 'password') {
-                        clearedCreds[c.field] = "";
-                    }
-                });
-                setEssCredentials(clearedCreds);
+                setEssCredentials({});
             }
+            setIsUtilityDirty(false);
+            setIsESSDirty(false);
 
             setTimeout(() => setSuccessMessage(null), 3000);
         } catch (err) {
@@ -150,7 +150,9 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                                 {utilities.find(u => u.id === settings.utilityProvider)?.rates.find(r => r.id === settings.utilityRate)?.name || settings.utilityRate}
                             </span>
                         </div>
-                        <div className="summary-status">Configured</div>
+                        <div className={`summary-status ${isUtilityDirty ? 'pending' : ''}`}>
+                            {isUtilityDirty ? 'Pending Save' : 'Configured'}
+                        </div>
                     </div>
                 ) : (
                     <div className={editUtility ? "edit-section" : ""}>
@@ -160,6 +162,7 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                                 value={settings.utilityProvider}
                                 onValueChange={(value) => {
                                     setEditUtility(true);
+                                    setIsUtilityDirty(true);
                                     const providerID = value as string;
                                     const provider = utilities.find(u => u.id === providerID);
                                     let newSettings = {
@@ -215,6 +218,7 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                                     <Select.Root
                                         value={settings.utilityRate}
                                         onValueChange={(value) => {
+                                            setIsUtilityDirty(true);
                                             const rateID = value as string;
                                             const rate = provider.rates.find(r => r.id === rateID);
                                             let newSettings = { ...settings, utilityRate: rateID };
@@ -266,13 +270,14 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                                                     <Field.Label>{opt.name}</Field.Label>
                                                     <Select.Root
                                                         value={settings.utilityRateOptions?.[opt.field] || opt.default}
-                                                        onValueChange={(value) => {
-                                                            const newOpts = {
-                                                                ...settings.utilityRateOptions,
-                                                                [opt.field]: value
-                                                            };
-                                                            handleChange('utilityRateOptions', newOpts);
-                                                        }}
+                                                            onValueChange={(value) => {
+                                                                const newOpts = {
+                                                                    ...settings.utilityRateOptions,
+                                                                    [opt.field]: value
+                                                                };
+                                                                handleChange('utilityRateOptions', newOpts);
+                                                                setIsUtilityDirty(true);
+                                                            }}
                                                     >
                                                         <Select.Trigger className="select-trigger" id={`opt-${opt.field}`}>
                                                             <Select.Value>
@@ -305,6 +310,7 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                                                                     [opt.field]: checked
                                                                 };
                                                                 handleChange('utilityRateOptions', newOpts);
+                                                                setIsUtilityDirty(true);
                                                             }}
                                                             className="switch-root"
                                                         >
@@ -334,12 +340,14 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                     )}
                 </div>
 
-                {settings.ess && settings.hasCredentials?.[settings.ess] && !editESS ? (
+                {settings.ess && (settings.hasCredentials?.[settings.ess] || isESSDirty) && !editESS ? (
                     <div className="configured-summary" onClick={() => setEditESS(true)}>
                         <div className="summary-info">
                             <span className="summary-label">{essProviders.find(p => p.id === settings.ess)?.name || settings.ess || 'Unknown System'}</span>
                         </div>
-                        <div className="summary-status">Connected</div>
+                        <div className={`summary-status ${isESSDirty ? 'pending' : ''}`}>
+                            {isESSDirty ? 'Pending Save' : 'Connected'}
+                        </div>
                     </div>
                 ) : (
                     <div className={editESS ? "edit-section" : ""}>
@@ -349,6 +357,7 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                                 value={settings.ess || ""}
                                 onValueChange={(value) => {
                                     setEditESS(true);
+                                    setIsESSDirty(true);
                                     setSettings({ ...settings, ess: value as string });
                                     setEssCredentials({}); // clear credentials when changing provider
                                 }}
@@ -385,7 +394,10 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                                     <Input
                                         type={cred.type === 'password' ? 'password' : 'text'}
                                         value={essCredentials[cred.field] || ""}
-                                        onChange={(e) => setEssCredentials({ ...essCredentials, [cred.field]: e.target.value })}
+                                        onChange={(e) => {
+                                            setEssCredentials({ ...essCredentials, [cred.field]: e.target.value });
+                                            setIsESSDirty(true);
+                                        }}
                                         placeholder={`Enter ${cred.name}`}
                                     />
                                     {cred.description && <Field.Description>{cred.description}</Field.Description>}
@@ -565,6 +577,48 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                                 Battery percentage to leave as headroom during solar charging when export is disabled. Negative values will remove the headroom and ignore solar curtailment.
                             </Field.Description>
                         </Field.Root>
+
+                        {settings.utilityRateOptions?.netMeteringCredits && (
+                            <Field.Root className="form-group">
+                                <Field.Label>Solar Net Metering Credits Value</Field.Label>
+                                <Select.Root
+                                    value={settings.solarNetMeteringCreditsValue || ""}
+                                    onValueChange={(value) => handleChange('solarNetMeteringCreditsValue', value)}
+                                >
+                                    <Select.Trigger className="select-trigger" id="solarNetMeteringCreditsValue">
+                                        <Select.Value>
+                                            {
+                                                settings.solarNetMeteringCreditsValue === 'highest' ? 'Highest Price' :
+                                                settings.solarNetMeteringCreditsValue === 'none' ? 'None' :
+                                                settings.solarNetMeteringCreditsValue === 'lowest' ? 'Lowest Price' :
+                                                'Lowest / Default'
+                                            }
+                                        </Select.Value>
+                                    </Select.Trigger>
+                                    <Select.Portal>
+                                        <Select.Positioner className="select-positioner">
+                                            <Select.Popup className="select-popup">
+                                                <Select.Item className="select-item" value="">
+                                                    <Select.ItemText>Lowest / Default</Select.ItemText>
+                                                </Select.Item>
+                                                <Select.Item className="select-item" value="lowest">
+                                                    <Select.ItemText>Lowest Price</Select.ItemText>
+                                                </Select.Item>
+                                                <Select.Item className="select-item" value="highest">
+                                                    <Select.ItemText>Highest Price</Select.ItemText>
+                                                </Select.Item>
+                                                <Select.Item className="select-item" value="none">
+                                                    <Select.ItemText>None</Select.ItemText>
+                                                </Select.Item>
+                                            </Select.Popup>
+                                        </Select.Positioner>
+                                    </Select.Portal>
+                                </Select.Root>
+                                <Field.Description>
+                                    How to value exported solar credits. "Lowest" price of the day, "Highest" price of the day, or value them as nothing.
+                                </Field.Description>
+                            </Field.Root>
+                        )}
 
                         <div className="section-header">
                             <h3>Power History Settings</h3>

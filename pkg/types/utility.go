@@ -64,7 +64,7 @@ type Price struct {
 type UtilityRateOptions struct {
 	RateClass            string `json:"rateClass"`
 	VariableDeliveryRate bool   `json:"variableDeliveryRate"`
-	NetMetering          bool   `json:"netMetering"`
+	NetMeteringCredits   bool   `json:"netMeteringCredits"`
 }
 
 // UtilityPeriod defines a particular schedule for some utility rate or fee

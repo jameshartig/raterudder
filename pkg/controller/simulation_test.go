@@ -601,16 +601,24 @@ func TestSimulateState(t *testing.T) {
 			Timestamp:          now,
 		}
 
-		price := types.Price{
+		currentPrice := types.Price{
 			DollarsPerKWH:        0.10,
 			GridUseDollarsPerKWH: 0.05,
 			TSStart:              now,
+		}
+
+		// Add a peak price later to test 1:1 net metering valuation
+		futurePrice := types.Price{
+			DollarsPerKWH:        0.40,
+			GridUseDollarsPerKWH: 0.10,
+			TSStart:              now.Add(2 * time.Hour),
 		}
 
 		tests := []struct {
 			name            string
 			gridExportSolar bool
 			netMetering     bool
+			nmValueSetting  string
 			expectedOppCost float64
 		}{
 			{
@@ -623,13 +631,35 @@ func TestSimulateState(t *testing.T) {
 				name:            "Export Enabled No Net Metering",
 				gridExportSolar: true,
 				netMetering:     false,
-				expectedOppCost: 0.10, // Just DollarsPerKWH
+				expectedOppCost: 0.10, // Just current DollarsPerKWH
 			},
 			{
-				name:            "Export Enabled With Net Metering",
+				name:            "Export Enabled With Net Metering Default (Lowest)",
 				gridExportSolar: true,
 				netMetering:     true,
-				expectedOppCost: 0.15, // DollarsPerKWH + GridAddlDollarsPerKWH
+				nmValueSetting:  "",
+				expectedOppCost: 0.15, // Current price (0.10 + 0.05) is lowest
+			},
+			{
+				name:            "Export Enabled With Net Metering (Lowest)",
+				gridExportSolar: true,
+				netMetering:     true,
+				nmValueSetting:  "lowest",
+				expectedOppCost: 0.15,
+			},
+			{
+				name:            "Export Enabled With Net Metering (Highest)",
+				gridExportSolar: true,
+				netMetering:     true,
+				nmValueSetting:  "highest",
+				expectedOppCost: 0.50, // Peak DollarsPerKWH (0.40) + GridUse (0.10)
+			},
+			{
+				name:            "Export Enabled With Net Metering (None)",
+				gridExportSolar: true,
+				netMetering:     true,
+				nmValueSetting:  "none",
+				expectedOppCost: 0.0,
 			},
 		}
 
@@ -638,11 +668,12 @@ func TestSimulateState(t *testing.T) {
 				settings := types.Settings{
 					GridExportSolar: tt.gridExportSolar,
 					UtilityRateOptions: types.UtilityRateOptions{
-						NetMetering: tt.netMetering,
+						NetMeteringCredits: tt.netMetering,
 					},
+					SolarNetMeteringCreditsValue: tt.nmValueSetting,
 				}
 
-				simData := c.SimulateState(ctx, now, currentStatus, price, nil, nil, settings)
+				simData := c.SimulateState(ctx, now, currentStatus, currentPrice, []types.Price{futurePrice}, nil, settings)
 				assert.NotEmpty(t, simData)
 				assert.InDelta(t, tt.expectedOppCost, simData[0].SolarOppDollarsPerKWH, 0.001)
 			})

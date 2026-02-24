@@ -31,7 +31,7 @@ func (s *Server) handleHistoryPrices(w http.ResponseWriter, r *http.Request) {
 	// Set Cache-Control headers
 	// If the range ends before today (midnight today), cache for 24 hours.
 	// Otherwise, cache for 1 minute.
-	today := time.Now().Truncate(24 * time.Hour)
+	today := truncateDay(time.Now())
 	if end.Before(today) {
 		w.Header().Set("Cache-Control", "private, max-age=86400")
 	} else {
@@ -64,7 +64,7 @@ func (s *Server) handleHistoryActions(w http.ResponseWriter, r *http.Request) {
 	// Set Cache-Control headers
 	// If the range ends before today (midnight today), cache for 24 hours.
 	// Otherwise, cache for 1 minute.
-	today := time.Now().Truncate(24 * time.Hour)
+	today := truncateDay(time.Now())
 	if end.Before(today) {
 		w.Header().Set("Cache-Control", "private, max-age=86400")
 	} else {

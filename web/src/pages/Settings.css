@@ -412,6 +412,13 @@
   border-radius: 99px;
 }
 
+.summary-status.pending {
+  color: #d97706;
+  /* amber-600 */
+  background: #fffbeb;
+  /* amber-50 */
+}
+
 /* Buttons */
 .text-button {
   background: none;

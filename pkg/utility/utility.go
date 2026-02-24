@@ -34,8 +34,8 @@ type Utility interface {
 func Configured() *Map {
 	m := NewMap()
 	// Initialize supported providers
-	// For now, we only support ComEd
 	m.baseComEdHourly = configuredComEdHourly()
+	m.baseAmerenSmart = configuredAmerenSmart()
 	return m
 }
 
@@ -43,6 +43,7 @@ func Configured() *Map {
 type Map struct {
 	mu              sync.Mutex
 	baseComEdHourly *BaseComEdHourly
+	baseAmerenSmart *BaseAmerenSmart
 	utilities       map[string]Utility
 }
 
@@ -74,8 +75,24 @@ func (m *Map) Site(ctx context.Context, siteID string, settings types.Settings) 
 		if settings.UtilityRate != "comed_besh" {
 			return nil, fmt.Errorf("unsupported comed rate: %s", settings.UtilityRate)
 		}
-		u := &SiteComEd{
+		u := &SiteFees{
 			base:   m.baseComEdHourly,
+			siteID: siteID,
+		}
+		if err := u.ApplySettings(ctx, settings); err != nil {
+			return nil, err
+		}
+		m.utilities[settings.UtilityProvider] = u
+		return u, nil
+	case "ameren":
+		if m.baseAmerenSmart == nil {
+			return nil, fmt.Errorf("ameren provider not configured")
+		}
+		if settings.UtilityRate != "ameren_psp" {
+			return nil, fmt.Errorf("unsupported ameren rate: %s", settings.UtilityRate)
+		}
+		u := &SiteFees{
+			base:   m.baseAmerenSmart,
 			siteID: siteID,
 		}
 		if err := u.ApplySettings(ctx, settings); err != nil {
@@ -98,6 +115,11 @@ func (m *Map) SetProvider(name string, provider Utility) {
 // ListUtilities returns metadata for all supported utility providers.
 func (m *Map) ListUtilities() []types.UtilityProviderInfo {
 	return []types.UtilityProviderInfo{
-		ComEdUtilityInfo(),
+		comEdUtilityInfo(),
+		amerenUtilityInfo(),
 	}
+}
+
+func truncateDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }

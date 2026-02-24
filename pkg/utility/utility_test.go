@@ -52,7 +52,7 @@ func TestListUtilities(t *testing.T) {
 }
 
 func TestComEdUtilityInfo(t *testing.T) {
-	info := ComEdUtilityInfo()
+	info := comEdUtilityInfo()
 
 	assert.Equal(t, "comed", info.ID)
 	assert.Equal(t, "ComEd", info.Name)

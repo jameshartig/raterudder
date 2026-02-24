@@ -80,9 +80,9 @@ func TestHandleListUtilities(t *testing.T) {
 		assert.Equal(t, types.UtilityOptionTypeSwitch, dtodOpt.Type)
 		assert.NotEmpty(t, dtodOpt.Description)
 
-		// netMetering option
+		// netMeteringCredits option
 		nmOpt := rate.Options[2]
-		assert.Equal(t, "netMetering", nmOpt.Field)
+		assert.Equal(t, "netMeteringCredits", nmOpt.Field)
 		assert.Equal(t, types.UtilityOptionTypeSwitch, nmOpt.Type)
 		assert.NotEmpty(t, nmOpt.Description)
 	})

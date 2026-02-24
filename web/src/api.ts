@@ -213,6 +213,7 @@ export interface Settings {
     solarTrendRatioMax: number;
     solarBellCurveMultiplier: number;
     solarFullyChargeHeadroomBatterySOC: number;
+    solarNetMeteringCreditsValue: string;
     utilityProvider: string;
     utilityRate: string;
     utilityRateOptions: UtilityRateOptions;

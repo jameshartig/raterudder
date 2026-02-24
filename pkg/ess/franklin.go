@@ -1029,6 +1029,10 @@ func (f *Franklin) GetEnergyHistory(ctx context.Context, start, end time.Time) (
 	// Start from the beginning of the start day
 	current := time.Date(startInLoc.Year(), startInLoc.Month(), startInLoc.Day(), 0, 0, 0, 0, di.location)
 	for current.Before(endInLoc) || current.Equal(endInLoc) {
+		if current.After(time.Now()) {
+			break
+		}
+
 		stats, err := f.getEnergyStatsForDay(ctx, current, di.location)
 		if err != nil {
 			log.Ctx(ctx).ErrorContext(ctx, "failed to get energy stats for day", slog.String("day", current.Format("2006-01-02")), slog.Any("error", err))
@@ -1086,6 +1090,18 @@ func (f *Franklin) getEnergyStatsForDay(ctx context.Context, day time.Time, loc 
 	// Aggregate 5-min data into hourly buckets
 	hourlyStats := make(map[string]*types.EnergyStats)
 	var sortedKeys []string
+
+	// no energy data for this day
+	if len(res.SolarToHomeKWHRates) == 0 &&
+		len(res.SolarToGridKWHRates) == 0 &&
+		len(res.SolarToBatteryKWHRates) == 0 &&
+		len(res.GridToBatteryKWHRates) == 0 &&
+		len(res.GridToHomeKWHRates) == 0 &&
+		len(res.BatteryToGridKWHRates) == 0 &&
+		len(res.BatteryToHomeKWHRates) == 0 &&
+		len(res.SOCArray) == 0 {
+		return nil, nil
+	}
 
 	expLen := len(res.DeviceTimeArray)
 	if len(res.SolarToHomeKWHRates) != expLen {
