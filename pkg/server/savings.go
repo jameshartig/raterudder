@@ -96,7 +96,7 @@ func (s *Server) getSiteSavings(ctx context.Context, siteID string, start, end t
 	for _, p := range prices {
 		tsHour := p.TSStart.Truncate(time.Hour)
 		hourlyExportPrices[tsHour] = p.DollarsPerKWH
-		hourlyImportPrices[tsHour] = p.DollarsPerKWH + p.GridAddlDollarsPerKWH
+		hourlyImportPrices[tsHour] = p.DollarsPerKWH + p.GridUseDollarsPerKWH
 	}
 
 	for _, stat := range energyStats {

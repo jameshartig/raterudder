@@ -52,9 +52,10 @@ type Price struct {
 	// DollarsPerKWH is the base cost of electricity in the time interval.
 	DollarsPerKWH float64 `json:"dollarsPerKWH"`
 
-	// GridAddlDollarsPerKWH is the cost of electricity delivered to the home in
-	// the time interval. This is added to the base price for grid use.
-	GridAddlDollarsPerKWH float64 `json:"gridUseDollarsPerKWH"`
+	// GridUseDollarsPerKWH is the additional cost of electricity for it to be
+	// delivered to the home via the grid in the time interval. This is added to
+	// the base price when using the grid.
+	GridUseDollarsPerKWH float64 `json:"gridUseDollarsPerKWH"`
 
 	SampleCount int `json:"-"`
 }

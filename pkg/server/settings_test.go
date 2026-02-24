@@ -79,7 +79,7 @@ func TestSettings(t *testing.T) {
 		err := json.NewDecoder(w.Body).Decode(&resp)
 		require.NoError(t, err)
 		assert.Equal(t, 10.0, resp.MinBatterySOC)
-		assert.False(t, resp.HasCredentials.Franklin)
+		assert.False(t, resp.HasCredentials["franklin"])
 	})
 
 	t.Run("Update Settings - Disabled (No Admin)", func(t *testing.T) {
@@ -188,13 +188,13 @@ func TestSettings(t *testing.T) {
 		assert.False(t, resp.LoggedIn)
 	})
 
-	t.Run("Update Settings - Call VerifySettings", func(t *testing.T) {
+	t.Run("Update Settings - Backfills History on New Credentials", func(t *testing.T) {
 		srv, mockES := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
 
 		// Create a request with franklin credentials and valid settings
 		s := struct {
 			types.Settings
-			Franklin *types.FranklinCredentials `json:"franklin,omitempty"`
+			Credentials *types.Credentials `json:"credentials,omitempty"`
 		}{
 			Settings: types.Settings{
 				MinBatterySOC:               80,
@@ -204,7 +204,9 @@ func TestSettings(t *testing.T) {
 				SolarBellCurveMultiplier:    1.0,
 				UtilityProvider:             "test",
 			},
-			Franklin: &types.FranklinCredentials{Username: "foo", MD5Password: "bar"},
+			Credentials: &types.Credentials{
+				Franklin: &types.FranklinCredentials{Username: "foo", MD5Password: "bar"},
+			},
 		}
 		b, err := json.Marshal(s)
 		require.NoError(t, err)
@@ -225,6 +227,67 @@ func TestSettings(t *testing.T) {
 		// Expect GetEnergyHistory (Sync) because we are providing new credentials
 		// and the default mock storage returns no EncryptedCredentials
 		mockES.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
+
+		// Expect SetSettings to be called
+		mockS.On("SetSettings", mock.Anything, mock.Anything, mock.Anything, types.CurrentSettingsVersion).Return(nil)
+
+		srv.handleUpdateSettings(w, req)
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+
+		mockES.AssertExpectations(t)
+		mockS.AssertExpectations(t)
+		mockU.AssertExpectations(t)
+	})
+
+	t.Run("Update Settings - Does Not Backfill History on Unchanged Credentials", func(t *testing.T) {
+		srv, mockES := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
+
+		// Create a request with franklin credentials
+		s := struct {
+			types.Settings
+			Credentials *types.Credentials `json:"credentials,omitempty"`
+		}{
+			Settings: types.Settings{
+				MinBatterySOC:               80,
+				DryRun:                      true,
+				IgnoreHourUsageOverMultiple: 5,
+				SolarTrendRatioMax:          3.0,
+				SolarBellCurveMultiplier:    1.0,
+				UtilityProvider:             "test",
+			},
+			Credentials: &types.Credentials{
+				Franklin: &types.FranklinCredentials{Username: "foo", MD5Password: "bar"},
+			},
+		}
+		b, err := json.Marshal(s)
+		require.NoError(t, err)
+		req := httptest.NewRequest("POST", "/api/settings", bytes.NewReader(b))
+		req = withUser(req, "admin@example.com", true)
+		w := httptest.NewRecorder()
+
+		// Setup Mock Storage to return existing credentials (so they are not new)
+		existingCreds := types.Credentials{
+			Franklin: &types.FranklinCredentials{Username: "old", MD5Password: "old"},
+		}
+		encrypted, _ := srv.encryptCredentials(req.Context(), existingCreds)
+
+		existingSettings := types.Settings{
+			EncryptedCredentials: encrypted,
+		}
+
+		// Unset the default mock and add a specific one
+		mockS.ExpectedCalls = nil
+		mockS.On("GetSettings", mock.Anything, mock.Anything).Return(existingSettings, types.CurrentSettingsVersion, nil)
+
+		// Expect validation to pass
+		mockU.On("ApplySettings", mock.Anything, mock.Anything).Return(nil).Once()
+
+		// Expect Authenticate to be called with the merged credentials
+		mockES.On("Authenticate", mock.Anything, mock.MatchedBy(func(c types.Credentials) bool {
+			return c.Franklin != nil && c.Franklin.Username == "foo" && c.Franklin.MD5Password == "bar"
+		})).Return(types.Credentials{
+			Franklin: &types.FranklinCredentials{Username: "foo", MD5Password: "bar", GatewayID: "gw-123"},
+		}, true, nil)
 
 		// Expect SetSettings to be called
 		mockS.On("SetSettings", mock.Anything, mock.Anything, mock.Anything, types.CurrentSettingsVersion).Return(nil)

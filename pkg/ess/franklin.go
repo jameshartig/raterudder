@@ -3,6 +3,8 @@ package ess
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,6 +58,34 @@ func newFranklin() *Franklin {
 	}
 }
 
+func franklinInfo() types.ESSProviderInfo {
+	return types.ESSProviderInfo{
+		ID:   "franklin",
+		Name: "FranklinWH",
+		Credentials: []types.ESSCredential{
+			{
+				Field:    "username",
+				Name:     "Email",
+				Type:     "string",
+				Required: true,
+			},
+			{
+				Field:    "password",
+				Name:     "Password",
+				Type:     "password",
+				Required: true,
+			},
+			{
+				Field:       "gatewayID",
+				Name:        "Gateway ID (Optional)",
+				Type:        "string",
+				Required:    false,
+				Description: "If left empty, Raterudder will attempt to auto-discover the gateway ID.",
+			},
+		},
+	}
+}
+
 // ApplySettings applies the given settings to the Franklin struct.
 func (f *Franklin) ApplySettings(ctx context.Context, settings types.Settings) error {
 	f.mu.Lock()
@@ -79,6 +109,16 @@ func (f *Franklin) Authenticate(ctx context.Context, creds types.Credentials) (t
 	defer f.mu.Unlock()
 
 	var changed bool
+
+	// If raw password is provided, hash it inside backend to handle it securely
+	// and avoid frontend dependencies.
+	if creds.Franklin.Password != "" {
+		hash := md5.Sum([]byte(creds.Franklin.Password))
+		creds.Franklin.MD5Password = hex.EncodeToString(hash[:])
+		creds.Franklin.Password = ""
+		changed = true
+	}
+
 	// Determine if we need a fresh login. We need one when:
 	// - There is no cached token in the supplied credentials (first time), OR
 	// - The username/password in the incoming credentials differ from what we
@@ -484,6 +524,13 @@ func (f *Franklin) GetStatus(ctx context.Context) (types.SystemStatus, error) {
 		})
 	}
 
+	var batteryChargingDisabled bool
+	if len(alarms) == 1 && strings.Contains(alarms[0].Name, "BMS Charge Under Temperature") {
+		log.Ctx(ctx).InfoContext(ctx, "bms charge under temperature is the only alarm, ignoring and setting battery charging disabled")
+		alarms = nil
+		batteryChargingDisabled = true
+	}
+
 	stormHedge := rd.RuntimeData.TOUID == 6
 
 	var storms []types.Storm
@@ -518,21 +565,22 @@ func (f *Franklin) GetStatus(ctx context.Context) (types.SystemStatus, error) {
 	}
 
 	return types.SystemStatus{
-		Timestamp:             time.Now().In(di.location),
-		BatterySOC:            rd.RuntimeData.SOC,
-		EachBatterySOC:        rd.RuntimeData.EachSOC,
-		BatteryKW:             rd.RuntimeData.PowerBattery,
-		EachBatteryKW:         rd.RuntimeData.PowerEachBattery,
-		SolarKW:               rd.RuntimeData.PowerSolar,
-		GridKW:                rd.RuntimeData.PowerGrid,
-		HomeKW:                rd.RuntimeData.PowerLoad,
-		BatteryCapacityKWH:    di.TotalBatteryCapacityKWH,
-		EmergencyMode:         stormHedge || modes.currentMode.WorkMode == 3,
-		CanExportSolar:        pc.GridFeedMaxFlag == GridFeedMaxFlagSolarOnly || pc.GridFeedMaxFlag == GridFeedMaxFlagBatteryAndSolar,
-		CanExportBattery:      pc.GridFeedMaxFlag == GridFeedMaxFlagBatteryAndSolar,
-		CanImportBattery:      pc.GridMaxFlag == GridMaxFlagChargeFromGrid,
-		ElevatedMinBatterySOC: modes.currentMode.ReserveSOC > 0 && modes.currentMode.ReserveSOC > f.settings.MinBatterySOC,
-		BatteryAboveMinSOC:    rd.RuntimeData.SOC >= modes.currentMode.ReserveSOC,
+		Timestamp:               time.Now().In(di.location),
+		BatterySOC:              rd.RuntimeData.SOC,
+		EachBatterySOC:          rd.RuntimeData.EachSOC,
+		BatteryKW:               rd.RuntimeData.PowerBattery,
+		EachBatteryKW:           rd.RuntimeData.PowerEachBattery,
+		SolarKW:                 rd.RuntimeData.PowerSolar,
+		GridKW:                  rd.RuntimeData.PowerGrid,
+		HomeKW:                  rd.RuntimeData.PowerLoad,
+		BatteryCapacityKWH:      di.TotalBatteryCapacityKWH,
+		EmergencyMode:           stormHedge || modes.currentMode.WorkMode == 3,
+		CanExportSolar:          pc.GridFeedMaxFlag == GridFeedMaxFlagSolarOnly || pc.GridFeedMaxFlag == GridFeedMaxFlagBatteryAndSolar,
+		CanExportBattery:        pc.GridFeedMaxFlag == GridFeedMaxFlagBatteryAndSolar,
+		CanImportBattery:        pc.GridMaxFlag == GridMaxFlagChargeFromGrid,
+		ElevatedMinBatterySOC:   modes.currentMode.ReserveSOC > 0 && modes.currentMode.ReserveSOC > f.settings.MinBatterySOC,
+		BatteryAboveMinSOC:      rd.RuntimeData.SOC >= modes.currentMode.ReserveSOC,
+		BatteryChargingDisabled: batteryChargingDisabled,
 
 		// TODO: get this from hes-gateway/common/getPowerCapConfigList
 		MaxBatteryChargeKW:    8 * float64(len(rd.RuntimeData.EachSOC)),

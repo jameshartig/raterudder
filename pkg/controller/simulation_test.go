@@ -602,9 +602,9 @@ func TestSimulateState(t *testing.T) {
 		}
 
 		price := types.Price{
-			DollarsPerKWH:         0.10,
-			GridAddlDollarsPerKWH: 0.05,
-			TSStart:               now,
+			DollarsPerKWH:        0.10,
+			GridUseDollarsPerKWH: 0.05,
+			TSStart:              now,
 		}
 
 		tests := []struct {

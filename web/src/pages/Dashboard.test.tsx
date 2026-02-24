@@ -336,27 +336,30 @@ describe('Dashboard', () => {
     });
 
 
-    it('shows banner when Franklin credentials are missing', async () => {
+    it('shows banner when ESS credentials are missing', async () => {
         (fetchActions as any).mockResolvedValue([]);
         (fetchSavings as any).mockResolvedValue(null);
         (fetchSettings as any).mockResolvedValue({
             minBatterySOC: 10,
-            hasCredentials: { franklin: false }
+            ess: 'franklin',
+            hasCredentials: { franklin: false },
+            utilityProvider: 'comed_besh'
         });
 
         renderWithRouter(<Dashboard />);
 
         await waitFor(() => {
-            expect(screen.getByText(/FranklinWH credentials are not configured/i)).toBeInTheDocument();
-            expect(screen.getByText(/Configure them in Settings/i)).toBeInTheDocument();
+            expect(screen.getByText(/Energy Storage System is not connected/i)).toBeInTheDocument();
+            expect(screen.getByText(/Configure it in Settings/i)).toBeInTheDocument();
         });
     });
 
-    it('does not show banner when Franklin credentials are present', async () => {
+    it('does not show banner when ESS credentials are present', async () => {
         (fetchActions as any).mockResolvedValue([]);
         (fetchSavings as any).mockResolvedValue(null);
         (fetchSettings as any).mockResolvedValue({
             minBatterySOC: 10,
+            ess: 'franklin',
             hasCredentials: { franklin: true },
             utilityProvider: 'comed_besh'
         });
@@ -368,7 +371,7 @@ describe('Dashboard', () => {
             expect(screen.queryByText('Loading day...')).not.toBeInTheDocument();
         });
 
-        expect(screen.queryByText(/FranklinWH credentials are not configured/i)).not.toBeInTheDocument();
+        expect(screen.queryByText(/Energy Storage System is not connected/i)).not.toBeInTheDocument();
     });
 
     it('shows banner when Utility Provider is missing', async () => {
@@ -376,6 +379,7 @@ describe('Dashboard', () => {
         (fetchSavings as any).mockResolvedValue(null);
         (fetchSettings as any).mockResolvedValue({
             minBatterySOC: 10,
+            ess: 'franklin',
             hasCredentials: { franklin: true },
             utilityProvider: ''
         });
@@ -393,6 +397,7 @@ describe('Dashboard', () => {
         (fetchSavings as any).mockResolvedValue(null);
         (fetchSettings as any).mockResolvedValue({
             minBatterySOC: 10,
+            ess: 'franklin',
             hasCredentials: { franklin: true },
             utilityProvider: 'comed_besh'
         });

@@ -294,4 +294,40 @@ describe('App & Settings', () => {
             }), expect.any(String), undefined);
         });
     });
+
+    it('can submit ESS credentials and passes raw password', async () => {
+        const user = userEvent.setup();
+        (fetchSettings as any).mockResolvedValue({
+            ...defaultSettings,
+            ess: 'franklin',
+            hasCredentials: {}
+        });
+
+        await navigateToSettings();
+
+        // Fill in credentials based on apiMocks
+        const emailInput = await screen.findByLabelText(/Username \/ Email/i);
+        await user.type(emailInput, 'user@example.com');
+
+        const passInput = await screen.findByLabelText(/Password/i, { selector: 'input[type="password"]' });
+        await user.type(passInput, 'myrawpassword');
+
+        // Target Gateway ID is optional, we skip it
+
+        // Save
+        const saveBtn = screen.getByText('Save Settings');
+        fireEvent.click(saveBtn);
+
+        await waitFor(() => {
+            expect(screen.getByText('Settings saved successfully')).toBeInTheDocument();
+
+            // Should pass the credentials untouched
+            expect(updateSettings).toHaveBeenCalledWith(expect.anything(), expect.any(String), {
+                franklin: {
+                    username: 'user@example.com',
+                    password: 'myrawpassword'
+                }
+            });
+        });
+    });
 });

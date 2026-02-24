@@ -60,11 +60,11 @@ func main() {
 		basePrice += (rng.Float64() * 0.02) - 0.01
 
 		currentPrice := &types.Price{
-			Provider:              "comed_besh",
-			DollarsPerKWH:         basePrice,
-			GridAddlDollarsPerKWH: DeliveryFee,
-			TSStart:               t,
-			TSEnd:                 t.Add(time.Hour),
+			Provider:             "comed_besh",
+			DollarsPerKWH:        basePrice,
+			GridUseDollarsPerKWH: DeliveryFee,
+			TSStart:              t,
+			TSEnd:                t.Add(time.Hour),
 		}
 
 		// 2. Determine System Status
@@ -176,9 +176,6 @@ func main() {
 			BatteryCapacityKWH:    BatteryCapacityKWH,
 			MaxBatteryChargeKW:    MaxBatteryKW,
 			MaxBatteryDischargeKW: MaxBatteryKW,
-			CanExportSolar:        true,
-			CanExportBattery:      false,
-			CanImportBattery:      true,
 			BatteryAboveMinSOC:    currentSOC > 20,
 		}
 
@@ -204,11 +201,11 @@ func main() {
 			futurePriceVal = 0.35
 		}
 		action.FuturePrice = &types.Price{
-			Provider:              "comed_besh",
-			DollarsPerKWH:         futurePriceVal,
-			GridAddlDollarsPerKWH: DeliveryFee,
-			TSStart:               futureHourT,
-			TSEnd:                 futureHourT.Add(time.Hour),
+			Provider:             "comed_besh",
+			DollarsPerKWH:        futurePriceVal,
+			GridUseDollarsPerKWH: DeliveryFee,
+			TSStart:              futureHourT,
+			TSEnd:                futureHourT.Add(time.Hour),
 		}
 
 		if err := s.InsertAction(ctx, types.SiteIDNone, action); err != nil {

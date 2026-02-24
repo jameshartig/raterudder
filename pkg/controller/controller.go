@@ -186,10 +186,10 @@ func (c *Controller) Decide(
 		return finalizeAction(types.BatteryModeStandby, types.ActionReasonMissingBattery, "Battery Config Missing or Capacity 0. Standby.", nil, time.Time{}, time.Time{}), nil
 	}
 
-	gridChargeNowCost := currentPrice.DollarsPerKWH + currentPrice.GridAddlDollarsPerKWH
+	gridChargeNowCost := currentPrice.DollarsPerKWH + currentPrice.GridUseDollarsPerKWH
 	// Rule 2: If the price is below the Always Charge Threshold, then charge the
 	// battery.
-	if gridChargeNowCost <= settings.AlwaysChargeUnderDollarsPerKWH {
+	if !currentStatus.BatteryChargingDisabled && gridChargeNowCost <= settings.AlwaysChargeUnderDollarsPerKWH {
 		desc := fmt.Sprintf(
 			"Price Low (%.3f < %.3f). Charging.",
 			gridChargeNowCost,
@@ -321,7 +321,7 @@ func (c *Controller) Decide(
 			deficitAmount := slot.TotalBatteryDeficitKWH
 
 			// only consider charging if GridCharging is enabled
-			if settings.GridChargeBatteries {
+			if settings.GridChargeBatteries && !currentStatus.BatteryChargingDisabled {
 				// future in this section is actually in the PAST from the current
 				// simulation hour but in the future compared to the real time
 				var cheapestFutureChargeCost float64
@@ -396,7 +396,7 @@ func (c *Controller) Decide(
 		}
 
 		// check for peak survival after deficit handling but before arbitrage
-		if settings.GridChargeBatteries && isAboveMinDeficitPriceDifference {
+		if settings.GridChargeBatteries && isAboveMinDeficitPriceDifference && !currentStatus.BatteryChargingDisabled {
 			remaining := slot.BatteryKWHIfStandby - continuousPeakLoadKWH
 			// if we already hit capacity before the peak there's no need to do anything
 			// because the battery can't hold more
@@ -439,7 +439,7 @@ func (c *Controller) Decide(
 
 		// make sure we can charge the batteries, we can export solar, and we have
 		// enough headroom to charge
-		if settings.GridChargeBatteries && settings.GridExportSolar && simEnergyAfterCharge < capacityKWH && hitCapacityAt.IsZero() {
+		if settings.GridChargeBatteries && settings.GridExportSolar && simEnergyAfterCharge < capacityKWH && hitCapacityAt.IsZero() && !currentStatus.BatteryChargingDisabled {
 			var value float64
 			// if we are importing, we avoid the import cost
 			// if we are exporting, we get the export value

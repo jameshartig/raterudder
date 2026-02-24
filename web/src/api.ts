@@ -184,6 +184,20 @@ export interface UtilityRateInfo {
   options: UtilityRateOption[];
 }
 
+export interface ESSCredential {
+  field: string;
+  name: string;
+  type: string;
+  required: boolean;
+  description?: string;
+}
+
+export interface ESSProviderInfo {
+  id: string;
+  name: string;
+  credentials: ESSCredential[];
+}
+
 export interface Settings {
     dryRun: boolean;
     pause: boolean;
@@ -202,8 +216,9 @@ export interface Settings {
     utilityProvider: string;
     utilityRate: string;
     utilityRateOptions: UtilityRateOptions;
+    ess: string;
     hasCredentials: {
-        franklin: boolean;
+        [key: string]: boolean;
     };
 }
 
@@ -215,7 +230,7 @@ export interface FranklinCredentials {
 
 export interface SettingsUpdate {
     settings: Settings;
-    franklin?: FranklinCredentials;
+    credentials?: Record<string, any>;
     siteID?: string;
 }
 
@@ -231,7 +246,7 @@ export const fetchSettings = async (siteID?: string): Promise<Settings> => {
     return response.json();
 };
 
-export const updateSettings = async (settings: Settings, siteID?: string, franklin?: FranklinCredentials): Promise<void> => {
+export const updateSettings = async (settings: Settings, siteID?: string, credentials?: Record<string, any>): Promise<void> => {
     const payload: any = {
         ...settings,
         siteID: siteID,
@@ -241,8 +256,8 @@ export const updateSettings = async (settings: Settings, siteID?: string, frankl
         payload.siteID = siteID;
     }
 
-    if (franklin) {
-        payload.franklin = franklin;
+    if (credentials) {
+        payload.credentials = credentials;
     }
 
     const response = await fetch('/api/settings', {
@@ -340,9 +355,21 @@ export const fetchUtilities = async (siteID?: string): Promise<UtilityProviderIn
     if (siteID) {
         query.append('siteID', siteID);
     }
-    const response = await fetch(`/api/utilities?${query.toString()}`);
+    const response = await fetch(`/api/list/utilities?${query.toString()}`);
     if (!response.ok) {
         throw new Error(await extractError(response, 'Failed to fetch utilities'));
+    }
+    return response.json();
+};
+
+export const fetchESSList = async (siteID?: string): Promise<ESSProviderInfo[]> => {
+    const query = new URLSearchParams();
+    if (siteID) {
+        query.append('siteID', siteID);
+    }
+    const response = await fetch(`/api/list/ess?${query.toString()}`);
+    if (!response.ok) {
+        throw new Error(await extractError(response, 'Failed to fetch ESS systems'));
     }
     return response.json();
 };

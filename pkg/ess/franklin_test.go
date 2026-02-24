@@ -2,6 +2,8 @@ package ess
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -932,6 +934,71 @@ func TestFranklin(t *testing.T) {
 	})
 
 	t.Run("Authenticate", func(t *testing.T) {
+		t.Run("MD5HashRawPassword", func(t *testing.T) {
+			token := "temp-token-md5"
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/hes-gateway/terminal/initialize/appUserOrInstallerLogin" {
+					require.NoError(t, r.ParseForm())
+					assert.Equal(t, "user@example.com", r.Form.Get("account"))
+
+					// Should send the MD5 of "myrawpassword"
+					hash := md5.Sum([]byte("myrawpassword"))
+					expectedHash := hex.EncodeToString(hash[:])
+					assert.Equal(t, expectedHash, r.Form.Get("password"))
+
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"code":    200,
+						"success": true,
+						"result": map[string]interface{}{
+							"token": token,
+						},
+					})
+					return
+				}
+				if r.URL.Path == "/hes-gateway/terminal/getHomeGatewayList" {
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"code":    200,
+						"success": true,
+						"result": []map[string]interface{}{
+							{"id": "GW-123"},
+						},
+					})
+					return
+				}
+				if r.URL.Path == "/hes-gateway/terminal/getDeviceInfoV2" {
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"code":    200,
+						"success": true,
+						"result":  map[string]interface{}{"totalCap": 30.0},
+					})
+					return
+				}
+				http.Error(w, "not found: "+r.URL.Path, 404)
+			}))
+			defer ts.Close()
+
+			f := &Franklin{
+				client:  ts.Client(),
+				baseURL: ts.URL,
+			}
+
+			creds := types.Credentials{
+				Franklin: &types.FranklinCredentials{
+					Username: "user@example.com",
+					Password: "myrawpassword",
+				},
+			}
+
+			newCreds, changed, err := f.Authenticate(context.Background(), creds)
+			require.NoError(t, err)
+			assert.True(t, changed)
+			assert.Equal(t, token, newCreds.Franklin.Token)
+			assert.Equal(t, "", newCreds.Franklin.Password, "Raw password should be cleared")
+
+			hash := md5.Sum([]byte("myrawpassword"))
+			assert.Equal(t, hex.EncodeToString(hash[:]), newCreds.Franklin.MD5Password, "MD5 hash should be set")
+		})
+
 		t.Run("AutoFetchGatewayID", func(t *testing.T) {
 			token := "temp-token-123"
 			expectedGatewayID := "AUTO-GW-999"

@@ -70,9 +70,9 @@ func (c *Controller) SimulateState(
 			Provider: currentPrice.Provider,
 			TSStart:  t,
 			// TODO: should we assume 1 hour?
-			TSEnd:                 t.Add(1 * time.Hour),
-			DollarsPerKWH:         currentPrice.DollarsPerKWH,
-			GridAddlDollarsPerKWH: currentPrice.GridAddlDollarsPerKWH,
+			TSEnd:                t.Add(1 * time.Hour),
+			DollarsPerKWH:        currentPrice.DollarsPerKWH,
+			GridUseDollarsPerKWH: currentPrice.GridUseDollarsPerKWH,
 		}
 	}
 
@@ -91,7 +91,7 @@ func (c *Controller) SimulateState(
 		if !settings.GridExportSolar {
 			solarOppCost = 0
 		} else if settings.UtilityRateOptions.NetMetering {
-			solarOppCost = price.DollarsPerKWH + price.GridAddlDollarsPerKWH
+			solarOppCost = price.DollarsPerKWH + price.GridUseDollarsPerKWH
 		}
 
 		profile := model[h]
@@ -157,7 +157,7 @@ func (c *Controller) SimulateState(
 			Hour:                    h,
 			NetLoadSolarKWH:         netLoadSolar,
 			ClampedNetLoadSolarKWH:  clampedNet,
-			GridChargeDollarsPerKWH: price.DollarsPerKWH + price.GridAddlDollarsPerKWH,
+			GridChargeDollarsPerKWH: price.DollarsPerKWH + price.GridUseDollarsPerKWH,
 			SolarOppDollarsPerKWH:   solarOppCost,
 			AvgHomeLoadKWH:          profile.avgHomeLoadKWH,
 			PredictedSolarKWH:       predictedAvgSolar,

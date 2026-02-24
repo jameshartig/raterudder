@@ -805,7 +805,7 @@ func (s *SiteComEd) applyFees(p types.Price) (types.Price, error) {
 
 		// Apply fee
 		if period.GridAdditional {
-			p.GridAddlDollarsPerKWH += period.DollarsPerKWH
+			p.GridUseDollarsPerKWH += period.DollarsPerKWH
 		} else {
 			p.DollarsPerKWH += period.DollarsPerKWH
 		}

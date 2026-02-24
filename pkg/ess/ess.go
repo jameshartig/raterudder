@@ -47,6 +47,13 @@ func NewMap() *Map {
 	}
 }
 
+// ListSystems returns the available ESS systems and their required credentials.
+func (m *Map) ListSystems() []types.ESSProviderInfo {
+	return []types.ESSProviderInfo{
+		franklinInfo(),
+	}
+}
+
 // Site returns the system for the given siteID.
 // If the siteID is new, it creates a new system instance.
 func (m *Map) Site(ctx context.Context, siteID string, settings types.Settings) (System, error) {
@@ -64,13 +71,21 @@ func (m *Map) Site(ctx context.Context, siteID string, settings types.Settings) 
 		return sys, nil
 	}
 
-	// TODO: we should check what kind of system this is
-	f := newFranklin()
-	if err := f.ApplySettings(ctx, settings); err != nil {
+	var sys System
+	switch settings.ESS {
+	case "franklin":
+		sys = newFranklin()
+	default:
+		// Default to franklin for backwards compatibility if not specified
+		// or if an unknown system is provided.
+		sys = newFranklin()
+	}
+
+	if err := sys.ApplySettings(ctx, settings); err != nil {
 		return nil, err
 	}
-	m.systems[siteID] = f
-	return f, nil
+	m.systems[siteID] = sys
+	return sys, nil
 }
 
 // SetSystem sets the system for a specific site. This is primarily used for testing.

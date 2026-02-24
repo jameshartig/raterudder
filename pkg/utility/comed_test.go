@@ -251,9 +251,9 @@ func TestComEd(t *testing.T) {
 					TSStart:       baseTime.Add(6 * time.Hour), // 16:00 UTC => 11:00 CDT (Window 09-17)
 				},
 				want: types.Price{
-					DollarsPerKWH:         0.05,
-					GridAddlDollarsPerKWH: 0.03, // just fees
-					TSStart:               baseTime,
+					DollarsPerKWH:        0.05,
+					GridUseDollarsPerKWH: 0.03, // just fees
+					TSStart:              baseTime,
 				},
 			},
 			{
@@ -277,9 +277,9 @@ func TestComEd(t *testing.T) {
 					TSStart:       baseTime, // 10:00 UTC
 				},
 				want: types.Price{
-					DollarsPerKWH:         0.05,
-					GridAddlDollarsPerKWH: 0.00,
-					TSStart:               baseTime,
+					DollarsPerKWH:        0.05,
+					GridUseDollarsPerKWH: 0.00,
+					TSStart:              baseTime,
 				},
 			},
 			{
@@ -303,9 +303,9 @@ func TestComEd(t *testing.T) {
 					TSStart:       baseTime,
 				},
 				want: types.Price{
-					DollarsPerKWH:         0.06,
-					GridAddlDollarsPerKWH: 0.00,
-					TSStart:               baseTime,
+					DollarsPerKWH:        0.06,
+					GridUseDollarsPerKWH: 0.00,
+					TSStart:              baseTime,
 				},
 			},
 		}
@@ -318,7 +318,7 @@ func TestComEd(t *testing.T) {
 				got, err := s.applyFees(tt.price)
 				require.NoError(t, err)
 				assert.InDelta(t, tt.want.DollarsPerKWH, got.DollarsPerKWH, 0.0001)
-				assert.InDelta(t, tt.want.GridAddlDollarsPerKWH, got.GridAddlDollarsPerKWH, 0.0001)
+				assert.InDelta(t, tt.want.GridUseDollarsPerKWH, got.GridUseDollarsPerKWH, 0.0001)
 			})
 		}
 	})

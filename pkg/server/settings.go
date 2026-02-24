@@ -86,15 +86,10 @@ func (s *Server) getESSSystem(ctx context.Context, siteID string, settings setti
 	return essSystem, nil
 }
 
-// HasCredentials just returns whether the credentials are set
-type HasCredentials struct {
-	Franklin bool `json:"franklin"`
-}
-
 // SettingsRes is the response type for GetSettings
 type SettingsRes struct {
 	types.Settings
-	HasCredentials HasCredentials `json:"hasCredentials"`
+	HasCredentials map[string]bool `json:"hasCredentials"`
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -110,10 +105,11 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	settings.EncryptedCredentials = nil
 
 	resp := SettingsRes{
-		Settings: settings.Settings,
+		Settings:       settings.Settings,
+		HasCredentials: make(map[string]bool),
 	}
 	if creds.Franklin != nil {
-		resp.HasCredentials.Franklin = true
+		resp.HasCredentials["franklin"] = true
 	}
 
 	w.Header().Set("Cache-Control", "no-store")
@@ -142,7 +138,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		types.Settings
-		Franklin *types.FranklinCredentials `json:"franklin,omitempty"`
+		Credentials *types.Credentials `json:"credentials,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -172,7 +168,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	var wg sync.WaitGroup
 	// Handle credentials update
-	if req.Franklin != nil {
+	if req.Credentials != nil {
 		// Get existing credentials to preserve other fields
 		existing, _, err := s.storage.GetSettings(ctx, siteID)
 		if err != nil {
@@ -199,10 +195,14 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var shouldBackfillHistory bool
-		if existingCreds.Franklin == nil {
-			shouldBackfillHistory = true
+
+		// Map properties from incoming credentials
+		if req.Credentials.Franklin != nil {
+			if existingCreds.Franklin == nil {
+				shouldBackfillHistory = true
+			}
+			existingCreds.Franklin = req.Credentials.Franklin
 		}
-		existingCreds.Franklin = req.Franklin
 
 		// Verify and update credentials
 		verifiedCreds, _, err := essSystem.Authenticate(ctx, existingCreds)
@@ -213,7 +213,8 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// now backfill if we need to since the credentials were verified
-		if shouldBackfillHistory {
+		// Backfill history for franklin if it was newly added
+		if shouldBackfillHistory && verifiedCreds.Franklin != nil {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()

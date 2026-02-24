@@ -28,7 +28,7 @@ func TestHandleListUtilities(t *testing.T) {
 	}
 
 	t.Run("Returns JSON array of utilities", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/api/utilities", nil)
+		req := httptest.NewRequest("GET", "/api/list/utilities", nil)
 		w := httptest.NewRecorder()
 
 		srv.handleListUtilities(w, req)
@@ -44,7 +44,7 @@ func TestHandleListUtilities(t *testing.T) {
 	})
 
 	t.Run("Contains comed with correct structure", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/api/utilities", nil)
+		req := httptest.NewRequest("GET", "/api/list/utilities", nil)
 		w := httptest.NewRecorder()
 
 		srv.handleListUtilities(w, req)
@@ -88,7 +88,7 @@ func TestHandleListUtilities(t *testing.T) {
 	})
 
 	t.Run("All options have required fields", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/api/utilities", nil)
+		req := httptest.NewRequest("GET", "/api/list/utilities", nil)
 		w := httptest.NewRecorder()
 
 		srv.handleListUtilities(w, req)
@@ -137,7 +137,7 @@ func TestHandleListUtilities(t *testing.T) {
 		}
 
 		handler := s.setupHandler()
-		req := httptest.NewRequest("GET", "/api/utilities", nil)
+		req := httptest.NewRequest("GET", "/api/list/utilities", nil)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 

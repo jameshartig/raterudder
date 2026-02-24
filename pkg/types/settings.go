@@ -6,7 +6,7 @@ import (
 
 // CurrentSettingsVersion is the current version of the settings struct.
 // Increment this value when adding new fields that require default values.
-const CurrentSettingsVersion = 7
+const CurrentSettingsVersion = 8
 
 // Settings represents the configuration stored in the database.
 // These are dynamic settings that can be changed without redeploying.
@@ -26,6 +26,9 @@ type Settings struct {
 	UtilityProvider    string             `json:"utilityProvider"`
 	UtilityRate        string             `json:"utilityRate"`
 	UtilityRateOptions UtilityRateOptions `json:"utilityRateOptions"`
+
+	// ESS Provider
+	ESS string `json:"ess"`
 
 	// Price Settings
 	// Always charge when the price is under this amount (in $/kWh)
@@ -76,6 +79,7 @@ type Credentials struct {
 // Credentials for Franklin
 type FranklinCredentials struct {
 	Username    string `json:"username"`
+	Password    string `json:"password,omitempty"`
 	MD5Password string `json:"md5Password"`
 	GatewayID   string `json:"gatewayID,omitempty"`
 	// Token is the cached Franklin API session token. It is stored alongside
@@ -144,6 +148,14 @@ func MigrateSettings(s Settings, currentVersion int) (Settings, bool, error) {
 			if s.UtilityProvider == "comed_besh" {
 				s.UtilityProvider = "comed"
 				s.UtilityRate = "comed_besh"
+				migrated = true
+			}
+		case 8:
+			// version 8: default ESS to "franklin" if we have credentials for franklin
+			// Actually we don't have decrypted creds here, but we can check if EncryptedCredentials exist
+			// because until now, Franklin was the only ESS supported
+			if len(s.EncryptedCredentials) > 0 && s.ESS == "" {
+				s.ESS = "franklin"
 				migrated = true
 			}
 		default:

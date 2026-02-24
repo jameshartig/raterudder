@@ -254,10 +254,10 @@ const Dashboard: React.FC<{ siteID?: string }> = ({ siteID }) => {
                             </p>
                         </div>
                     )}
-                    {settings && !settings.hasCredentials.franklin && (
+                    {settings && (!settings.ess || !settings.hasCredentials?.[settings.ess]) && (
                         <div className="banner warning-banner">
                             <p>
-                                <strong>Setup Required:</strong> FranklinWH credentials are not configured. <Link href="/settings">Configure them in Settings</Link> to enable automation.
+                                <strong>Setup Required:</strong> Energy Storage System is not connected. <Link href="/settings">Configure it in Settings</Link> to enable automation.
                             </p>
                         </div>
                     )}

@@ -104,7 +104,7 @@ const ActionTimeline: React.FC<ActionTimelineProps> = ({ groupedActions }) => {
                 }
                 const action = item as Action;
                 const reasonText = getReasonText(action);
-                const isNegPrice = action.currentPrice && action.currentPrice.dollarsPerKWH < 0;
+                const isNegPrice = action.currentPrice && (action.currentPrice.dollarsPerKWH+action.currentPrice.gridUseDollarsPerKWH) < 0;
                 const showDeficit = action.deficitAt && action.deficitAt !== '0001-01-01T00:00:00Z';
                 const showCapacity = action.capacityAt && action.capacityAt !== '0001-01-01T00:00:00Z';
 

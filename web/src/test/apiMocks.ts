@@ -40,6 +40,7 @@ export const defaultSettings = {
         rateClass: 'singleFamilyWithoutElectricHeat',
         variableDeliveryRate: false,
     },
+    ess: 'franklin',
     hasCredentials: {
         franklin: false
     }
@@ -79,12 +80,25 @@ export const defaultUtilities = [
     },
 ];
 
+export const defaultESSProviders = [
+    {
+        id: 'franklin',
+        name: 'FranklinWH',
+        credentials: [
+            { field: 'username', name: 'Username / Email', type: 'string', required: true },
+            { field: 'password', name: 'Password', type: 'password', required: true },
+            { field: 'gatewayID', name: 'Target Gateway ID (Optional)', type: 'string', required: false },
+        ]
+    }
+];
+
 export const setupDefaultApiMocks = (api: any) => {
     if (typeof api.fetchActions?.mockResolvedValue === 'function') api.fetchActions.mockResolvedValue([]);
     if (typeof api.fetchSavings?.mockResolvedValue === 'function') api.fetchSavings.mockResolvedValue(defaultSavings);
     if (typeof api.fetchAuthStatus?.mockResolvedValue === 'function') api.fetchAuthStatus.mockResolvedValue(defaultAuthStatus);
     if (typeof api.fetchSettings?.mockResolvedValue === 'function') api.fetchSettings.mockResolvedValue(defaultSettings);
     if (typeof api.fetchUtilities?.mockResolvedValue === 'function') api.fetchUtilities.mockResolvedValue(defaultUtilities);
+    if (typeof api.fetchESSList?.mockResolvedValue === 'function') api.fetchESSList.mockResolvedValue(defaultESSProviders);
     if (typeof api.updateSettings?.mockResolvedValue === 'function') api.updateSettings.mockResolvedValue(undefined);
     if (typeof api.login?.mockResolvedValue === 'function') api.login.mockResolvedValue(undefined);
     if (typeof api.logout?.mockResolvedValue === 'function') api.logout.mockResolvedValue(undefined);

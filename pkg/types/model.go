@@ -115,25 +115,26 @@ type Storm struct {
 
 // SystemStatus represents the current system status.
 type SystemStatus struct {
-	Timestamp             time.Time     `json:"timestamp"`
-	BatterySOC            float64       `json:"batterySOC"`            // 0-100
-	EachBatterySOC        []float64     `json:"eachBatterySOC"`        // 0-100
-	BatteryKW             float64       `json:"batteryKW"`             // Positive for discharge, negative for charge
-	EachBatteryKW         []float64     `json:"eachBatteryKW"`         // Positive for discharge, negative for charge
-	BatteryCapacityKWH    float64       `json:"batteryCapacityKWH"`    // Total capacity of the battery (kWh)
-	MaxBatteryChargeKW    float64       `json:"maxBatteryChargeKW"`    // Maximum charge rate of the battery (kW)
-	MaxBatteryDischargeKW float64       `json:"maxBatteryDischargeKW"` // Maximum discharge rate of the battery (kW)
-	SolarKW               float64       `json:"solarKW"`               // Solar generation (kW)
-	GridKW                float64       `json:"gridKW"`                // Grid import/export (kW, + import, - export)
-	HomeKW                float64       `json:"homeKW"`                // Home consumption (kW)
-	CanExportSolar        bool          `json:"canExportSolar"`        // True if solar exporting is enabled
-	CanExportBattery      bool          `json:"canExportBattery"`      // True if battery exporting is enabled
-	CanImportBattery      bool          `json:"canImportBattery"`      // True if battery importing is enabled
-	ElevatedMinBatterySOC bool          `json:"elevatedMinBatterySOC"` // True if the minimum SOC is elevated to force standby
-	BatteryAboveMinSOC    bool          `json:"batteryAboveMinSOC"`    // True if the battery SOC is above the minimum SOC
-	EmergencyMode         bool          `json:"emergencyMode"`
-	Alarms                []SystemAlarm `json:"alarms"`
-	Storms                []Storm       `json:"storms"`
+	Timestamp               time.Time     `json:"timestamp"`
+	BatterySOC              float64       `json:"batterySOC"`            // 0-100
+	EachBatterySOC          []float64     `json:"eachBatterySOC"`        // 0-100
+	BatteryKW               float64       `json:"batteryKW"`             // Positive for discharge, negative for charge
+	EachBatteryKW           []float64     `json:"eachBatteryKW"`         // Positive for discharge, negative for charge
+	BatteryCapacityKWH      float64       `json:"batteryCapacityKWH"`    // Total capacity of the battery (kWh)
+	MaxBatteryChargeKW      float64       `json:"maxBatteryChargeKW"`    // Maximum charge rate of the battery (kW)
+	MaxBatteryDischargeKW   float64       `json:"maxBatteryDischargeKW"` // Maximum discharge rate of the battery (kW)
+	SolarKW                 float64       `json:"solarKW"`               // Solar generation (kW)
+	GridKW                  float64       `json:"gridKW"`                // Grid import/export (kW, + import, - export)
+	HomeKW                  float64       `json:"homeKW"`                // Home consumption (kW)
+	CanExportSolar          bool          `json:"canExportSolar"`        // True if solar exporting is enabled
+	CanExportBattery        bool          `json:"canExportBattery"`      // True if battery exporting is enabled
+	CanImportBattery        bool          `json:"canImportBattery"`      // True if battery importing is enabled
+	ElevatedMinBatterySOC   bool          `json:"elevatedMinBatterySOC"` // True if the minimum SOC is elevated to force standby
+	BatteryAboveMinSOC      bool          `json:"batteryAboveMinSOC"`    // True if the battery SOC is above the minimum SOC
+	EmergencyMode           bool          `json:"emergencyMode"`
+	BatteryChargingDisabled bool          `json:"batteryChargingDisabled"` // True if battery charging is disabled due to alarms
+	Alarms                  []SystemAlarm `json:"alarms"`
+	Storms                  []Storm       `json:"storms"`
 }
 
 // BatteryMode represents the mode of the battery.

@@ -1,28 +1,26 @@
 import { useEffect, useState } from 'react';
-import { fetchSettings, updateSettings, fetchUtilities, type Settings as SettingsType, type UtilityProviderInfo, type UtilityRateOption } from '../api';
+import { fetchSettings, updateSettings, fetchUtilities, fetchESSList, type Settings as SettingsType, type UtilityProviderInfo, type UtilityRateOption, type ESSProviderInfo } from '../api';
 import { Field } from '@base-ui/react/field';
 import { Input } from '@base-ui/react/input';
 import { Switch } from '@base-ui/react/switch';
 import { Collapsible } from '@base-ui/react/collapsible';
 import { Select } from '@base-ui/react/select';
 import './Settings.css';
-import SparkMD5 from 'spark-md5';
 
 
 const Settings = ({ siteID }: { siteID?: string }) => {
     const [settings, setSettings] = useState<SettingsType | null>(null);
     const [utilities, setUtilities] = useState<UtilityProviderInfo[]>([]);
+    const [essProviders, setEssProviders] = useState<ESSProviderInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-    const [franklinUsername, setFranklinUsername] = useState("");
-    const [franklinPassword, setFranklinPassword] = useState("");
-    const [franklinGatewayID, setFranklinGatewayID] = useState("");
+    const [essCredentials, setEssCredentials] = useState<Record<string, string>>({});
 
     // UI State for consolidated views
     const [editUtility, setEditUtility] = useState(false);
-    const [editFranklin, setEditFranklin] = useState(false);
+    const [editESS, setEditESS] = useState(false);
 
     useEffect(() => {
         loadData();
@@ -31,12 +29,14 @@ const Settings = ({ siteID }: { siteID?: string }) => {
     const loadData = async () => {
         try {
             setLoading(true);
-            const [settingsData, utilitiesData] = await Promise.all([
+            const [settingsData, utilitiesData, essProvidersData] = await Promise.all([
                 fetchSettings(siteID),
-                fetchUtilities(siteID)
+                fetchUtilities(siteID),
+                fetchESSList(siteID)
             ]);
             setSettings(settingsData);
             setUtilities(utilitiesData);
+            setEssProviders(essProvidersData);
             setError(null);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to load settings');
@@ -53,34 +53,44 @@ const Settings = ({ siteID }: { siteID?: string }) => {
             setError(null);
             setSuccessMessage(null);
 
-            let franklinCredentials = undefined;
-            if (franklinUsername || franklinPassword || franklinGatewayID) {
-                // If any credential field is filled, we include credentials update
-                if (!franklinUsername || !franklinPassword) {
-                    throw new Error("Franklin credential fields (Username, Password) must be filled to update credentials.");
+            let credentialsPayload: any = undefined;
+            if (Object.keys(essCredentials).length > 0) {
+                const provider = essProviders.find(p => p.id === settings.ess);
+                if (provider) {
+                    credentialsPayload = { [provider.id]: {} };
+                    for (const cred of provider.credentials) {
+                        const val = essCredentials[cred.field] || "";
+                        if (cred.required && !val) {
+                            throw new Error(`The ${cred.name} field is required.`);
+                        }
+                        if (val) {
+                            credentialsPayload[provider.id][cred.field] = val;
+                        }
+                    }
                 }
-
-                franklinCredentials = {
-                    username: franklinUsername,
-                    md5Password: SparkMD5.hash(franklinPassword),
-                    gatewayID: franklinGatewayID
-                };
             }
 
-            await updateSettings(settings, siteID, franklinCredentials);
+            await updateSettings(settings, siteID, credentialsPayload);
             setSuccessMessage('Settings saved successfully');
 
-            if (franklinCredentials) {
+            if (credentialsPayload && settings.ess) {
                 setSettings({
                     ...settings,
                     hasCredentials: {
                         ...settings.hasCredentials,
-                        franklin: true
+                        [settings.ess]: true
                     }
                 });
-                setEditFranklin(false);
-                // Clear password field after save
-                setFranklinPassword("");
+                setEditESS(false);
+                // Clear password fields after save
+                const clearedCreds = { ...essCredentials };
+                const provider = essProviders.find(p => p.id === settings.ess);
+                provider?.credentials.forEach(c => {
+                    if (c.type === 'password') {
+                        clearedCreds[c.field] = "";
+                    }
+                });
+                setEssCredentials(clearedCreds);
             }
 
             setTimeout(() => setSuccessMessage(null), 3000);
@@ -316,55 +326,75 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                     </div>
                 )}
 
-                {/* Franklin Credentials Section */}
+                {/* ESS Configuration Section */}
                 <div className="section-header">
-                    <h3 id="franklin-credentials">Franklin Credentials</h3>
-                    {settings.hasCredentials.franklin && !editFranklin && (
-                        <button type="button" className="text-button" onClick={() => setEditFranklin(true)}>Update</button>
+                    <h3 id="ess-credentials">Energy Storage System</h3>
+                    {settings.ess && settings.hasCredentials?.[settings.ess] && !editESS && (
+                        <button type="button" className="text-button" onClick={() => setEditESS(true)}>Update</button>
                     )}
                 </div>
 
-                {settings.hasCredentials.franklin && !editFranklin ? (
-                    <div className="configured-summary" onClick={() => setEditFranklin(true)}>
+                {settings.ess && settings.hasCredentials?.[settings.ess] && !editESS ? (
+                    <div className="configured-summary" onClick={() => setEditESS(true)}>
                         <div className="summary-info">
-                            <span className="summary-label">Franklin Energy System</span>
+                            <span className="summary-label">{essProviders.find(p => p.id === settings.ess)?.name || settings.ess || 'Unknown System'}</span>
                         </div>
                         <div className="summary-status">Connected</div>
                     </div>
                 ) : (
-                    <div className={editFranklin ? "edit-section" : ""}>
+                    <div className={editESS ? "edit-section" : ""}>
                         <Field.Root className="form-group">
-                            <Field.Label>Username (Email)</Field.Label>
-                            <Input
-                                id="franklinUsername"
-                                type="email"
-                                value={franklinUsername}
-                                onChange={(e) => setFranklinUsername(e.target.value)}
-                                placeholder="Enter FranklinWH email"
-                            />
+                            <Field.Label>System Type</Field.Label>
+                            <Select.Root
+                                value={settings.ess || ""}
+                                onValueChange={(value) => {
+                                    setEditESS(true);
+                                    setSettings({ ...settings, ess: value as string });
+                                    setEssCredentials({}); // clear credentials when changing provider
+                                }}
+                            >
+                                <Select.Trigger className="select-trigger" aria-label="ESS Type">
+                                    <Select.Value>
+                                        {essProviders.find(u => u.id === settings.ess)?.name || 'Select a system type...'}
+                                    </Select.Value>
+                                </Select.Trigger>
+                                <Select.Portal>
+                                    <Select.Positioner className="select-positioner">
+                                        <Select.Popup className="select-popup">
+                                            <Select.Item className="select-item" value="">
+                                                <Select.ItemText>Select a system type...</Select.ItemText>
+                                            </Select.Item>
+                                            {essProviders.map(p => (
+                                                <Select.Item key={p.id} className="select-item" value={p.id}>
+                                                    <Select.ItemText>{p.name}</Select.ItemText>
+                                                </Select.Item>
+                                            ))}
+                                        </Select.Popup>
+                                    </Select.Positioner>
+                                </Select.Portal>
+                            </Select.Root>
                         </Field.Root>
-                        <Field.Root className="form-group">
-                            <Field.Label>Password</Field.Label>
-                            <Input
-                                id="franklinPassword"
-                                type="password"
-                                value={franklinPassword}
-                                onChange={(e) => setFranklinPassword(e.target.value)}
-                                placeholder="Enter new password to update"
-                            />
-                        </Field.Root>
-                        <Field.Root className="form-group">
-                            <Field.Label>Gateway ID (Optional)</Field.Label>
-                            <Input
-                                id="franklinGatewayID"
-                                type="text"
-                                value={franklinGatewayID}
-                                onChange={(e) => setFranklinGatewayID(e.target.value)}
-                                placeholder="Enter FranklinWH Gateway ID"
-                            />
-                        </Field.Root>
-                        {editFranklin && (
-                            <button type="button" className="text-button cancel-button" onClick={() => setEditFranklin(false)}>Done</button>
+
+                        {(() => {
+                            const provider = essProviders.find(p => p.id === settings.ess);
+                            if (!provider) return null;
+
+                            return provider.credentials.map(cred => (
+                                <Field.Root key={cred.field} className="form-group">
+                                    <Field.Label>{cred.name}</Field.Label>
+                                    <Input
+                                        type={cred.type === 'password' ? 'password' : 'text'}
+                                        value={essCredentials[cred.field] || ""}
+                                        onChange={(e) => setEssCredentials({ ...essCredentials, [cred.field]: e.target.value })}
+                                        placeholder={`Enter ${cred.name}`}
+                                    />
+                                    {cred.description && <Field.Description>{cred.description}</Field.Description>}
+                                </Field.Root>
+                            ));
+                        })()}
+
+                        {editESS && (
+                            <button type="button" className="text-button cancel-button" onClick={() => setEditESS(false)}>Done</button>
                         )}
                     </div>
                 )}

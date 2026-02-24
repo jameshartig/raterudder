@@ -61,7 +61,7 @@ func TestComEdUtilityInfo(t *testing.T) {
 	rate := info.Rates[0]
 	assert.Equal(t, "comed_besh", rate.ID)
 	assert.NotEmpty(t, rate.Name)
-	require.Len(t, rate.Options, 2, "comed_besh should have exactly 2 options")
+	require.Len(t, rate.Options, 3, "comed_besh should have exactly 3 options")
 
 	t.Run("RateClass option", func(t *testing.T) {
 		opt := rate.Options[0]
