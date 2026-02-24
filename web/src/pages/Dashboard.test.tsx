@@ -261,8 +261,6 @@ describe('Dashboard', () => {
             gridExported: 5,
             homeUsed: 25,
             batteryUsed: 11,
-            lastPrice: 0.123,
-            lastCost: 0.150
         });
 
         renderWithRouter(<Dashboard />);
@@ -310,9 +308,7 @@ describe('Dashboard', () => {
             gridImported: 20,
             gridExported: 2,
             homeUsed: 23,
-            batteryUsed: 5,
-            lastPrice: 0.123,
-            lastCost: 0.150
+            batteryUsed: 5
         });
 
         renderWithRouter(<Dashboard />);
@@ -339,103 +335,6 @@ describe('Dashboard', () => {
         });
     });
 
-    it('renders deficit charge reason with future price and deficit time', async () => {
-        const deficitTime = new Date('2026-02-15T14:00:00').toISOString();
-        const actions = [{
-            reason: 'deficitCharge',
-            description: 'Charging Optimized: Projected Deficit...',
-            timestamp: new Date().toISOString(),
-            batteryMode: 2, // ChargeAny
-            solarMode: 0,
-            currentPrice: { dollarsPerKWH: 0.10, tsStart: '', tsEnd: '' },
-            futurePrice: { dollarsPerKWH: 0.50, tsStart: '', tsEnd: '' },
-            deficitAt: deficitTime,
-        }];
-        (fetchActions as any).mockResolvedValue(actions);
-
-        renderWithRouter(<Dashboard />);
-
-        await waitFor(() => {
-            // Should show the templatized deficit charge text
-            expect(screen.getByText(/The battery will deplete.*Charging now.*\$ 0\.100.*cheaper than.*\$ 0\.500/)).toBeInTheDocument();
-            expect(screen.getByText(/Estimated savings: \$ 0\.400\/kWh/)).toBeInTheDocument();
-        });
-    });
-
-    it('renders charge survive peak reason text', async () => {
-        const actions = [{
-            reason: 'chargeSurvivePeak',
-            description: 'Charging Optimized: Cannot survive peak pricing...',
-            timestamp: new Date().toISOString(),
-            batteryMode: 2, // ChargeAny
-            solarMode: 0,
-            currentPrice: { dollarsPerKWH: 0.10, tsStart: '', tsEnd: '' },
-            futurePrice: { dollarsPerKWH: 0.50, tsStart: '', tsEnd: '' },
-        }];
-        (fetchActions as any).mockResolvedValue(actions);
-
-        renderWithRouter(<Dashboard />);
-
-        await waitFor(() => {
-            expect(screen.getByText(/Battery will deplete before forecasted.*\$ 0\.500.*Charging now.*\$ 0\.100/)).toBeInTheDocument();
-            expect(screen.getByText(/Estimated savings: \$ 0\.400\/kWh/)).toBeInTheDocument();
-        });
-    });
-
-    it('renders sufficient battery reason text', async () => {
-        const actions = [{
-            reason: 'sufficientBattery',
-            description: 'Sufficient battery.',
-            timestamp: new Date().toISOString(),
-            batteryMode: -1, // Load
-            solarMode: 0,
-        }];
-        (fetchActions as any).mockResolvedValue(actions);
-
-        renderWithRouter(<Dashboard />);
-
-        await waitFor(() => {
-            expect(screen.getByText(/battery has enough stored energy to meet predicted demand/)).toBeInTheDocument();
-        });
-    });
-
-    it('renders arbitrage charge reason text', async () => {
-        const actions = [{
-            reason: 'arbitrageCharge',
-            description: 'Charging Optimized: Arbitrage...',
-            timestamp: new Date().toISOString(),
-            batteryMode: 2, // ChargeAny
-            solarMode: 0,
-            currentPrice: { dollarsPerKWH: 0.10, tsStart: '', tsEnd: '' },
-            futurePrice: { dollarsPerKWH: 0.50, tsStart: '', tsEnd: '' },
-        }];
-        (fetchActions as any).mockResolvedValue(actions);
-
-        renderWithRouter(<Dashboard />);
-
-        await waitFor(() => {
-            expect(screen.getByText(/Forecast shows higher prices.*\$ 0\.500.*compared to right now.*\$ 0\.100/)).toBeInTheDocument();
-            expect(screen.getByText(/Estimated savings: \$ 0\.400\/kWh/)).toBeInTheDocument();
-        });
-    });
-
-    it('appends disabled solar export text when price is negative and mode is NoExport', async () => {
-        const actions = [{
-            reason: 'sufficientBattery',
-            description: 'Sufficient battery.',
-            timestamp: new Date().toISOString(),
-            batteryMode: -1, // Load
-            solarMode: 1, // NoExport
-            currentPrice: { dollarsPerKWH: -0.05, tsStart: '', tsEnd: '' },
-        }];
-        (fetchActions as any).mockResolvedValue(actions);
-
-        renderWithRouter(<Dashboard />);
-
-        await waitFor(() => {
-            expect(screen.getByText(/battery has enough stored energy to meet predicted demand.*Disabled solar export/)).toBeInTheDocument();
-        });
-    });
 
     it('shows banner when Franklin credentials are missing', async () => {
         (fetchActions as any).mockResolvedValue([]);
@@ -833,25 +732,34 @@ describe('Dashboard', () => {
         });
     });
 
-    it('renders prevent solar curtailment reason text', async () => {
-        const capacityTime = new Date('2026-02-15T18:00:00').toISOString();
-        const actions = [{
-            reason: ActionReason.PreventSolarCurtailment,
-            description: 'Solar curtailment likely',
-            timestamp: new Date().toISOString(),
-            batteryMode: -1, // Load
-            solarMode: 0,
-            capacityAt: capacityTime,
-        }];
-        (fetchActions as any).mockResolvedValue(actions);
 
-        renderWithRouter(<Dashboard />);
+    it('renders only savings in overview mode (siteID=ALL)', async () => {
+        (fetchActions as any).mockResolvedValue([{ description: 'Should not show' }]);
+        (fetchSavings as any).mockResolvedValue({
+            batterySavings: 10,
+            solarSavings: 20,
+            cost: 5,
+            credit: 2,
+            avoidedCost: 12,
+            chargingCost: 2,
+            solarGenerated: 30,
+            gridImported: 15,
+            gridExported: 5,
+            homeUsed: 40,
+            batteryUsed: 10,
+        });
+        (fetchSettings as any).mockResolvedValue({ utilityProvider: 'test' });
+
+        renderWithRouter(<Dashboard siteID="ALL" />);
 
         await waitFor(() => {
-            expect(screen.getByText(/Solar generation will exceed battery capacity/)).toBeInTheDocument();
-            expect(screen.getByText(/Using the battery now to create headroom/)).toBeInTheDocument();
-            // Should show capacity tag
-            expect(screen.getByText(/Full by:/)).toBeInTheDocument();
+            expect(screen.getByText('Net Savings Today')).toBeInTheDocument();
+            expect(screen.getByText(/\$ 32\.00/)).toBeInTheDocument(); // 10+20+2
         });
+
+        // Should NOT show current status or actions
+        expect(document.querySelector('.current-status-card')).not.toBeInTheDocument();
+        expect(screen.queryByText('Should not show')).not.toBeInTheDocument();
+        expect(document.querySelector('.action-list')).not.toBeInTheDocument();
     });
 });

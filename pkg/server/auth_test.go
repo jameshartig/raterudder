@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,6 +75,10 @@ func TestAuthMiddleware(t *testing.T) {
 		userReg, ok := r.Context().Value(userToRegisterContextKey).(types.User)
 		if ok {
 			w.Header().Set("X-Register-Email", userReg.Email)
+		}
+		sites, ok := r.Context().Value(allUserSiteIDsContextKey).([]string)
+		if ok {
+			w.Header().Set("X-All-Site-IDs", strings.Join(sites, ","))
 		}
 		w.WriteHeader(http.StatusOK)
 	})
@@ -350,6 +355,51 @@ func TestAuthMiddleware(t *testing.T) {
 		assert.Empty(t, w.Header().Get("X-Email"))
 		// Should have register email header
 		assert.Equal(t, "user@example.com", w.Header().Get("X-Register-Email"))
+	})
+
+	t.Run("Multi Site Mode - Auth and SiteID ALL (Regular User)", func(t *testing.T) {
+		server.singleSite = false
+		w := httptest.NewRecorder()
+		cookie := &http.Cookie{Name: authTokenCookie, Value: "valid-token"}
+		req := createReq("GET", "/api/test?siteID=ALL", nil, cookie)
+
+		mockStorage.On("GetUser", mock.Anything, "user@example.com").Return(types.User{
+			ID:      "user@example.com",
+			Email:   "user@example.com",
+			SiteIDs: []string{"site1", "site2"},
+		}, nil).Once()
+
+		server.authMiddleware(testHandler).ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "ALL", w.Header().Get("X-Site-ID"))
+		assert.Equal(t, "site1,site2", w.Header().Get("X-All-Site-IDs"))
+	})
+
+	t.Run("Multi Site Mode - Auth and SiteID ALL (Admin)", func(t *testing.T) {
+		server.singleSite = false
+		server.adminEmails = []string{"user@example.com"}
+		defer func() { server.adminEmails = nil }()
+
+		w := httptest.NewRecorder()
+		cookie := &http.Cookie{Name: authTokenCookie, Value: "valid-token"}
+		req := createReq("GET", "/api/test?siteID=ALL", nil, cookie)
+
+		mockStorage.On("GetUser", mock.Anything, "user@example.com").Return(types.User{
+			ID:      "user@example.com",
+			Email:   "user@example.com",
+			SiteIDs: []string{"site1"},
+		}, nil).Once()
+
+		mockStorage.On("ListSites", mock.Anything).Return([]types.Site{
+			{ID: "site1"},
+		}, nil).Once()
+
+		server.authMiddleware(testHandler).ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "ALL", w.Header().Get("X-Site-ID"))
+		assert.Equal(t, "site1", w.Header().Get("X-All-Site-IDs"))
 	})
 }
 

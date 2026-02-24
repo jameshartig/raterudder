@@ -28,7 +28,5 @@ type SavingsStats struct {
 	GridExported    float64                       `json:"gridExported"`   // Total grid exported
 	HomeUsed        float64                       `json:"homeUsed"`       // Total home usage
 	BatteryUsed     float64                       `json:"batteryUsed"`    // Total battery discharged
-	LastCost        float64                       `json:"lastCost"`       // Latest cost of grid import
-	LastPrice       float64                       `json:"lastPrice"`      // Latest base price
 	HourlyDebugging []HourlySavingsStatsDebugging `json:"hourlyDebugging"`
 }

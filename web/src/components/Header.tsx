@@ -29,7 +29,10 @@ const Header: React.FC<HeaderProps> = ({ loggedIn, siteIDs, selectedSiteID, onSi
                     {loggedIn && siteIDs.length > 1 && (
                         <Select.Root
                             value={selectedSiteID}
-                            items={Object.fromEntries(siteIDs.map(id => [id, id]))}
+                            items={{
+                                ...Object.fromEntries(siteIDs.map(id => [id, id])),
+                                "ALL": "Overview"
+                            }}
                             onValueChange={(value) => onSiteChange(value as string)}
                         >
                             <Select.Trigger className="site-selector-header">
@@ -38,6 +41,9 @@ const Header: React.FC<HeaderProps> = ({ loggedIn, siteIDs, selectedSiteID, onSi
                             <Select.Portal>
                                 <Select.Positioner className="select-positioner">
                                     <Select.Popup className="select-popup">
+                                        <Select.Item className="select-item" value="ALL">
+                                            <Select.ItemText>Overview</Select.ItemText>
+                                        </Select.Item>
                                         {siteIDs.map(id => (
                                             <Select.Item key={id} className="select-item" value={id}>
                                                 <Select.ItemText>{id}</Select.ItemText>
@@ -63,8 +69,12 @@ const Header: React.FC<HeaderProps> = ({ loggedIn, siteIDs, selectedSiteID, onSi
                         {loggedIn ? (
                             <>
                                 <Link to="/dashboard" className="nav-link" onClick={() => setIsMenuOpen(false)}>Dashboard</Link>
-                                <Link to="/forecast" className="nav-link" onClick={() => setIsMenuOpen(false)}>Forecast</Link>
-                                <Link to="/settings" className="nav-link" onClick={() => setIsMenuOpen(false)}>Settings</Link>
+                                {selectedSiteID !== 'ALL' && (
+                                    <>
+                                        <Link to="/forecast" className="nav-link" onClick={() => setIsMenuOpen(false)}>Forecast</Link>
+                                        <Link to="/settings" className="nav-link" onClick={() => setIsMenuOpen(false)}>Settings</Link>
+                                    </>
+                                )}
                             </>
                         ) : (
                             <span className="nav-empty-spacer"></span>

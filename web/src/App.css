@@ -233,8 +233,8 @@ button {
 }
 
 
-/* Savings Summary Card Redesign V2 */
-.savings-summary-v2 {
+/* Savings Hero Card */
+.savings-hero {
   background: var(--surface);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);

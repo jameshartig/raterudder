@@ -136,10 +136,53 @@ func TestHandleHistorySavings(t *testing.T) {
 
 	// Net Savings calculation removed from backend.
 
-	// Last price/cost
-	assert.Equal(t, 0.30, savings.LastPrice)
-	assert.Equal(t, 0.30, savings.LastCost)
-
 	// Home Used: 10 + 10 + 0 + 0 + 10 = 30
 	assert.Equal(t, 30.0, savings.HomeUsed)
+}
+
+func TestHandleHistorySavingsAll(t *testing.T) {
+	mockStore := &mockStorage{}
+	s := &Server{storage: mockStore, bypassAuth: true}
+
+	start := time.Now().Truncate(24 * time.Hour)
+	end := start.Add(24 * time.Hour)
+
+	// Site 1 data
+	mockStore.On("GetPriceHistory", mock.Anything, "site1", mock.Anything, mock.Anything).Return([]types.Price{
+		{TSStart: start, DollarsPerKWH: 0.10},
+	}, nil)
+	mockStore.On("GetEnergyHistory", mock.Anything, "site1", mock.Anything, mock.Anything).Return([]types.EnergyStats{
+		{TSHourStart: start, HomeKWH: 10, GridImportKWH: 10},
+	}, nil)
+
+	// Site 2 data
+	mockStore.On("GetPriceHistory", mock.Anything, "site2", mock.Anything, mock.Anything).Return([]types.Price{
+		{TSStart: start, DollarsPerKWH: 0.20},
+	}, nil)
+	mockStore.On("GetEnergyHistory", mock.Anything, "site2", mock.Anything, mock.Anything).Return([]types.EnergyStats{
+		{TSHourStart: start, HomeKWH: 20, GridImportKWH: 20},
+	}, nil)
+
+	req, _ := http.NewRequest("GET", "/api/history/savings?siteID=ALL&start="+start.Format(time.RFC3339)+"&end="+end.Format(time.RFC3339), nil)
+	// Mock authMiddleware effects
+	ctx := req.Context()
+	ctx = context.WithValue(ctx, siteIDContextKey, SiteIDAll)
+	ctx = context.WithValue(ctx, allUserSiteIDsContextKey, []string{"site1", "site2"})
+	req = req.WithContext(ctx)
+
+	rr := httptest.NewRecorder()
+	s.handleHistorySavings(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	var savings types.SavingsStats
+	err := json.Unmarshal(rr.Body.Bytes(), &savings)
+	assert.NoError(t, err)
+
+	// Site 1 cost: 10 * 0.10 = 1.00
+	// Site 2 cost: 20 * 0.20 = 4.00
+	// Total: 5.00
+	assert.Equal(t, 5.00, savings.Cost)
+	assert.Equal(t, 30.0, savings.HomeUsed) // 10 + 20
+	assert.Empty(t, savings.HourlyDebugging)
 }

@@ -25,12 +25,16 @@ import (
 	"google.golang.org/api/idtoken"
 )
 
-const authTokenCookie = "auth_token"
+const (
+	authTokenCookie = "auth_token"
+	SiteIDAll       = "ALL"
+)
 
 type contextKey string
 
 const (
 	siteIDContextKey         contextKey = "siteID"
+	allUserSiteIDsContextKey contextKey = "allUserSiteIDs"
 	userContextKey           contextKey = "user"
 	userToRegisterContextKey contextKey = "userToRegister"
 )
@@ -171,6 +175,13 @@ func (s *Server) getSiteID(r *http.Request) string {
 	}
 	// we want to have a stack trace when this happens
 	panic("no siteID in context")
+}
+
+func (s *Server) getAllUserSiteIDs(r *http.Request) []string {
+	if sites, ok := r.Context().Value(allUserSiteIDsContextKey).([]string); ok {
+		return sites
+	}
+	return nil
 }
 
 // Run starts the HTTP server and blocks until the context is canceled or an error occurs.

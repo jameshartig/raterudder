@@ -160,6 +160,9 @@ function AppContent() {
     const handleSiteChange = (id: string) => {
         if (viewSiteOverride) setViewSiteOverride(null);
         setSelectedSiteID(id);
+        if (id === 'ALL') {
+            navigate('/dashboard');
+        }
     };
 
     return (

@@ -67,15 +67,19 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 
 		var email string
 		var userID string
+		// userFound is true if the user is a real user found in the database
 		var userFound bool
+		// user might be a mock/fake user if this is bypassAuth or singleSite
+		var user types.User
 		var authViaUpdateSpecific bool
 		// handle authentication
 		if s.bypassAuth {
-			ctx = context.WithValue(ctx, userContextKey, types.User{
+			user = types.User{
 				ID:      "",
 				SiteIDs: []string{types.SiteIDNone},
 				Admin:   true,
-			})
+			}
+			ctx = context.WithValue(ctx, userContextKey, user)
 		} else {
 			var authSuccess bool
 
@@ -140,7 +144,6 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 
 			if authSuccess {
 				// fetch user
-				var user types.User
 				if s.singleSite {
 					user = types.User{
 						ID:      userID,
@@ -174,20 +177,22 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 						}
 					} else {
 						userFound = true
-						// User found, proceed with normal logic
-						if siteID == "" && !ignoreUserNotFound {
-							if len(user.SiteIDs) == 1 {
-								siteID = user.SiteIDs[0]
-							} else {
-								writeJSONError(w, "siteID required", http.StatusBadRequest)
-								return
-							}
+						// fill in default siteID if
+						if siteID == "" && len(user.SiteIDs) == 1 {
+							siteID = user.SiteIDs[0]
 						}
 					}
 				}
 
-				if !s.singleSite && siteID != "" && !authViaUpdateSpecific {
-					// 3. Check Permissions
+				var isAdmin bool
+				for _, admin := range s.adminEmails {
+					if email == admin {
+						isAdmin = true
+						// Do not set user.Admin = true to grant read-only access
+						break
+					}
+				}
+				if !s.singleSite && siteID != "" && siteID != SiteIDAll && !authViaUpdateSpecific && !isAdmin {
 					site, err := s.storage.GetSite(ctx, siteID)
 					if err != nil {
 						log.Ctx(ctx).WarnContext(ctx, "site lookup failed", slog.String("siteID", siteID), slog.Any("error", err))
@@ -201,15 +206,6 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 							permFound = true
 							user.Admin = true
 							break
-						}
-					}
-					if !permFound {
-						for _, admin := range s.adminEmails {
-							if email == admin {
-								permFound = true
-								// Do not set user.Admin = true to grant read-only access
-								break
-							}
 						}
 					}
 					if !permFound {
@@ -254,6 +250,9 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			slog.Bool("userFound", userFound),
 		)
 
+		if siteID == SiteIDAll {
+			ctx = context.WithValue(ctx, allUserSiteIDsContextKey, user.SiteIDs)
+		}
 		ctx = context.WithValue(ctx, siteIDContextKey, siteID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

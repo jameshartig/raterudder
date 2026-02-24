@@ -17,9 +17,7 @@ export const defaultSavings = {
     gridImported: 0,
     gridExported: 0,
     homeUsed: 0,
-    batteryUsed: 0,
-    lastPrice: 0,
-    lastCost: 0,
+    batteryUsed: 0
 };
 
 export const defaultSettings = {

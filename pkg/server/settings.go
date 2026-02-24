@@ -97,11 +97,6 @@ type SettingsRes struct {
 	HasCredentials HasCredentials `json:"hasCredentials"`
 }
 
-var validEnvironments = map[string]bool{
-	"production": true,
-	"staging":    true,
-}
-
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	siteID := s.getSiteID(r)
