@@ -76,7 +76,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		// handle authentication
 		if s.bypassAuth {
 			user = types.User{
-				ID:    "",
+				ID:    "fake",
 				Sites: []types.UserSite{{ID: types.SiteIDNone}},
 				Admin: true,
 			}

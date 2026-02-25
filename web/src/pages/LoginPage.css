@@ -77,3 +77,116 @@
   background: var(--border);
   margin: 0;
 }
+
+/* ============================================
+   Beta Interstitial Page
+   ============================================ */
+
+.beta-interstitial-title {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+}
+
+.beta-interstitial-desc {
+  color: var(--text-secondary);
+  margin-bottom: 2rem;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.beta-interstitial-form {
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.beta-interstitial-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.beta-interstitial-select-trigger {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  font-size: 1rem;
+  background-color: var(--surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.beta-interstitial-select-popup {
+  min-width: var(--anchor-width);
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+
+.beta-interstitial-select-item {
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  outline: none;
+  color: var(--text-primary);
+}
+
+.beta-interstitial-select-item[data-highlighted] {
+  background-color: var(--surface-subtle);
+}
+
+.beta-interstitial-feedback {
+  margin-top: 2rem;
+  padding: 1.25rem;
+  background-color: #fffbeb;
+  color: #b45309;
+  border-radius: var(--radius-md);
+  text-align: left;
+  font-size: 0.9rem;
+  border: 1px solid #fde68a;
+  line-height: 1.5;
+}
+
+.beta-interstitial-feedback p {
+  margin: 0;
+}
+
+.beta-interstitial-feedback-link {
+  color: #b45309;
+  text-decoration: underline;
+  font-weight: 600;
+  transition: color 0.15s ease;
+}
+
+.beta-interstitial-feedback-link:hover {
+  color: #92400e;
+}
+
+.beta-interstitial-continue-btn {
+  margin-top: 2rem;
+  width: 100%;
+  padding: 0.875rem;
+  background-color: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 1rem;
+  transition: background-color 0.2s;
+  box-shadow: var(--shadow-sm);
+}
+
+.beta-interstitial-continue-btn:hover {
+  background-color: var(--accent-hover);
+}

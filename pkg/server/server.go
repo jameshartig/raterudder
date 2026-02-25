@@ -43,7 +43,7 @@ const (
 // tokenVerifier is a function that validates a Google or Apple ID Token.
 type tokenVerifier func(ctx context.Context, rawIDToken string) (*oidc.IDToken, error)
 
-// Server handles the HTTP API and control logic for the Raterudder system.
+// Server handles the HTTP API and control logic for the RateRudder system.
 // It orchestrates interactions between the utility provider, ESS, and storage.
 type Server struct {
 	utilities  *utility.Map
@@ -180,7 +180,7 @@ func Configured(u *utility.Map, e *ess.Map, s storage.Database) *Server {
 		}
 		srv.encryptionKey = *encryptionKey
 
-		if *devProxy != "" && *oidcAudience == "" && *adminEmails == "" {
+		if srv.devProxy != "" && len(srv.oidcAudiences) == 0 && len(srv.adminEmails) == 0 {
 			srv.bypassAuth = true
 		}
 	})

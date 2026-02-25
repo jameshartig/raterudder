@@ -80,7 +80,7 @@ func franklinInfo() types.ESSProviderInfo {
 				Name:        "Gateway ID (Optional)",
 				Type:        "string",
 				Required:    false,
-				Description: "If left empty, Raterudder will attempt to auto-discover the gateway ID.",
+				Description: "If left empty, RateRudder will attempt to auto-discover the gateway ID.",
 			},
 		},
 	}

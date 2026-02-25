@@ -25,8 +25,9 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onLoginError, aut
     return (
         <div className="auth-page">
             <div className="auth-card">
-                <h1>Raterudder</h1>
-                <p>Sign in to manage your home energy.</p>
+                <h1>RateRudder</h1>
+                <p>Log in or sign up to manage your home energy.</p>
+
                 <div className="google-btn-wrapper">
                     {authEnabled && (clientIDs["google"] || clientIDs["apple"]) ? (
                         <>
@@ -70,6 +71,9 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onLoginError, aut
                         </div>
                     )}
                 </div>
+                <p className="beta-notice" style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginTop: '0', marginBottom: '1.5rem', lineHeight: '1.5' }}>
+                    During our limited beta, we currently only support Ameren and ComEd utility providers, and FranklinWH battery systems.
+                </p>
                 <div className="login-footer">
                     <Link to="/privacy">Privacy Policy</Link>
                     <Separator className="separator" />
