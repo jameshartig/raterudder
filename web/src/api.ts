@@ -176,6 +176,7 @@ export interface UtilityProviderInfo {
   id: string;
   name: string;
   rates: UtilityRateInfo[];
+  hidden?: boolean;
 }
 
 export interface UtilityRateInfo {
@@ -196,6 +197,7 @@ export interface ESSProviderInfo {
   id: string;
   name: string;
   credentials: ESSCredential[];
+  hidden?: boolean;
 }
 
 export interface Settings {

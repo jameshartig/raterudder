@@ -76,6 +76,23 @@ type Settings struct {
 // Credentials for external systems
 type Credentials struct {
 	Franklin *FranklinCredentials `json:"franklin,omitempty"`
+	Mock     *MockCredentials     `json:"mock,omitempty"`
+	// when a new field is added we need to make sure that handleGetSettings and
+	// handleUpdateSettings are updated to handle the new field
+}
+
+// Has returns a map of credentials that are set
+func (c *Credentials) Has() map[string]bool {
+	return map[string]bool{
+		"franklin": c.Franklin != nil,
+		"mock":     c.Mock != nil,
+	}
+}
+
+// MockCredentials for simulated ESS
+type MockCredentials struct {
+	Strategy string `json:"strategy"`
+	Location string `json:"location"`
 }
 
 // Credentials for Franklin

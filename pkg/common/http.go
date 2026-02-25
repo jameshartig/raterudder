@@ -15,7 +15,7 @@ type userAgentTransport struct {
 	userAgent string
 }
 
-// RoundTrip implements the 
+// RoundTrip implements the
 func (t *userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Clone the request to avoid modifying the original request's headers
 	// which might be shared or reused

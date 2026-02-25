@@ -305,8 +305,14 @@ describe('App & Settings', () => {
 
         await navigateToSettings();
 
+        // Select ESS
+        const essSelect = await screen.findByLabelText(/ESS/i);
+        await user.click(essSelect);
+        const franklinOption = await screen.findByRole('option', { name: 'FranklinWH' });
+        await user.click(franklinOption);
+
         // Fill in credentials based on apiMocks
-        const emailInput = await screen.findByLabelText(/Username \/ Email/i);
+        const emailInput = await screen.findByLabelText('Email');
         await user.type(emailInput, 'user@example.com');
 
         const passInput = await screen.findByLabelText(/Password/i, { selector: 'input[type="password"]' });
@@ -329,5 +335,54 @@ describe('App & Settings', () => {
                 }
             });
         });
+    });
+
+    it('hides providers with hidden true unless already selected', async () => {
+        const user = userEvent.setup();
+        (fetchSettings as any).mockResolvedValue({
+            ...defaultSettings,
+            utilityProvider: '', // Not secret utility
+            ess: '', // Not secret ess
+        });
+
+        await navigateToSettings();
+
+        // Check utility
+        const serviceSelect = await screen.findByLabelText(/Service/i);
+        await user.click(serviceSelect);
+        await waitFor(() => expect(screen.getByRole('option', { name: 'ComEd' })).toBeInTheDocument());
+        expect(screen.queryByRole('option', { name: 'Secret Utility' })).not.toBeInTheDocument();
+        // Try to close dropdown by clicking document body
+        fireEvent.pointerDown(document.body);
+
+        // Check ESS
+        const essSelect = await screen.findByLabelText(/System Type/i);
+        await user.click(essSelect);
+        await waitFor(() => expect(screen.getByRole('option', { name: 'FranklinWH' })).toBeInTheDocument());
+        expect(screen.queryByRole('option', { name: 'Secret ESS' })).not.toBeInTheDocument();
+    });
+
+    it('shows hidden providers if they are currently configured', async () => {
+         const user = userEvent.setup();
+         (fetchSettings as any).mockResolvedValue({
+             ...defaultSettings,
+             utilityProvider: 'hidden_utility',
+             ess: 'hidden_ess',
+         });
+
+         await navigateToSettings();
+
+         // The configured summary should show the hidden provider's name
+         await waitFor(() => expect(screen.getByText("Secret Utility")).toBeInTheDocument());
+         expect(screen.getByText("Secret ESS")).toBeInTheDocument();
+
+         // In edit mode (change), the option should also be visible in the dropdown
+         // There are two "Change" / "Update" buttons, so look by closer container or find specific
+         const utilityChangeBtn = screen.getAllByText('Change')[0] || screen.getByText('Change');
+         fireEvent.click(utilityChangeBtn); // click Utility Service "Change"
+
+         const serviceSelect = await screen.findByLabelText(/Service/i);
+         await user.click(serviceSelect);
+         await waitFor(() => expect(screen.getByRole('option', { name: 'Secret Utility' })).toBeInTheDocument());
     });
 });

@@ -24,6 +24,8 @@ func main() {
 	e := ess.Configured()
 	s := storage.Configured()
 
+	ess.ConfigureMock(s)
+
 	// init server
 	srv := server.Configured(u, e, s)
 

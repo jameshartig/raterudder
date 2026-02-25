@@ -44,6 +44,19 @@ func (m *mockStorage) UpsertEnergyHistory(ctx context.Context, siteID string, st
 	return args.Error(0)
 }
 
+func (m *mockStorage) UpdateESSMockState(ctx context.Context, siteID string, state types.ESSMockState) error {
+	args := m.Called(ctx, siteID, state)
+	return args.Error(0)
+}
+
+func (m *mockStorage) GetESSMockState(ctx context.Context, siteID string) (types.ESSMockState, error) {
+	args := m.Called(ctx, siteID)
+	if len(args) > 0 {
+		return args.Get(0).(types.ESSMockState), args.Error(1)
+	}
+	return types.ESSMockState{}, nil
+}
+
 func (m *mockStorage) GetPriceHistory(ctx context.Context, siteID string, start, end time.Time) ([]types.Price, error) {
 	args := m.Called(ctx, siteID, start, end)
 	if len(args) > 0 {

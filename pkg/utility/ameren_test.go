@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAmeren(t *testing.T) {
@@ -47,14 +48,14 @@ IGNORE
 	ctx := context.Background()
 	// Test current price
 	price, err := c.GetCurrentPrice(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	expectedTodayVal := 10 + float64(now.Hour())
 	assert.InDelta(t, (expectedTodayVal/1000.0)*1.05009, price.DollarsPerKWH, 0.00001)
 	assert.Equal(t, "ameren_psp", price.Provider)
 
 	// Test future prices
 	futures, err := c.GetFuturePrices(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, len(futures) > 0)
 
 	// Next hour price should be from futures[0]
@@ -70,7 +71,7 @@ IGNORE
 
 	// Should still work due to cache
 	price2, err := c.GetCurrentPrice(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.InDelta(t, (expectedTodayVal/1000.0)*1.05009, price2.DollarsPerKWH, 0.00001)
 
 	t.Run("ignores tomorrow errors", func(t *testing.T) {
@@ -93,7 +94,7 @@ AMIL.BGS6,Loadzone,LMP,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,
 		cError.misoAPIURL = apiError.URL
 
 		futuresError, err := cError.GetFuturePrices(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		if now.Hour() < 23 {
 			assert.True(t, len(futuresError) > 0)

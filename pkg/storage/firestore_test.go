@@ -32,7 +32,7 @@ func TestFirestoreProvider(t *testing.T) {
 	defer f.Close()
 
 	t.Run("Validate", func(t *testing.T) {
-		assert.NoError(t, f.Validate())
+		require.NoError(t, f.Validate())
 	})
 
 	t.Run("Settings", func(t *testing.T) {

@@ -147,4 +147,45 @@ func TestHandleListUtilities(t *testing.T) {
 		require.NoError(t, json.NewDecoder(w.Body).Decode(&utilities))
 		assert.NotEmpty(t, utilities)
 	})
+
+	t.Run("Does not clear Hidden flags when showHidden=false", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/list/utilities", nil)
+		w := httptest.NewRecorder()
+
+		srv := &Server{
+			utilities:  mockUMap,
+			ess:        mockE,
+			showHidden: false,
+		}
+
+		srv.handleListUtilities(w, req)
+
+		var utilities []types.UtilityProviderInfo
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&utilities))
+
+		// Just check that they parsed. Since mockUMap returns real utilities, and none are hidden right now,
+		// we mainly check it runs correctly without modifying them.
+		assert.NotEmpty(t, utilities)
+	})
+
+	t.Run("Clears Hidden flags when showHidden=true", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/list/utilities", nil)
+		w := httptest.NewRecorder()
+
+		srv := &Server{
+			utilities:  mockUMap,
+			ess:        mockE,
+			showHidden: true,
+		}
+
+		srv.handleListUtilities(w, req)
+
+		var utilities []types.UtilityProviderInfo
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&utilities))
+
+		assert.NotEmpty(t, utilities)
+		for _, u := range utilities {
+			assert.False(t, u.Hidden, "hidden flag should be false when showHidden is true")
+		}
+	})
 }

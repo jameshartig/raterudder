@@ -65,6 +65,7 @@ type Server struct {
 	release                string
 	serverName             string
 	webCacheDuration       time.Duration
+	showHidden             bool
 }
 
 // Configured initializes the Server with dependencies.
@@ -97,6 +98,7 @@ func Configured(u *utility.Map, e *ess.Map, s storage.Database) *Server {
 	oidcAudience := lflag.String("oidc-audience", "", "token to use for id tokens audience to validate")
 	updateSpecificAudience := lflag.String("update-specific-audience", "", "audience to validate for /api/update")
 	singleSite := lflag.Bool("single-site", false, "Enable single-site mode (disables siteID requirement)")
+	showHidden := lflag.Bool("show-hidden", false, "Expose hidden providers in lists via the API")
 	encryptionKey := lflag.RequiredString("credentials-encryption-key", "Key for encrypting credentials")
 	release := lflag.String("release", "production", "Release environment (production or staging)")
 	webCacheDuration := lflag.Duration("web-cache-duration", 0, "Duration to cache web files (e.g. 1h, 5m). 0 means no cache.")
@@ -114,6 +116,7 @@ func Configured(u *utility.Map, e *ess.Map, s storage.Database) *Server {
 		srv.oidcAudience = *oidcAudience
 		srv.updateSpecificAudience = *updateSpecificAudience
 		srv.singleSite = *singleSite
+		srv.showHidden = *showHidden
 		srv.release = *release
 		srv.webCacheDuration = *webCacheDuration
 

@@ -79,6 +79,9 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				SiteIDs: []string{types.SiteIDNone},
 				Admin:   true,
 			}
+			if siteID == "" {
+				siteID = types.SiteIDNone
+			}
 			ctx = context.WithValue(ctx, userContextKey, user)
 		} else {
 			var authSuccess bool

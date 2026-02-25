@@ -25,6 +25,8 @@ type Database interface {
 	UpsertPrice(ctx context.Context, siteID string, price types.Price, version int) error
 	InsertAction(ctx context.Context, siteID string, action types.Action) error
 	UpsertEnergyHistory(ctx context.Context, siteID string, stats types.EnergyStats, version int) error
+	UpdateESSMockState(ctx context.Context, siteID string, state types.ESSMockState) error
+	GetESSMockState(ctx context.Context, siteID string) (types.ESSMockState, error)
 
 	// History
 	GetPriceHistory(ctx context.Context, siteID string, start, end time.Time) ([]types.Price, error)

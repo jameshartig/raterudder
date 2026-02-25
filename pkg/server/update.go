@@ -204,6 +204,35 @@ func (s *Server) performSiteUpdate(
 		// Continue with empty future prices
 	}
 
+	nowTime := time.Now()
+	if len(futurePrices) == 0 {
+		log.Ctx(ctx).WarnContext(ctx, "no future prices available, estimating using last 24 hours")
+		histStart := nowTime.Add(-24 * time.Hour)
+		histPrices, histErr := s.storage.GetPriceHistory(ctx, siteID, histStart, nowTime)
+		if histErr != nil {
+			log.Ctx(ctx).WarnContext(ctx, "failed to get historical prices", slog.Any("error", histErr))
+		} else {
+			for _, p := range histPrices {
+				p.TSStart = p.TSStart.Add(24 * time.Hour)
+				if !p.TSEnd.IsZero() {
+					p.TSEnd = p.TSEnd.Add(24 * time.Hour)
+				}
+				futurePrices = append(futurePrices, p)
+			}
+		}
+	}
+
+	hasFuture := false
+	for _, fp := range futurePrices {
+		if fp.TSStart.After(nowTime) {
+			hasFuture = true
+			break
+		}
+	}
+	if !hasFuture {
+		return nil, "", fmt.Errorf("insufficient future pricing data")
+	}
+
 	// get History for Controller (Last 72 hours from Storage)
 	historyStart := time.Now().Add(-72 * time.Hour)
 	historyEnd := time.Now()

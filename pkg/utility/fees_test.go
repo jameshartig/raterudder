@@ -8,6 +8,7 @@ import (
 	"github.com/raterudder/raterudder/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // mockUtilityPrices is a mock implementation of the UtilityPrices interface.
@@ -45,7 +46,7 @@ func TestSiteFees(t *testing.T) {
 				},
 			}
 			err := s.ApplySettings(ctx, settings)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.NotEmpty(t, s.periods)
 		})
 
@@ -56,7 +57,7 @@ func TestSiteFees(t *testing.T) {
 				UtilityRate:     "ameren_psp",
 			}
 			err := s.ApplySettings(ctx, settings)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			// ameren currently returns nil periods but should not error
 		})
 
@@ -82,7 +83,7 @@ func TestSiteFees(t *testing.T) {
 			AdditionalFeesPeriods: periods,
 		}
 		err := s.ApplySettings(ctx, settings)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, periods, s.periods)
 	})
 
@@ -123,7 +124,7 @@ func TestSiteFees(t *testing.T) {
 				DollarsPerKWH: 0.10,
 			}
 			result, err := s.applyFees(p)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			// Base (0.10) + Peak (0.10) + Summer (0.05) = 0.25
 			assert.InDelta(t, 0.25, result.DollarsPerKWH, 0.0001)
 			// Grid Fee (0.02)
@@ -136,7 +137,7 @@ func TestSiteFees(t *testing.T) {
 				DollarsPerKWH: 0.10,
 			}
 			result, err := s.applyFees(p)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			// Base (0.10) + 0 = 0.10
 			assert.InDelta(t, 0.10, result.DollarsPerKWH, 0.0001)
 			// Grid Fee (0.02)
@@ -181,7 +182,7 @@ func TestSiteFees(t *testing.T) {
 		m.On("GetConfirmedPrices", ctx, start, end).Return(basePrices, nil)
 
 		prices, err := s.GetConfirmedPrices(ctx, start, end)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, 2, len(prices))
 		assert.InDelta(t, 0.11, prices[0].DollarsPerKWH, 0.0001)
 		assert.InDelta(t, 0.21, prices[1].DollarsPerKWH, 0.0001)
@@ -199,7 +200,7 @@ func TestSiteFees(t *testing.T) {
 		m.On("GetCurrentPrice", ctx).Return(basePrice, nil)
 
 		price, err := s.GetCurrentPrice(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.InDelta(t, 0.51, price.DollarsPerKWH, 0.0001)
 		m.AssertExpectations(t)
 	})
@@ -217,7 +218,7 @@ func TestSiteFees(t *testing.T) {
 		m.On("GetFuturePrices", ctx).Return(basePrices, nil)
 
 		prices, err := s.GetFuturePrices(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, 1, len(prices))
 		assert.InDelta(t, 0.31, prices[0].DollarsPerKWH, 0.0001)
 		m.AssertExpectations(t)

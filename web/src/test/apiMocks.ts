@@ -78,6 +78,12 @@ export const defaultUtilities = [
             },
         ],
     },
+    {
+        id: 'hidden_utility',
+        name: 'Secret Utility',
+        hidden: true,
+        rates: [],
+    },
 ];
 
 export const defaultESSProviders = [
@@ -85,10 +91,16 @@ export const defaultESSProviders = [
         id: 'franklin',
         name: 'FranklinWH',
         credentials: [
-            { field: 'username', name: 'Username / Email', type: 'string', required: true },
+            { field: 'username', name: 'Email', type: 'string', required: true },
             { field: 'password', name: 'Password', type: 'password', required: true },
             { field: 'gatewayID', name: 'Target Gateway ID (Optional)', type: 'string', required: false },
         ]
+    },
+    {
+        id: 'hidden_ess',
+        name: 'Secret ESS',
+        hidden: true,
+        credentials: [],
     }
 ];
 

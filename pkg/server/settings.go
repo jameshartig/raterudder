@@ -106,10 +106,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 
 	resp := SettingsRes{
 		Settings:       settings.Settings,
-		HasCredentials: make(map[string]bool),
-	}
-	if creds.Franklin != nil {
-		resp.HasCredentials["franklin"] = true
+		HasCredentials: creds.Has(),
 	}
 
 	w.Header().Set("Cache-Control", "no-store")
@@ -187,45 +184,60 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		essSystem, err := s.ess.Site(ctx, siteID, newSettings)
-		if err != nil {
-			log.Ctx(ctx).ErrorContext(ctx, "failed to get ess system", slog.Any("error", err))
-			writeJSONError(w, fmt.Sprintf("failed to get ess system: %v", err), http.StatusInternalServerError)
-			return
-		}
-
+		// check which credentials changed
+		var changedESS bool
 		var shouldBackfillHistory bool
-
-		// Map properties from incoming credentials
-		if req.Credentials.Franklin != nil {
-			if existingCreds.Franklin == nil {
-				shouldBackfillHistory = true
-			}
-			existingCreds.Franklin = req.Credentials.Franklin
-		}
-
-		// Verify and update credentials
-		verifiedCreds, _, err := essSystem.Authenticate(ctx, existingCreds)
-		if err != nil {
-			log.Ctx(ctx).WarnContext(ctx, "failed to verify ess credentials", slog.Any("error", err))
-			writeJSONError(w, fmt.Sprintf("failed to verify ess credentials: %v", err), http.StatusBadRequest)
-			return
-		}
-
-		// now backfill if we need to since the credentials were verified
-		// Backfill history for franklin if it was newly added
-		if shouldBackfillHistory && verifiedCreds.Franklin != nil {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				log.Ctx(ctx).InfoContext(ctx, "backfilling energy history for new credentials")
-				if err := s.updateEnergyHistory(ctx, siteID, essSystem); err != nil {
-					log.Ctx(ctx).ErrorContext(ctx, "failed to sync energy history after settings update", slog.Any("error", err))
+		switch newSettings.ESS {
+		case "franklin":
+			if req.Credentials.Franklin != nil {
+				changedESS = true
+				if existingCreds.Franklin == nil {
+					shouldBackfillHistory = true
 				}
-			}()
+				existingCreds.Franklin = req.Credentials.Franklin
+			}
+		case "mock":
+			if req.Credentials.Mock != nil {
+				changedESS = true
+				if existingCreds.Mock == nil {
+					shouldBackfillHistory = true
+				}
+				existingCreds.Mock = req.Credentials.Mock
+			}
 		}
 
-		encrypted, err := s.encryptCredentials(ctx, verifiedCreds)
+		// if the ess credentials changed, we need to verify them and potentially backfill history
+		if changedESS {
+			essSystem, err := s.ess.Site(ctx, siteID, newSettings)
+			if err != nil {
+				log.Ctx(ctx).ErrorContext(ctx, "failed to get ess system", slog.Any("error", err))
+				writeJSONError(w, fmt.Sprintf("failed to get ess system: %v", err), http.StatusInternalServerError)
+				return
+			}
+
+			// Verify and update credentials
+			existingCreds, _, err = essSystem.Authenticate(ctx, existingCreds)
+			if err != nil {
+				log.Ctx(ctx).WarnContext(ctx, "failed to verify ess credentials", slog.Any("error", err))
+				writeJSONError(w, fmt.Sprintf("failed to verify ess credentials: %v", err), http.StatusBadRequest)
+				return
+			}
+
+			// now backfill if we need to since the credentials were verified
+			if shouldBackfillHistory {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					log.Ctx(ctx).InfoContext(ctx, "backfilling energy history for new credentials")
+					if err := s.updateEnergyHistory(ctx, siteID, essSystem); err != nil {
+						log.Ctx(ctx).ErrorContext(ctx, "failed to sync energy history after settings update", slog.Any("error", err))
+					}
+				}()
+			}
+		}
+
+		// store the existing credentials with the new ones updated in-place
+		encrypted, err := s.encryptCredentials(ctx, existingCreds)
 		if err != nil {
 			log.Ctx(ctx).ErrorContext(ctx, "failed to encrypt credentials", slog.Any("error", err))
 			writeJSONError(w, "failed to encrypt credentials", http.StatusInternalServerError)

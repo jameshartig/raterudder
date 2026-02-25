@@ -203,6 +203,7 @@ func TestSettings(t *testing.T) {
 				SolarTrendRatioMax:          3.0,
 				SolarBellCurveMultiplier:    1.0,
 				UtilityProvider:             "test",
+				ESS:                         "franklin",
 			},
 			Credentials: &types.Credentials{
 				Franklin: &types.FranklinCredentials{Username: "foo", MD5Password: "bar"},
@@ -254,6 +255,7 @@ func TestSettings(t *testing.T) {
 				SolarTrendRatioMax:          3.0,
 				SolarBellCurveMultiplier:    1.0,
 				UtilityProvider:             "test",
+				ESS:                         "franklin",
 			},
 			Credentials: &types.Credentials{
 				Franklin: &types.FranklinCredentials{Username: "foo", MD5Password: "bar"},

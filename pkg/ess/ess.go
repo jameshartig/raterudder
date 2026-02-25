@@ -51,6 +51,7 @@ func NewMap() *Map {
 func (m *Map) ListSystems() []types.ESSProviderInfo {
 	return []types.ESSProviderInfo{
 		franklinInfo(),
+		mockInfo(),
 	}
 }
 
@@ -75,6 +76,8 @@ func (m *Map) Site(ctx context.Context, siteID string, settings types.Settings) 
 	switch settings.ESS {
 	case "franklin":
 		sys = newFranklin()
+	case "mock":
+		sys = newMock(siteID)
 	default:
 		// Default to franklin for backwards compatibility if not specified
 		// or if an unknown system is provided.

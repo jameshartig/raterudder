@@ -11,6 +11,7 @@ import (
 	"github.com/raterudder/raterudder/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 type mockSavingsStorage struct {
@@ -104,7 +105,7 @@ func TestHandleHistorySavings(t *testing.T) {
 
 	var savings types.SavingsStats
 	err := json.Unmarshal(rr.Body.Bytes(), &savings)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Cost:
 	// H1: 5 * 0.10 = 0.50
@@ -177,7 +178,7 @@ func TestHandleHistorySavingsAll(t *testing.T) {
 
 	var savings types.SavingsStats
 	err := json.Unmarshal(rr.Body.Bytes(), &savings)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Site 1 cost: 10 * 0.10 = 1.00
 	// Site 2 cost: 20 * 0.20 = 4.00

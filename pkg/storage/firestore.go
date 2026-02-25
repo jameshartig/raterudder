@@ -588,3 +588,55 @@ func (f *FirestoreProvider) UpdateUser(ctx context.Context, user types.User) err
 	}
 	return nil
 }
+
+// UpdateESSMockState saves the internal state of a mock ESS provider.
+
+func (f *FirestoreProvider) UpdateESSMockState(ctx context.Context, siteID string, state types.ESSMockState) error {
+	stateJSON, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("failed to marshal mock state %s: %w", siteID, err)
+	}
+
+	coll, err := f.getCollection(siteID, "mocks")
+	if err != nil {
+		return err
+	}
+	_, err = coll.Doc("mock_ess").Set(ctx, map[string]interface{}{
+		"json": string(stateJSON),
+	}, firestore.MergeAll)
+	if err != nil {
+		return fmt.Errorf("failed to save mock state: %w", err)
+	}
+	return nil
+}
+
+// GetESSMockState retrieves the internal state of a mock ESS provider.
+func (f *FirestoreProvider) GetESSMockState(ctx context.Context, siteID string) (types.ESSMockState, error) {
+	coll, err := f.getCollection(siteID, "mocks")
+	if err != nil {
+		return types.ESSMockState{}, err
+	}
+	doc, err := coll.Doc("mock_ess").Get(ctx)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return types.ESSMockState{}, nil
+		}
+		return types.ESSMockState{}, fmt.Errorf("failed to fetch mock state: %w", err)
+	}
+	val, err := doc.DataAt("json")
+	if err != nil {
+		log.Ctx(ctx).WarnContext(ctx, "mock state doc missing json", slog.String("siteID", siteID))
+		return types.ESSMockState{}, fmt.Errorf("mock state %s missing json: %w", siteID, err)
+	}
+	jsonStr, ok := val.(string)
+	if !ok {
+		log.Ctx(ctx).WarnContext(ctx, "mock state doc json not string", slog.String("siteID", siteID))
+		return types.ESSMockState{}, fmt.Errorf("mock state %s json not string", siteID)
+	}
+
+	var state types.ESSMockState
+	if err := json.Unmarshal([]byte(jsonStr), &state); err != nil {
+		return types.ESSMockState{}, fmt.Errorf("failed to unmarshal mock state %s: %w", siteID, err)
+	}
+	return state, nil
+}

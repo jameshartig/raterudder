@@ -57,25 +57,6 @@ func (c *Controller) SimulateState(
 	// simulate our energy state and prices for the next 24 hours
 	simData := make([]SimHour, 0, 24)
 
-	// helper to find price at time t
-	getPriceAt := func(t time.Time) types.Price {
-		for _, fp := range futurePrices {
-			if fp.TSStart.Truncate(time.Hour).Equal(t.Truncate(time.Hour)) {
-				return fp
-			}
-		}
-		// default to current price if no future price found but adjust it to fit
-		// the timestamp
-		return types.Price{
-			Provider: currentPrice.Provider,
-			TSStart:  t,
-			// TODO: should we assume 1 hour?
-			TSEnd:                t.Add(1 * time.Hour),
-			DollarsPerKWH:        currentPrice.DollarsPerKWH,
-			GridUseDollarsPerKWH: currentPrice.GridUseDollarsPerKWH,
-		}
-	}
-
 	// build our simulation timeline
 	todaySolarTrend := c.calculateSolarTrend(ctx, now, history, model, settings)
 	log.Ctx(ctx).DebugContext(ctx, "solar trend calculated", slog.Float64("trend", todaySolarTrend))
@@ -126,7 +107,19 @@ func (c *Controller) SimulateState(
 
 	for i := 0; i < simHours; i++ {
 		h := simTime.Hour()
-		price := getPriceAt(simTime)
+
+		var price types.Price
+		if currentPrice.TSStart.Truncate(time.Hour).Equal(simTime.Truncate(time.Hour)) {
+			price = currentPrice
+		} else {
+			for _, fp := range futurePrices {
+				if fp.TSStart.Truncate(time.Hour).Equal(simTime.Truncate(time.Hour)) {
+					price = fp
+					break
+				}
+			}
+		}
+
 		gridChargeCost := price.DollarsPerKWH + price.GridUseDollarsPerKWH
 		solarOppCost := price.DollarsPerKWH
 

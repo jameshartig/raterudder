@@ -935,7 +935,7 @@ func TestFranklin(t *testing.T) {
 
 	t.Run("Authenticate", func(t *testing.T) {
 		t.Run("MD5HashRawPassword", func(t *testing.T) {
-			token := "temp-token-md5"
+			randomStr := "temp-token-md5"
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/hes-gateway/terminal/initialize/appUserOrInstallerLogin" {
 					require.NoError(t, r.ParseForm())
@@ -950,7 +950,7 @@ func TestFranklin(t *testing.T) {
 						"code":    200,
 						"success": true,
 						"result": map[string]interface{}{
-							"token": token,
+							"token": randomStr,
 						},
 					})
 					return
@@ -992,7 +992,7 @@ func TestFranklin(t *testing.T) {
 			newCreds, changed, err := f.Authenticate(context.Background(), creds)
 			require.NoError(t, err)
 			assert.True(t, changed)
-			assert.Equal(t, token, newCreds.Franklin.Token)
+			assert.Equal(t, randomStr, newCreds.Franklin.Token)
 			assert.Equal(t, "", newCreds.Franklin.Password, "Raw password should be cleared")
 
 			hash := md5.Sum([]byte("myrawpassword"))

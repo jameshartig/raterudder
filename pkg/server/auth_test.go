@@ -14,6 +14,7 @@ import (
 	"github.com/raterudder/raterudder/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/api/idtoken"
 )
 
@@ -420,7 +421,7 @@ func TestHandleAuthStatus(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		var resp authStatusResponse
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		assert.True(t, resp.LoggedIn)
 		assert.Equal(t, "new@example.com", resp.Email)
@@ -439,7 +440,7 @@ func TestHandleAuthStatus(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		var resp authStatusResponse
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		assert.True(t, resp.LoggedIn)
 		assert.Equal(t, "existing@example.com", resp.Email)

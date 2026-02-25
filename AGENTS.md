@@ -1,3 +1,7 @@
+Tests
+- go test ./folder/subfolder -name "TestFunctionName" -v
+- npm test path/to/test.test.tsx
+
 Architecture
 - cmd/raterudder is the main entry point and orchestrator.
 - pkg/controller contains decision logic for charging/discharging.
@@ -21,4 +25,5 @@ Code Style
 - Tests should live in a file with the same name as the file they test, with suffix _test
 - Tests should be named Test<FunctionName> and all related tests should live as subtests in that function with t.Run()
 - Use assert.ErrorContains for error messages
+- Use require.NoError to require errors didn't happen when you don't expect them
 - Review web/llms.txt for available base-ui components and their props

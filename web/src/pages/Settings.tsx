@@ -110,9 +110,6 @@ const Settings = ({ siteID }: { siteID?: string }) => {
     return (
         <div className="content-container settings-container">
             <h2>Settings</h2>
-            {error && <div className="error-message">{error}</div>}
-            {successMessage && <div className="success-message">{successMessage}</div>}
-
             <form onSubmit={handleSubmit}>
                 {/* Pause Updates at the top */}
                 <div className="section-header pause-section">
@@ -197,7 +194,7 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                                             <Select.Item className="select-item" value="">
                                                 <Select.ItemText>Select a service...</Select.ItemText>
                                             </Select.Item>
-                                            {utilities.map(u => (
+                                            {utilities.filter(u => !u.hidden || u.id === settings.utilityProvider).map(u => (
                                                 <Select.Item key={u.id} className="select-item" value={u.id}>
                                                     <Select.ItemText>{u.name}</Select.ItemText>
                                                 </Select.Item>
@@ -373,7 +370,7 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                                             <Select.Item className="select-item" value="">
                                                 <Select.ItemText>Select a system type...</Select.ItemText>
                                             </Select.Item>
-                                            {essProviders.map(p => (
+                                            {essProviders.filter(p => !p.hidden || p.id === settings.ess).map(p => (
                                                 <Select.Item key={p.id} className="select-item" value={p.id}>
                                                     <Select.ItemText>{p.name}</Select.ItemText>
                                                 </Select.Item>
@@ -638,9 +635,13 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                     </Collapsible.Panel>
                 </Collapsible.Root>
 
-                <button type="submit" className="save-button">
-                    Save Settings
-                </button>
+                <div className="submit-section">
+                    {error && <div className="error-message">{error}</div>}
+                    {successMessage && <div className="success-message">{successMessage}</div>}
+                    <button type="submit" className="save-button">
+                        Save Settings
+                    </button>
+                </div>
             </form>
         </div>
     );

@@ -8,6 +8,12 @@ import (
 func (s *Server) handleListUtilities(w http.ResponseWriter, r *http.Request) {
 	utilities := s.utilities.ListUtilities()
 
+	if s.showHidden {
+		for i := range utilities {
+			utilities[i].Hidden = false
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(utilities); err != nil {
 		writeJSONError(w, "internal server error", http.StatusInternalServerError)
