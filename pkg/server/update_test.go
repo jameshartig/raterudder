@@ -938,4 +938,54 @@ func TestUpdateEnergyHistory(t *testing.T) {
 
 		mockES.AssertNotCalled(t, "GetEnergyHistory")
 	})
+
+	t.Run("Future Price Fallback", func(t *testing.T) {
+		mockS := &mockStorage{}
+		mockES := &mockESS{}
+		mockU := &mockUtility{}
+
+		now := time.Now().Truncate(time.Hour)
+		pastPrice := types.Price{
+			TSStart:       now.Add(-12 * time.Hour),
+			TSEnd:         now.Add(-11 * time.Hour),
+			DollarsPerKWH: 0.25,
+		}
+
+		mockS.On("GetSettings", mock.Anything, "site1").Return(types.Settings{UtilityProvider: "test"}, types.CurrentSettingsVersion, nil)
+		mockS.On("GetLatestEnergyHistoryTime", mock.Anything, "site1").Return(time.Time{}, 0, nil)
+		mockS.On("GetLatestPriceHistoryTime", mock.Anything, "site1").Return(time.Time{}, 0, nil)
+		mockS.On("UpsertEnergyHistory", mock.Anything, "site1", mock.Anything, mock.Anything).Return(nil)
+		mockS.On("UpsertPrice", mock.Anything, "site1", mock.Anything, mock.Anything).Return(nil)
+		mockS.On("GetEnergyHistory", mock.Anything, "site1", mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
+		mockS.On("InsertAction", mock.Anything, "site1", mock.Anything).Return(nil)
+		mockS.On("GetPriceHistory", mock.Anything, "site1", mock.Anything, mock.Anything).Return([]types.Price{pastPrice}, nil)
+
+		mockES.On("ApplySettings", mock.Anything, mock.Anything).Return(nil)
+		mockES.On("Authenticate", mock.Anything, mock.Anything).Return(types.Credentials{}, false, nil)
+		mockES.On("GetStatus", mock.Anything).Return(types.SystemStatus{BatterySOC: 50}, nil)
+		mockES.On("GetEnergyHistory", mock.Anything, mock.Anything, mock.Anything).Return([]types.EnergyStats{}, nil)
+		mockES.On("SetModes", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+		mockU.On("ApplySettings", mock.Anything, mock.Anything).Return(nil)
+		mockU.On("GetCurrentPrice", mock.Anything).Return(types.Price{DollarsPerKWH: 0.10, TSStart: now}, nil)
+		mockU.On("GetFuturePrices", mock.Anything).Return([]types.Price{}, nil) // Trigger fallback
+		mockU.On("GetConfirmedPrices", mock.Anything, mock.Anything, mock.Anything).Return([]types.Price{}, nil)
+
+		mockUMap := utility.NewMap()
+		mockUMap.SetProvider("test", mockU)
+		mockP := ess.NewMap()
+		mockP.SetSystem("site1", mockES)
+
+		srv := &Server{
+			utilities:  mockUMap,
+			ess:        mockP,
+			storage:    mockS,
+			controller: controller.NewController(),
+		}
+
+		_, _, err := srv.performSiteUpdate(context.Background(), "site1", settingsWithVersion{Settings: types.Settings{UtilityProvider: "test"}}, types.Credentials{})
+		assert.NoError(t, err)
+
+		mockS.AssertCalled(t, "GetPriceHistory", mock.Anything, "site1", mock.Anything, mock.Anything)
+	})
 }

@@ -40,10 +40,6 @@
   color: #fff !important;
 }
 
-.apple-auth-btn:hover {
-  background-color: #333 !important;
-}
-
 .auth-disabled-message {
   color: var(--text-muted);
   font-size: 0.9rem;

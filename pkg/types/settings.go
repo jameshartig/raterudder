@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"time"
 )
 
 // CurrentSettingsVersion is the current version of the settings struct.
@@ -71,6 +72,15 @@ type Settings struct {
 
 	// Credentials for external systems (encrypted)
 	EncryptedCredentials []byte `json:"encryptedCredentials,omitempty"`
+
+	// ESS Authentication Status
+	ESSAuthStatus ESSAuthStatus `json:"essAuthStatus,omitempty"`
+}
+
+// ESSAuthStatus represents the status of ESS authentication for the site.
+type ESSAuthStatus struct {
+	ConsecutiveFailures int       `json:"consecutiveFailures,omitempty"`
+	LastAttempt         time.Time `json:"lastAttempt,omitempty"`
 }
 
 // Credentials for external systems

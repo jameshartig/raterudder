@@ -24,7 +24,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		ctx = log.With(ctx, log.Ctx(ctx).With(slog.String("reqPath", r.URL.Path)))
 
 		allowNoLogin := r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/join"
-		ignoreUserNotFound := r.URL.Path == "/api/join" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/logout"
+		ignoreUserNotFound := r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/join" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/logout"
 		isUpdatePath := r.URL.Path == "/api/update" || r.URL.Path == "/api/updateSites"
 		ignoreSiteID := r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/logout"
 
@@ -80,9 +80,6 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				Sites: []types.UserSite{{ID: types.SiteIDNone}},
 				Admin: true,
 			}
-			if siteID == "" {
-				siteID = types.SiteIDNone
-			}
 			ctx = context.WithValue(ctx, userContextKey, user)
 		} else {
 			var authSuccess bool
@@ -101,7 +98,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 					if _, ok := s.oidcAudiences["google_update_specific"]; ok {
 						specificClient = "google_update_specific"
 					}
-					emailRet, subjectRet, _, err := s.defaultTokenValidator(ctx, token, specificClient)
+					emailRet, subjectRet, _, err := s.authenticateToken(ctx, token, specificClient)
 					if err != nil {
 						log.Ctx(ctx).WarnContext(ctx, "update token validation failed", slog.Any("error", err))
 					} else {
@@ -128,16 +125,15 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 					return
 				}
 				if authCookie != nil {
-					emailRet, subjectRet, _, err := s.defaultTokenValidator(ctx, authCookie.Value, "")
+					emailRet, subjectRet, _, err := s.authenticateToken(ctx, authCookie.Value, "")
 					if err != nil {
 						log.Ctx(ctx).ErrorContext(ctx, "auth token validation failed", slog.Any("error", err))
 						writeJSONError(w, "invalid auth token", http.StatusBadRequest)
 						return
-					} else {
-						email = emailRet
-						userID = subjectRet
-						authSuccess = true
 					}
+					email = emailRet
+					userID = subjectRet
+					authSuccess = true
 				} else if !allowNoLogin {
 					log.Ctx(ctx).WarnContext(ctx, "no auth cookie found")
 					writeJSONError(w, "missing auth cookie", http.StatusBadRequest)
@@ -145,7 +141,9 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				}
 			}
 
-			if authSuccess {
+			if authViaUpdateSpecific && isUpdatePath {
+				// allowed to update
+			} else if authSuccess {
 				// fetch user
 				if s.singleSite {
 					user = types.User{
@@ -153,16 +151,6 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 						Email: email,
 						Sites: []types.UserSite{{ID: types.SiteIDNone}},
 					}
-					for _, admin := range s.adminEmails {
-						if user.Email == admin {
-							user.Admin = true
-							break
-						}
-					}
-					ctx = context.WithValue(ctx, userContextKey, user)
-				} else if authViaUpdateSpecific {
-					// We don't need to fetch the user for update-specific auth
-					// The handler doesn't use the user object, and we've already validated the token
 				} else {
 					var err error
 					user, err = s.storage.GetUser(ctx, userID)
@@ -192,7 +180,6 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 						if siteID == "" && len(user.Sites) == 1 {
 							siteID = user.Sites[0].ID
 						}
-						ctx = context.WithValue(ctx, userContextKey, user)
 					}
 				}
 
@@ -200,11 +187,15 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				for _, admin := range s.adminEmails {
 					if email == admin {
 						isAdmin = true
-						// Do not set user.Admin = true to grant read-only access
+						// Do not set user.Admin = true to grant read-only access when multi-site
+						// but for single-site we do want to set Admin
+						if s.singleSite {
+							user.Admin = true
+						}
 						break
 					}
 				}
-				if !s.singleSite && siteID != "" && siteID != SiteIDAll && !authViaUpdateSpecific && !isAdmin {
+				if !s.singleSite && siteID != "" && siteID != SiteIDAll && !authViaUpdateSpecific {
 					site, err := s.storage.GetSite(ctx, siteID)
 					if err != nil {
 						log.Ctx(ctx).WarnContext(ctx, "site lookup failed", slog.String("siteID", siteID), slog.Any("error", err))
@@ -220,12 +211,13 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 							break
 						}
 					}
-					if !permFound {
+					if !permFound && !isAdmin {
 						log.Ctx(ctx).WarnContext(ctx, "user does not have permission for site", slog.String("userID", userID), slog.String("email", email), slog.String("site", siteID))
 						writeJSONError(w, "site access denied", http.StatusForbidden)
 						return
 					}
 				}
+				ctx = context.WithValue(ctx, userContextKey, user)
 			} else if !allowNoLogin {
 				log.Ctx(ctx).WarnContext(ctx, "unauthenticated request")
 				s.clearCookie(w)
@@ -276,7 +268,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	email, subject, expires, err := s.defaultTokenValidator(r.Context(), req.Token, req.Client)
+	email, subject, expires, err := s.authenticateToken(r.Context(), req.Token, req.Client)
 	if err != nil {
 		log.Ctx(r.Context()).WarnContext(r.Context(), "failed to validate id token", slog.Any("error", err))
 		writeJSONError(w, "invalid id token", http.StatusUnauthorized)
@@ -338,7 +330,7 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 		loggedIn = true
 	} else if userToRegister, ok := r.Context().Value(userToRegisterContextKey).(types.User); ok {
 		user = userToRegister
-		loggedIn = false
+		loggedIn = true
 	}
 	sites := s.getAllUserSites(r)
 
@@ -354,7 +346,7 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) defaultTokenValidator(ctx context.Context, token string, specificClient string) (string, string, time.Time, error) {
+func (s *Server) authenticateToken(ctx context.Context, token string, specificClient string) (string, string, time.Time, error) {
 	var errs []error
 
 	for providerName, verifier := range s.oidcVerifiers {

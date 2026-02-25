@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -312,5 +313,62 @@ func TestHandleJoin(t *testing.T) {
 		s.handleJoin(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 		store.AssertExpectations(t)
+	})
+
+	t.Run("SiteLimitReached", func(t *testing.T) {
+		store := &mockStorage{}
+		s := newServer(store)
+
+		// Create a request with 5 existing sites in context
+		sites := make([]types.UserSite, 5)
+		for i := 0; i < 5; i++ {
+			sites[i] = types.UserSite{ID: fmt.Sprintf("site%d", i)}
+		}
+
+		ctx := context.WithValue(context.Background(), userContextKey, types.User{ID: "user1", Sites: sites})
+		ctx = context.WithValue(ctx, allUserSitesContextKey, sites)
+
+		t.Run("CannotCreate", func(t *testing.T) {
+			body := `{"create":true,"name":"Too Many"}`
+			req := httptest.NewRequest(http.MethodPost, "/api/join", bytes.NewBufferString(body))
+			req = req.WithContext(ctx)
+			w := httptest.NewRecorder()
+
+			s.handleJoin(w, req)
+			assert.Equal(t, http.StatusForbidden, w.Code)
+			assert.Contains(t, w.Body.String(), "maximum of 5 sites reached")
+		})
+
+		t.Run("CannotJoinNew", func(t *testing.T) {
+			body := `{"create":false,"joinSiteID":"newsite","inviteCode":"abc"}`
+			req := httptest.NewRequest(http.MethodPost, "/api/join", bytes.NewBufferString(body))
+			req = req.WithContext(ctx)
+			w := httptest.NewRecorder()
+
+			s.handleJoin(w, req)
+			assert.Equal(t, http.StatusForbidden, w.Code)
+			assert.Contains(t, w.Body.String(), "maximum of 5 sites reached")
+		})
+
+		t.Run("CanUpdateExisting", func(t *testing.T) {
+			// Mock looking up the site
+			store.On("GetSite", mock.Anything, "site1").Return(types.Site{
+				ID:         "site1",
+				InviteCode: "abc",
+				Permissions: []types.SitePermissions{
+					{UserID: "user1"},
+				},
+			}, nil)
+			store.On("GetUser", mock.Anything, "user1").Return(types.User{ID: "user1", Sites: sites}, nil)
+			store.On("UpdateUser", mock.Anything, mock.Anything).Return(nil)
+
+			body := `{"create":false,"joinSiteID":"site1","inviteCode":"abc","name":"New Name"}`
+			req := httptest.NewRequest(http.MethodPost, "/api/join", bytes.NewBufferString(body))
+			req = req.WithContext(ctx)
+			w := httptest.NewRecorder()
+
+			s.handleJoin(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+		})
 	})
 }

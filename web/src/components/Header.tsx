@@ -47,7 +47,7 @@ const Header: React.FC<HeaderProps> = ({ loggedIn, sites, selectedSiteID, onSite
                                         </Select.Item>
                                         {sites.map(site => (
                                             <Select.Item key={site.id} className="select-item" value={site.id}>
-                                                <Select.ItemText>{site.name}</Select.ItemText>
+                                                <Select.ItemText>{site.name || site.id}</Select.ItemText>
                                             </Select.Item>
                                         ))}
                                     </Select.Popup>

@@ -26,6 +26,7 @@ func TestHandleForecast(t *testing.T) {
 		mockU.On("GetFuturePrices", mock.Anything).Return([]types.Price{}, nil)
 
 		mockS := &mockStorage{}
+		mockS.On("GetSite", mock.Anything, mock.Anything).Return(types.Site{}, nil)
 		mockS.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{
 			MinBatterySOC:   5.0,
 			UtilityProvider: "test",
@@ -82,6 +83,7 @@ func TestHandleForecast(t *testing.T) {
 
 	t.Run("Settings Error Returns 500", func(t *testing.T) {
 		mockS := &mockStorage{}
+		mockS.On("GetSite", mock.Anything, mock.Anything).Return(types.Site{}, nil)
 		mockS.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{}, 0, assert.AnError)
 
 		srv := &Server{
@@ -106,6 +108,7 @@ func TestHandleForecast(t *testing.T) {
 
 	t.Run("ESS Status Error Returns 500", func(t *testing.T) {
 		mockS := &mockStorage{}
+		mockS.On("GetSite", mock.Anything, mock.Anything).Return(types.Site{}, nil)
 		mockS.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{UtilityProvider: "test"}, types.CurrentSettingsVersion, nil)
 
 		mockES := &mockESS{}
@@ -139,6 +142,7 @@ func TestHandleForecast(t *testing.T) {
 
 	t.Run("Price Error Returns 500", func(t *testing.T) {
 		mockS := &mockStorage{}
+		mockS.On("GetSite", mock.Anything, mock.Anything).Return(types.Site{}, nil)
 		mockS.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{UtilityProvider: "test"}, types.CurrentSettingsVersion, nil)
 
 		mockES := &mockESS{}
@@ -185,6 +189,7 @@ func TestHandleForecast(t *testing.T) {
 		mockU.On("GetFuturePrices", mock.Anything).Return([]types.Price{}, nil)
 
 		mockS := &mockStorage{}
+		mockS.On("GetSite", mock.Anything, mock.Anything).Return(types.Site{}, nil)
 		mockS.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{
 			MinBatterySOC:   5.0,
 			UtilityProvider: "test",

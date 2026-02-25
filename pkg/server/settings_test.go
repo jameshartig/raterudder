@@ -22,6 +22,8 @@ func TestSettings(t *testing.T) {
 	mockU := &mockUtility{}
 	mockS := &mockStorage{}
 	// Default setup for most tests
+	mockS.On("GetSite", mock.Anything, mock.Anything).Return(types.Site{}, nil).Maybe()
+	mockS.On("UpdateSite", mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	mockS.On("GetSettings", mock.Anything, mock.Anything).Return(types.Settings{
 		DryRun:          false,
 		MinBatterySOC:   10.0,
@@ -116,27 +118,78 @@ func TestSettings(t *testing.T) {
 	t.Run("Update Settings - Validation Error", func(t *testing.T) {
 		srv, _ := newAuthServer("my-audience", []string{"admin@example.com"}, nil)
 
+		base := types.Settings{
+			IgnoreHourUsageOverMultiple: 1,
+			SolarTrendRatioMax:          1,
+			MinBatterySOC:               20,
+			Release:                     srv.release,
+		}
+
 		// Invalid value (negative battery SOC)
-		s1 := types.Settings{MinBatterySOC: -5}
-		b1, err := json.Marshal(s1)
-		require.NoError(t, err)
+		s1 := base
+		s1.MinBatterySOC = -5
+		b1, _ := json.Marshal(s1)
 		req := httptest.NewRequest("POST", "/api/settings", bytes.NewReader(b1))
 		req = withUser(req, "admin@example.com", true)
 		w := httptest.NewRecorder()
-
 		srv.handleUpdateSettings(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, w.Body.String(), "minimum battery SOC must be between 0 and 100")
 
 		// Invalid value (IgnoreHourUsageOverMultiple < 1)
-		s2 := types.Settings{IgnoreHourUsageOverMultiple: 0}
-		b2, err := json.Marshal(s2)
-		require.NoError(t, err)
+		s2 := base
+		s2.IgnoreHourUsageOverMultiple = 0
+		b2, _ := json.Marshal(s2)
 		req = httptest.NewRequest("POST", "/api/settings", bytes.NewReader(b2))
 		req = withUser(req, "admin@example.com", true)
 		w = httptest.NewRecorder()
-
 		srv.handleUpdateSettings(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, w.Body.String(), "ignore hour usage over multiple must be at least 1")
+
+		// Invalid value (MinArbitrageDifferenceDollarsPerKWH < 0)
+		s3 := base
+		s3.MinArbitrageDifferenceDollarsPerKWH = -0.01
+		b3, _ := json.Marshal(s3)
+		req = httptest.NewRequest("POST", "/api/settings", bytes.NewReader(b3))
+		req = withUser(req, "admin@example.com", true)
+		w = httptest.NewRecorder()
+		srv.handleUpdateSettings(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, w.Body.String(), "minimum arbitrage difference cannot be negative")
+
+		// Invalid value (SolarBellCurveMultiplier < 0)
+		s4 := base
+		s4.SolarBellCurveMultiplier = -1
+		b4, _ := json.Marshal(s4)
+		req = httptest.NewRequest("POST", "/api/settings", bytes.NewReader(b4))
+		req = withUser(req, "admin@example.com", true)
+		w = httptest.NewRecorder()
+		srv.handleUpdateSettings(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, w.Body.String(), "solar bell curve multiplier cannot be negative")
+
+		// Invalid value (SolarTrendRatioMax < 1)
+		s5 := base
+		s5.SolarTrendRatioMax = 0.5
+		b5, _ := json.Marshal(s5)
+		req = httptest.NewRequest("POST", "/api/settings", bytes.NewReader(b5))
+		req = withUser(req, "admin@example.com", true)
+		w = httptest.NewRecorder()
+		srv.handleUpdateSettings(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, w.Body.String(), "solar trend ratio max must be at least 1")
+
+		// Invalid value (Release mismatch)
+		s6 := base
+		s6.Release = "wrong"
+		b6, _ := json.Marshal(s6)
+		req = httptest.NewRequest("POST", "/api/settings", bytes.NewReader(b6))
+		req = withUser(req, "admin@example.com", true)
+		w = httptest.NewRecorder()
+		srv.handleUpdateSettings(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, w.Body.String(), "settings release mismatch")
 	})
 
 	t.Run("Update Settings - Success", func(t *testing.T) {

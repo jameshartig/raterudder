@@ -58,8 +58,13 @@ function AppContent() {
         setSites(newSites);
 
         // Default select first site if not selected or invalid
-        if (newSites.length > 0 && (!selectedSiteID || !newSites.some(site => site.id === selectedSiteID))) {
-            setSelectedSiteID(newSites[0].id);
+        if (newSites.length > 0) {
+            setSelectedSiteID(current => {
+                if (!current || !newSites.some(site => site.id === current)) {
+                    return newSites[0].id;
+                }
+                return current;
+            });
         }
 
         setHasAttemptedFetch(true);
@@ -67,7 +72,7 @@ function AppContent() {
         if (redirectOnLogin && status.loggedIn) {
             navigate('/dashboard');
         }
-    }, [navigate, selectedSiteID]);
+    }, [navigate]);
 
     // Initial auth check — runs once on mount. Sets loading=true to gate
     // the first render until we know whether the user is authenticated.

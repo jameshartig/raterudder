@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/raterudder/raterudder/pkg/ess"
 	"github.com/raterudder/raterudder/pkg/log"
@@ -61,25 +62,55 @@ func (s *Server) getSettingsWithMigration(ctx context.Context, siteID string) (s
 }
 
 func (s *Server) getESSSystem(ctx context.Context, siteID string, settings settingsWithVersion, creds types.Credentials) (ess.System, error) {
+	if settings.ESSAuthStatus.ConsecutiveFailures >= 5 {
+		return nil, fmt.Errorf("ESS authentication locked due to too many consecutive failures")
+	}
+
+	if settings.ESSAuthStatus.ConsecutiveFailures > 0 {
+		backoff := time.Duration(settings.ESSAuthStatus.ConsecutiveFailures*5) * time.Minute
+		if time.Since(settings.ESSAuthStatus.LastAttempt) < backoff {
+			return nil, fmt.Errorf("ESS authentication rate limited, try again later")
+		}
+	}
+
 	essSystem, err := s.ess.Site(ctx, siteID, settings.Settings)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ESS system: %w", err)
 	}
 
 	// and apply those settings to the ESS
-	creds, updated, err := essSystem.Authenticate(ctx, creds)
+	newCreds, updated, err := essSystem.Authenticate(ctx, creds)
+
+	now := time.Now().UTC()
 	if err != nil {
+		settings.ESSAuthStatus.ConsecutiveFailures++
+		settings.ESSAuthStatus.LastAttempt = now
+		if dbErr := s.storage.SetSettings(ctx, siteID, settings.Settings, settings.version); dbErr != nil {
+			log.Ctx(ctx).ErrorContext(ctx, "failed to update settings auth status", slog.Any("error", dbErr))
+		}
 		return nil, fmt.Errorf("failed to apply settings: %w", err)
 	}
+
+	authStatusChanged := false
+	if settings.ESSAuthStatus.ConsecutiveFailures > 0 {
+		settings.ESSAuthStatus.ConsecutiveFailures = 0
+		settings.ESSAuthStatus.LastAttempt = now
+		authStatusChanged = true
+	}
+
 	if updated {
 		log.Ctx(ctx).DebugContext(ctx, "credentials updated by ess system")
-		settings.EncryptedCredentials, err = s.encryptCredentials(ctx, creds)
+		settings.EncryptedCredentials, err = s.encryptCredentials(ctx, newCreds)
 		if err != nil {
 			log.Ctx(ctx).ErrorContext(ctx, "failed to encrypt credentials", slog.Any("error", err))
 		} else {
 			if err := s.storage.SetSettings(ctx, siteID, settings.Settings, settings.version); err != nil {
 				log.Ctx(ctx).ErrorContext(ctx, "failed to save settings", slog.Any("error", err))
 			}
+		}
+	} else if authStatusChanged {
+		if dbErr := s.storage.SetSettings(ctx, siteID, settings.Settings, settings.version); dbErr != nil {
+			log.Ctx(ctx).ErrorContext(ctx, "failed to update settings auth status", slog.Any("error", dbErr))
 		}
 	}
 
@@ -146,13 +177,28 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	newSettings := req.Settings
 
-	// Basic validation
-	if newSettings.MinArbitrageDifferenceDollarsPerKWH < 0 ||
-		newSettings.MinBatterySOC < 0 || newSettings.MinBatterySOC > 100 ||
-		newSettings.IgnoreHourUsageOverMultiple < 1 ||
-		newSettings.SolarBellCurveMultiplier < 0 || newSettings.SolarTrendRatioMax < 1 ||
-		newSettings.Release != s.release {
-		writeJSONError(w, "invalid settings values", http.StatusBadRequest)
+	if newSettings.MinArbitrageDifferenceDollarsPerKWH < 0 {
+		writeJSONError(w, "minimum arbitrage difference cannot be negative", http.StatusBadRequest)
+		return
+	}
+	if newSettings.MinBatterySOC < 0 || newSettings.MinBatterySOC > 100 {
+		writeJSONError(w, "minimum battery SOC must be between 0 and 100", http.StatusBadRequest)
+		return
+	}
+	if newSettings.IgnoreHourUsageOverMultiple < 1 {
+		writeJSONError(w, "ignore hour usage over multiple must be at least 1", http.StatusBadRequest)
+		return
+	}
+	if newSettings.SolarBellCurveMultiplier < 0 {
+		writeJSONError(w, "solar bell curve multiplier cannot be negative", http.StatusBadRequest)
+		return
+	}
+	if newSettings.SolarTrendRatioMax < 1 {
+		writeJSONError(w, "solar trend ratio max must be at least 1", http.StatusBadRequest)
+		return
+	}
+	if newSettings.Release != s.release {
+		writeJSONError(w, "settings release mismatch", http.StatusBadRequest)
 		return
 	}
 
@@ -162,18 +208,18 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, fmt.Sprintf("invalid utility provider settings: %v", err), http.StatusBadRequest)
 		return
 	}
+	// Get existing credentials to preserve other fields
+	existing, _, err := s.storage.GetSettings(ctx, siteID)
+	if err != nil {
+		log.Ctx(ctx).ErrorContext(ctx, "failed to get settings", slog.Any("error", err))
+		writeJSONError(w, "failed to get settings", http.StatusInternalServerError)
+		return
+	}
+	newSettings.ESSAuthStatus = existing.ESSAuthStatus
 
 	var wg sync.WaitGroup
 	// Handle credentials update
 	if req.Credentials != nil {
-		// Get existing credentials to preserve other fields
-		existing, _, err := s.storage.GetSettings(ctx, siteID)
-		if err != nil {
-			log.Ctx(ctx).ErrorContext(ctx, "failed to get settings", slog.Any("error", err))
-			writeJSONError(w, "failed to get settings", http.StatusInternalServerError)
-			return
-		}
-
 		var existingCreds types.Credentials
 		if len(existing.EncryptedCredentials) > 0 {
 			existingCreds, err = s.decryptCredentials(ctx, existing.EncryptedCredentials)
@@ -187,12 +233,16 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		// check which credentials changed
 		var changedESS bool
 		var shouldBackfillHistory bool
+		var credentialsActuallyChanged bool
 		switch newSettings.ESS {
 		case "franklin":
 			if req.Credentials.Franklin != nil {
 				changedESS = true
 				if existingCreds.Franklin == nil {
 					shouldBackfillHistory = true
+					credentialsActuallyChanged = true
+				} else if req.Credentials.Franklin.Username != existingCreds.Franklin.Username || req.Credentials.Franklin.Password != "" {
+					credentialsActuallyChanged = true
 				}
 				existingCreds.Franklin = req.Credentials.Franklin
 			}
@@ -215,12 +265,41 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
+			if credentialsActuallyChanged && newSettings.ESSAuthStatus.ConsecutiveFailures > 0 {
+				newSettings.ESSAuthStatus.ConsecutiveFailures--
+				newSettings.ESSAuthStatus.LastAttempt = time.Time{}
+			}
+
+			if newSettings.ESSAuthStatus.ConsecutiveFailures >= 5 {
+				writeJSONError(w, "ESS authentication locked due to too many consecutive failures", http.StatusTooManyRequests)
+				return
+			}
+
+			if newSettings.ESSAuthStatus.ConsecutiveFailures > 0 {
+				backoff := time.Duration(newSettings.ESSAuthStatus.ConsecutiveFailures*5) * time.Minute
+				if time.Since(newSettings.ESSAuthStatus.LastAttempt) < backoff {
+					writeJSONError(w, "ESS authentication rate limited, try again later", http.StatusTooManyRequests)
+					return
+				}
+			}
+
 			// Verify and update credentials
 			existingCreds, _, err = essSystem.Authenticate(ctx, existingCreds)
+			now := time.Now().UTC()
 			if err != nil {
+				newSettings.ESSAuthStatus.ConsecutiveFailures++
+				newSettings.ESSAuthStatus.LastAttempt = now
+				if dbErr := s.storage.SetSettings(ctx, siteID, newSettings, types.CurrentSettingsVersion); dbErr != nil {
+					log.Ctx(ctx).ErrorContext(ctx, "failed to update settings auth status", slog.Any("error", dbErr))
+				}
 				log.Ctx(ctx).WarnContext(ctx, "failed to verify ess credentials", slog.Any("error", err))
 				writeJSONError(w, fmt.Sprintf("failed to verify ess credentials: %v", err), http.StatusBadRequest)
 				return
+			}
+
+			if newSettings.ESSAuthStatus.ConsecutiveFailures > 0 {
+				newSettings.ESSAuthStatus.ConsecutiveFailures = 0
+				newSettings.ESSAuthStatus.LastAttempt = now
 			}
 
 			// now backfill if we need to since the credentials were verified
@@ -246,12 +325,6 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		newSettings.EncryptedCredentials = encrypted
 	} else {
 		// Preserve existing encrypted credentials if not updating
-		existing, _, err := s.storage.GetSettings(ctx, siteID)
-		if err != nil {
-			log.Ctx(ctx).ErrorContext(ctx, "failed to get settings", slog.Any("error", err))
-			writeJSONError(w, "failed to get settings", http.StatusInternalServerError)
-			return
-		}
 		newSettings.EncryptedCredentials = existing.EncryptedCredentials
 	}
 

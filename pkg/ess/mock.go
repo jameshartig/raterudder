@@ -99,10 +99,6 @@ func (m *MockESS) advanceState(state *types.ESSMockState, now time.Time) (batter
 		panic(fmt.Sprintf("unsupported strategy: %s", m.strategy))
 	}
 
-	if state.DailyHistory == nil {
-		state.DailyHistory = make(map[string]types.EnergyStats)
-	}
-
 	now = now.In(m.location)
 
 	lastMidnight := getMidnight(state.Timestamp.In(m.location))
@@ -120,6 +116,9 @@ func (m *MockESS) advanceState(state *types.ESSMockState, now time.Time) (batter
 		}
 	}
 	// fill in defaults in case they're not set
+	if state.DailyHistory == nil {
+		state.DailyHistory = make(map[string]types.EnergyStats)
+	}
 	if state.BatteryMode == 0 {
 		state.BatteryMode = types.BatteryModeLoad
 	}
@@ -306,12 +305,6 @@ func (m *MockESS) GetStatus(ctx context.Context) (types.SystemStatus, error) {
 	state, err := mockDB.GetESSMockState(ctx, m.siteID)
 	if err != nil {
 		return types.SystemStatus{}, err
-	}
-
-	if state.Timestamp.IsZero() {
-		state.Timestamp = time.Now()
-		state.BatterySOC = 50.0
-		state.DailyHistory = make(map[string]types.EnergyStats)
 	}
 
 	now := time.Now()

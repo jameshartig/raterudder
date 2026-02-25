@@ -131,14 +131,15 @@ func TestMockESS(t *testing.T) {
 
 		status, err := ess.GetStatus(ctx)
 		require.NoError(t, err)
-		assert.InDelta(t, 50.0, status.BatterySOC, 1.0)
+		assert.NotEqual(t, 50.0, status.BatterySOC)
 		assert.Equal(t, 10.0, status.BatteryCapacityKWH)
 
 		// 2. Test subsequent run (with state)
 		lastTime := time.Now().Add(-1 * time.Hour)
 		state := types.ESSMockState{
-			Timestamp:  lastTime,
-			BatterySOC: 60.0,
+			Timestamp:   lastTime,
+			BatterySOC:  60.0,
+			BatteryMode: types.BatteryModeChargeAny,
 		}
 		db.On("GetESSMockState", ctx, "test-site").Return(state, nil).Once()
 		db.On("UpdateESSMockState", ctx, "test-site", mock.Anything).Return(nil).Once()
@@ -147,7 +148,7 @@ func TestMockESS(t *testing.T) {
 		require.NoError(t, err)
 		// SOC should have changed based on random usage (usually down if Solar is low)
 		assert.NotEqual(t, 60.0, status.BatterySOC)
-		assert.True(t, status.BatterySOC >= 0 && status.BatterySOC <= 100)
+		assert.True(t, status.BatterySOC >= 0 && status.BatterySOC <= 100, status.BatterySOC)
 
 		db.AssertExpectations(t)
 	})

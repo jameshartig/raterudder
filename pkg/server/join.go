@@ -58,6 +58,24 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Limit user to 5 sites
+	sites := s.getAllUserSites(r)
+	if len(sites) >= 5 {
+		alreadyMember := false
+		if !req.Create {
+			for _, st := range sites {
+				if st.ID == req.JoinSiteID {
+					alreadyMember = true
+					break
+				}
+			}
+		}
+		if !alreadyMember {
+			writeJSONError(w, "maximum of 5 sites reached", http.StatusForbidden)
+			return
+		}
+	}
+
 	var site types.Site
 	if req.Create {
 		// Generate Site ID

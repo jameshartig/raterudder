@@ -42,11 +42,11 @@ const LandingPage: React.FC = () => {
         },
         {
             question: "Which utilities are supported?",
-            answer: "Currently only ComEd is supported but new utilities are being added quickly based on demand."
+            answer: "Currently only a limited set of utility provider rates are supported but new utilities are being added quickly based on demand."
         },
         {
             question: "How much does it cost?",
-            answer: "RateRudder is currently free for early adopters."
+            answer: "RateRudder is currently free during public beta."
         }
     ];
 
