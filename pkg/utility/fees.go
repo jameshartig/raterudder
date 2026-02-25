@@ -64,7 +64,8 @@ func (s *SiteFees) applyFees(p types.Price) (types.Price, error) {
 		if !period.Start.IsZero() && p.TSStart.Before(period.Start) {
 			continue
 		}
-		if !period.End.IsZero() && p.TSStart.After(period.End) {
+		// period.End is exclusive: skip if the price starts at or after End
+		if !period.End.IsZero() && !p.TSStart.Before(period.End) {
 			continue
 		}
 

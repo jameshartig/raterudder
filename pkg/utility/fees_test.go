@@ -99,8 +99,9 @@ func TestSiteFees(t *testing.T) {
 			},
 			{
 				UtilityPeriod: types.UtilityPeriod{
+					// End is exclusive: summer ends at the start of Sept 1, so Aug 31 is the last covered day.
 					Start:   time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
-					End:     time.Date(2026, 8, 31, 23, 59, 59, 0, time.UTC),
+					End:     time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
 					HourEnd: 24,
 				},
 				DollarsPerKWH: 0.05,
@@ -145,19 +146,58 @@ func TestSiteFees(t *testing.T) {
 		})
 
 		t.Run("boundary checks", func(t *testing.T) {
-			// Exactly at start of peak (14:00)
+			// Exactly at start of peak (14:00) - inclusive
 			p1, _ := s.applyFees(types.Price{
 				TSStart:       time.Date(2026, 1, 1, 14, 0, 0, 0, ctLocation),
 				DollarsPerKWH: 0.10,
 			})
 			assert.InDelta(t, 0.20, p1.DollarsPerKWH, 0.0001)
 
-			// Exactly at end of peak (18:00) - exclusive
+			// Exactly at HourEnd of peak (18:00) - exclusive
 			p2, _ := s.applyFees(types.Price{
 				TSStart:       time.Date(2026, 1, 1, 18, 0, 0, 0, ctLocation),
 				DollarsPerKWH: 0.10,
 			})
 			assert.InDelta(t, 0.10, p2.DollarsPerKWH, 0.0001)
+		})
+
+		t.Run("End is exclusive", func(t *testing.T) {
+			// Use a dedicated SiteFees with a single date-bounded period to isolate period.End behavior.
+			endTime := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+			boundedS := &SiteFees{
+				periods: []types.UtilityAdditionalFeesPeriod{
+					{
+						UtilityPeriod: types.UtilityPeriod{
+							Start:   time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+							End:     endTime, // exclusive
+							HourEnd: 24,
+						},
+						DollarsPerKWH: 0.05,
+						Description:   "Bounded Fee",
+					},
+				},
+			}
+
+			// One hour before End - fee should apply
+			beforeEnd, _ := boundedS.applyFees(types.Price{
+				TSStart:       endTime.Add(-time.Hour), // Aug 31 23:00 UTC
+				DollarsPerKWH: 0.10,
+			})
+			assert.InDelta(t, 0.15, beforeEnd.DollarsPerKWH, 0.0001, "price one hour before End should have fee applied")
+
+			// Exactly at End - fee should NOT apply (End is exclusive)
+			atEnd, _ := boundedS.applyFees(types.Price{
+				TSStart:       endTime, // Sept 1 00:00 UTC
+				DollarsPerKWH: 0.10,
+			})
+			assert.InDelta(t, 0.10, atEnd.DollarsPerKWH, 0.0001, "price exactly at End should NOT have fee applied")
+
+			// One hour after End - fee should NOT apply
+			afterEnd, _ := boundedS.applyFees(types.Price{
+				TSStart:       endTime.Add(time.Hour), // Sept 1 01:00 UTC
+				DollarsPerKWH: 0.10,
+			})
+			assert.InDelta(t, 0.10, afterEnd.DollarsPerKWH, 0.0001, "price after End should NOT have fee applied")
 		})
 	})
 

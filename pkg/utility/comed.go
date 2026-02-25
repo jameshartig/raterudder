@@ -483,7 +483,6 @@ func (c *BaseComEdHourly) fetchPJMDayAhead(ctx context.Context, pnodeID string) 
 		// Residential Multi Family Without Electric Space Heat 0.0532 0.0468
 		// Residential Single Family With Electric Space Heat 0.0554 0.0473
 		// Residential Multi Family With Electric Space Heat 0.0567 0.0497
-		// TODO: how to apply PJM service charge
 		hec := (item.TotalLMPDA / 1000) * 1.0124 * 1.0002 * (1.0 + .047)
 
 		prices = append(prices, types.Price{
@@ -510,6 +509,31 @@ func (c *BaseComEdHourly) fetchPJMDayAhead(ctx context.Context, pnodeID string) 
 	)
 	return prices, nil
 }
+
+// TODO: support Basic Electric Service Time of Use Pricing (Rate BEST)
+/*
+Basic Electric Service Time of Use Electricity
+Charges (BESTECs) Effective Prior to the June
+Summer BESTEC (6) Nonsummer BESTEC
+Morning Period Electricity Charge (MPEC)
+Mid-Day Peak Period Electricity Charge (MDPPEC)
+Evening Period Electricity Charge (EPEC)
+Overnight Period Electricity Charge (OPEC)
+NOTES:
+(1) This informational sheet is supplemental to Rate BEST – Basic Electric Service Time of Use Pricing
+(Rate BEST).
+(2) The energy prices apply to energy provided every day during the following Central Prevailing Time
+(CPT) periods: MPECs from 6:00 a.m. to 1:00 p.m., MDPPECs from 1:00 p.m. to 7:00 p.m., EPECs
+from 7:00 p.m. to 9:00 p.m., and OPECs from 9:00 p.m. to 6:00 a.m.
+(3) BESTECs are applied in the Supply Section on retail customer bills for each period pursuant to Rate
+BEST.
+(4) BESTECs include Residential Supply Base Uncollectible Cost Factors (SBUFR) as listed in
+Informational Sheet No. 21.
+(5) BESTECs incorporate Residential Incremental Supply Uncollectible Cost Factors (ISUFR) as listed in
+Informational Sheet No. 20.
+(6) The Summer BESTECs are applicable in the June, July, August, and September monthly billing
+periods.
+*/
 
 func getComEdAdditionalFees(ro types.UtilityRateOptions) ([]types.UtilityAdditionalFeesPeriod, error) {
 	// TODO: include 2027 prices
@@ -550,35 +574,20 @@ func getComEdAdditionalFees(ro types.UtilityRateOptions) ([]types.UtilityAdditio
 	// provided in cents per kWh
 	dgrad := 0.062 / 100 // for 2026
 
-	var iedt float64
-	switch ro.RateClass {
-	case ComEdRateClassSingleFamilyResidenceWithoutElectricSpaceHeat, "":
-		iedt = 0.00124
-	case ComEdRateClassMultiFamilyResidenceWithoutElectricSpaceHeat:
-		iedt = 0.00124
-	case ComEdRateClassSingleFamilyResidenceWithElectricSpaceHeat:
-		iedt = 0.00124
-	case ComEdRateClassMultiFamilyResidenceWithElectricSpaceHeat:
-		iedt = 0.00124
-	default:
-		return nil, fmt.Errorf("unknown ComEd rate class: %s", ro.RateClass)
-	}
-	// IEDT & ADJ = IEDT x (IDUF + RBAFD)
-	//1.082178
-	iedtAdj := iedt * (iduf + rbafd)
+	// PJM Service Charge (PSC) for 2026
+	psc := 1.083 / 100
 
 	fees := []types.UtilityAdditionalFeesPeriod{
 		{
 			UtilityPeriod: types.UtilityPeriod{
 				Start:       time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
-				End:         time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+				End:         time.Date(2026, time.June, 1, 0, 0, 0, 0, ctLocation),
 				HourStart:   0,
 				HourEnd:     24,
 				LocationPtr: ctLocation,
 			},
-			GridAdditional: true,
-			DollarsPerKWH:  iedtAdj,
-			Description:    "IL Electricity Distribution Charge - IEDT & ADJ",
+			DollarsPerKWH: psc,
+			Description:   "Transmission Services Charge (PSC)",
 		},
 	}
 
@@ -601,8 +610,8 @@ func getComEdAdditionalFees(ro types.UtilityRateOptions) ([]types.UtilityAdditio
 
 		return append(fees, types.UtilityAdditionalFeesPeriod{
 			UtilityPeriod: types.UtilityPeriod{
-				Start:       time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
-				End:         time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+				Start:       time.Date(2026, time.January, 1, 0, 0, 0, 0, ctLocation),
+				End:         time.Date(2027, time.January, 1, 0, 0, 0, 0, ctLocation),
 				HourStart:   0,
 				HourEnd:     24,
 				LocationPtr: ctLocation,
@@ -651,8 +660,8 @@ func getComEdAdditionalFees(ro types.UtilityRateOptions) ([]types.UtilityAdditio
 			// night (midnight - 6am)
 			{
 				UtilityPeriod: types.UtilityPeriod{
-					Start:       time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
-					End:         time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+					Start:       time.Date(2026, time.January, 1, 0, 0, 0, 0, ctLocation),
+					End:         time.Date(2027, time.January, 1, 0, 0, 0, 0, ctLocation),
 					HourStart:   0,
 					HourEnd:     6,
 					LocationPtr: ctLocation,
@@ -664,8 +673,8 @@ func getComEdAdditionalFees(ro types.UtilityRateOptions) ([]types.UtilityAdditio
 			// morning (6am - 1pm)
 			{
 				UtilityPeriod: types.UtilityPeriod{
-					Start:       time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
-					End:         time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+					Start:       time.Date(2026, time.January, 1, 0, 0, 0, 0, ctLocation),
+					End:         time.Date(2027, time.January, 1, 0, 0, 0, 0, ctLocation),
 					HourStart:   6,
 					HourEnd:     13,
 					LocationPtr: ctLocation,
@@ -677,8 +686,8 @@ func getComEdAdditionalFees(ro types.UtilityRateOptions) ([]types.UtilityAdditio
 			// mid day (1pm - 7pm)
 			{
 				UtilityPeriod: types.UtilityPeriod{
-					Start:       time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
-					End:         time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+					Start:       time.Date(2026, time.January, 1, 0, 0, 0, 0, ctLocation),
+					End:         time.Date(2027, time.January, 1, 0, 0, 0, 0, ctLocation),
 					HourStart:   13,
 					HourEnd:     19,
 					LocationPtr: ctLocation,
@@ -690,8 +699,8 @@ func getComEdAdditionalFees(ro types.UtilityRateOptions) ([]types.UtilityAdditio
 			// evening (7pm - 9pm)
 			{
 				UtilityPeriod: types.UtilityPeriod{
-					Start:       time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
-					End:         time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+					Start:       time.Date(2026, time.January, 1, 0, 0, 0, 0, ctLocation),
+					End:         time.Date(2027, time.January, 1, 0, 0, 0, 0, ctLocation),
 					HourStart:   19,
 					HourEnd:     21,
 					LocationPtr: ctLocation,
@@ -703,8 +712,8 @@ func getComEdAdditionalFees(ro types.UtilityRateOptions) ([]types.UtilityAdditio
 			// night (9pm - midnight)
 			{
 				UtilityPeriod: types.UtilityPeriod{
-					Start:       time.Date(2026, 1, 1, 0, 0, 0, 0, ctLocation),
-					End:         time.Date(2027, 1, 1, 0, 0, 0, 0, ctLocation),
+					Start:       time.Date(2026, time.January, 1, 0, 0, 0, 0, ctLocation),
+					End:         time.Date(2027, time.January, 1, 0, 0, 0, 0, ctLocation),
 					HourStart:   21,
 					HourEnd:     24,
 					LocationPtr: ctLocation,

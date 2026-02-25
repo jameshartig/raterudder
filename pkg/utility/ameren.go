@@ -118,7 +118,7 @@ func (c *BaseAmerenSmart) GetConfirmedPrices(ctx context.Context, start, end tim
 func (c *BaseAmerenSmart) GetFuturePrices(ctx context.Context) ([]types.Price, error) {
 	now := time.Now().In(etLocation)
 	today := truncateDay(now)
-	tomorrow := today.Add(24 * time.Hour)
+	tomorrow := today.AddDate(0, 0, 1) // AddDate is DST-safe, unlike Add(24*time.Hour)
 
 	pricesToday, err := c.getPricesForDate(ctx, today)
 	if err != nil {
@@ -253,14 +253,12 @@ func (c *BaseAmerenSmart) fetchMISODayAhead(ctx context.Context, date time.Time,
 				t := time.Date(date.Year(), date.Month(), date.Day(), i-1, 0, 0, 0, etLocation)
 				lmp := val / 1000.0 // $/MWh to $/kWh
 
-				// Rider HSS says EC = [LMP + ASEC + MSC]
-				// but ASEC and MSC almost always seem to cancel each other out so we're
-				// excluding them for now.
-				// but we need to apply loss factors as well since the MISO LMP is a
-				// "wholesale" price
-				// Ameren Illinois Company d/b/a Ameren Illinois Loss Multiplier and Loss Factor
-				// this is valid until may 2026
-				lossFactor := 1.05009
+				// Rider PSP says EC = [LMP + ASEC + MSC] * LossFactor
+				// ASEC and MSC are excluded as they nearly always cancel out.
+				// Loss multiplier source: Ameren Illinois Company d/b/a Ameren Illinois
+				// Loss Multiplier and Loss Factor (secondary voltage, residential).
+				// Loss factors are published annually; update this table each June.
+				lossFactor := amerenLossFactor(t)
 				prices = append(prices, types.Price{
 					Provider:      "ameren_psp",
 					TSStart:       t,
@@ -280,68 +278,117 @@ func (c *BaseAmerenSmart) fetchMISODayAhead(ctx context.Context, date time.Time,
 	return prices, nil
 }
 
+// amerenLossFactor returns the applicable residential secondary voltage loss
+// multiplier for the given hour.  Ameren publishes updated values each June;
+// add new rows here when new values are released.
+// see https://www.icc.illinois.gov/downloads/public/filing/4/390832.pdf
+func amerenLossFactor(t time.Time) float64 {
+	switch {
+	case t.Before(time.Date(2026, time.June, 1, 0, 0, 0, 0, etLocation)):
+		return 1.05009
+	// TODO: 2026-2027 loss factor
+	default:
+		return 1.05009
+	}
+}
+
 func getAmerenAdditionalFees(types.UtilityRateOptions) ([]types.UtilityAdditionalFeesPeriod, error) {
 	// Rider PSP says the delivery fees are "Residential - Rate DS-1"
-	// RATE PBR-R defines Rate DS-1
-	// summer is June 1st to September 30th
-	// non-summer is January 1st to May 31st and October 1st to May 31st
+	// RATE PBR-R defines Rate DS-1.
+	// Summer = June 1 – September 30.  Non-summer = remainder of the year.
+	//
+	// NOTE: The DS-1 non-summer distribution delivery charge is officially TIERED
+	// but because we calculate fees at an hourly level without knowing monthly
+	// cumulative consumption, we apply the first-tier rate as a
+	// conservative estimate. This slightly overstates costs for customers
+	// with monthly usage above 800 kWh. The summer rate is flat.
+	//
+	// The Ameren Illinois Transmission Service Charge is a separate per-kWh
+	// charge included in the all-in price-to-compare. As of January 2026 it is
+	// 2.629¢/kWh and applies regardless of season or time-of-day.
 	return []types.UtilityAdditionalFeesPeriod{
-		// 2026
+		// ── 2026 Transmission Service Charge ──────────────────────────────────
+		// Applies all hours, both summer and non-summer.
 		{
 			UtilityPeriod: types.UtilityPeriod{
-				Start: time.Date(2026, time.January, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2026, time.June, 1, 0, 0, 0, 0, ctLocation),
+				Start:     time.Date(2026, time.January, 1, 0, 0, 0, 0, ctLocation),
+				End:       time.Date(2027, time.January, 1, 0, 0, 0, 0, ctLocation),
+				HourStart: 0,
+				HourEnd:   24,
 			},
-			DollarsPerKWH:  0.04572,
+			DollarsPerKWH: 0.02629,
+			Description:   "Ameren IL Transmission Service Charge (2026)",
+		},
+		// TODO: add 2027 transmission service charge
+
+		// ── 2026 Distribution Delivery Charge ────────────────────────────────
+		{
+			UtilityPeriod: types.UtilityPeriod{
+				Start:     time.Date(2026, time.January, 1, 0, 0, 0, 0, ctLocation),
+				End:       time.Date(2026, time.June, 1, 0, 0, 0, 0, ctLocation),
+				HourStart: 0,
+				HourEnd:   24,
+			},
+			DollarsPerKWH:  0.04572, // first-tier non-summer rate; see tiering note above
 			GridAdditional: true,
-			Description:    "Residential - Rate DS-1 Distribution Delivery Charge (Non-summer)",
+			Description:    "Rate DS-1 Distribution Delivery Charge (Non-summer 2026)",
 		},
 		{
 			UtilityPeriod: types.UtilityPeriod{
-				Start: time.Date(2026, time.June, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2026, time.October, 1, 0, 0, 0, 0, ctLocation),
+				Start:     time.Date(2026, time.June, 1, 0, 0, 0, 0, ctLocation),
+				End:       time.Date(2026, time.October, 1, 0, 0, 0, 0, ctLocation),
+				HourStart: 0,
+				HourEnd:   24,
 			},
 			DollarsPerKWH:  0.07811,
 			GridAdditional: true,
-			Description:    "Residential - Rate DS-1 Distribution Delivery Charge (Summer)",
+			Description:    "Rate DS-1 Distribution Delivery Charge (Summer 2026)",
 		},
 		{
 			UtilityPeriod: types.UtilityPeriod{
-				Start: time.Date(2026, time.October, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2027, time.January, 1, 0, 0, 0, 0, ctLocation),
+				Start:     time.Date(2026, time.October, 1, 0, 0, 0, 0, ctLocation),
+				End:       time.Date(2027, time.January, 1, 0, 0, 0, 0, ctLocation),
+				HourStart: 0,
+				HourEnd:   24,
 			},
-			DollarsPerKWH:  0.04572,
+			DollarsPerKWH:  0.04572, // first-tier non-summer rate
 			GridAdditional: true,
-			Description:    "Residential - Rate DS-1 Distribution Delivery Charge (Non-summer)",
+			Description:    "Rate DS-1 Distribution Delivery Charge (Non-summer 2026)",
 		},
 
-		// 2027
+		// ── 2027 Distribution Delivery Charge ────────────────────────────────
 		{
 			UtilityPeriod: types.UtilityPeriod{
-				Start: time.Date(2027, time.January, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2027, time.June, 1, 0, 0, 0, 0, ctLocation),
+				Start:     time.Date(2027, time.January, 1, 0, 0, 0, 0, ctLocation),
+				End:       time.Date(2027, time.June, 1, 0, 0, 0, 0, ctLocation),
+				HourStart: 0,
+				HourEnd:   24,
 			},
-			DollarsPerKWH:  0.04687,
+			DollarsPerKWH:  0.04687, // first-tier non-summer rate
 			GridAdditional: true,
-			Description:    "Residential - Rate DS-1 Distribution Delivery Charge (Non-summer)",
+			Description:    "Rate DS-1 Distribution Delivery Charge (Non-summer 2027)",
 		},
 		{
 			UtilityPeriod: types.UtilityPeriod{
-				Start: time.Date(2027, time.June, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2027, time.October, 1, 0, 0, 0, 0, ctLocation),
+				Start:     time.Date(2027, time.June, 1, 0, 0, 0, 0, ctLocation),
+				End:       time.Date(2027, time.October, 1, 0, 0, 0, 0, ctLocation),
+				HourStart: 0,
+				HourEnd:   24,
 			},
 			DollarsPerKWH:  0.08009,
 			GridAdditional: true,
-			Description:    "Residential - Rate DS-1 Distribution Delivery Charge (Summer)",
+			Description:    "Rate DS-1 Distribution Delivery Charge (Summer 2027)",
 		},
 		{
 			UtilityPeriod: types.UtilityPeriod{
-				Start: time.Date(2027, time.October, 1, 0, 0, 0, 0, ctLocation),
-				End:   time.Date(2028, time.January, 1, 0, 0, 0, 0, ctLocation),
+				Start:     time.Date(2027, time.October, 1, 0, 0, 0, 0, ctLocation),
+				End:       time.Date(2028, time.January, 1, 0, 0, 0, 0, ctLocation),
+				HourStart: 0,
+				HourEnd:   24,
 			},
-			DollarsPerKWH:  0.04687,
+			DollarsPerKWH:  0.04687, // first-tier non-summer rate
 			GridAdditional: true,
-			Description:    "Residential - Rate DS-1 Distribution Delivery Charge (Non-summer)",
+			Description:    "Rate DS-1 Distribution Delivery Charge (Non-summer 2027-Q4)",
 		},
 	}, nil
 }
