@@ -15,14 +15,15 @@ import (
 	"time"
 
 	"github.com/NYTimes/gziphandler"
+	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/levenlabs/go-lflag"
 	"github.com/raterudder/raterudder/pkg/controller"
 	"github.com/raterudder/raterudder/pkg/ess"
 	"github.com/raterudder/raterudder/pkg/log"
 	"github.com/raterudder/raterudder/pkg/storage"
+	"github.com/raterudder/raterudder/pkg/types"
 	"github.com/raterudder/raterudder/pkg/utility"
 	"github.com/raterudder/raterudder/web"
-	"google.golang.org/api/idtoken"
 )
 
 const (
@@ -34,13 +35,13 @@ type contextKey string
 
 const (
 	siteIDContextKey         contextKey = "siteID"
-	allUserSiteIDsContextKey contextKey = "allUserSiteIDs"
+	allUserSitesContextKey   contextKey = "allUserSites"
 	userContextKey           contextKey = "user"
 	userToRegisterContextKey contextKey = "userToRegister"
 )
 
-// TokenValidator is a function that validates a Google ID Token.
-type TokenValidator func(ctx context.Context, idToken string, audience string) (*idtoken.Payload, error)
+// tokenVerifier is a function that validates a Google or Apple ID Token.
+type tokenVerifier func(ctx context.Context, rawIDToken string) (*oidc.IDToken, error)
 
 // Server handles the HTTP API and control logic for the Raterudder system.
 // It orchestrates interactions between the utility provider, ESS, and storage.
@@ -50,34 +51,32 @@ type Server struct {
 	storage    storage.Database
 	controller *controller.Controller
 
-	listenAddr     string
-	devProxy       string
-	tokenValidator TokenValidator
-	httpServer     *http.Server
+	listenAddr string
+	devProxy   string
+	httpServer *http.Server
 
-	updateSpecificAudience string
-	updateSpecificEmail    string
-	adminEmails            []string
-	oidcAudience           string
-	bypassAuth             bool
-	singleSite             bool
-	encryptionKey          string
-	release                string
-	serverName             string
-	webCacheDuration       time.Duration
-	showHidden             bool
+	updateSpecificEmail string
+	adminEmails         []string
+	oidcAudiences       map[string]string
+	oidcVerifiers       map[string]tokenVerifier
+	bypassAuth          bool
+	singleSite          bool
+	encryptionKey       string
+	release             string
+	serverName          string
+	webCacheDuration    time.Duration
+	showHidden          bool
 }
 
 // Configured initializes the Server with dependencies.
 // It uses lflag to register command-line flags for configuration.
 func Configured(u *utility.Map, e *ess.Map, s storage.Database) *Server {
 	srv := &Server{
-		utilities:      u,
-		ess:            e,
-		storage:        s,
-		controller:     controller.NewController(),
-		tokenValidator: idtoken.Validate,
-		serverName:     "raterudder",
+		utilities:  u,
+		ess:        e,
+		storage:    s,
+		controller: controller.NewController(),
+		serverName: "raterudder",
 	}
 	revision := os.Getenv("K_REVISION")
 	if revision != "" {
@@ -96,7 +95,9 @@ func Configured(u *utility.Map, e *ess.Map, s storage.Database) *Server {
 	updateSpecificEmail := lflag.String("update-specific-email", "", "email to validate for /api/update")
 	adminEmails := lflag.String("admin-emails", "", "comma-delimited list of email addresses allowed to update settings via IAP")
 	oidcAudience := lflag.String("oidc-audience", "", "token to use for id tokens audience to validate")
-	updateSpecificAudience := lflag.String("update-specific-audience", "", "audience to validate for /api/update")
+	oidcAudiences := map[string]string{}
+	lflag.JSON(&oidcAudiences, "oidc-audiences", oidcAudiences, "JSON map of provider (google/apple) to audience/client ID")
+	updateSpecificAudience := lflag.String("update-specific-audience", "", "Google-specific legacy audience to validate for /api/update")
 	singleSite := lflag.Bool("single-site", false, "Enable single-site mode (disables siteID requirement)")
 	showHidden := lflag.Bool("show-hidden", false, "Expose hidden providers in lists via the API")
 	encryptionKey := lflag.RequiredString("credentials-encryption-key", "Key for encrypting credentials")
@@ -113,8 +114,61 @@ func Configured(u *utility.Map, e *ess.Map, s storage.Database) *Server {
 				srv.adminEmails[i] = strings.TrimSpace(email)
 			}
 		}
-		srv.oidcAudience = *oidcAudience
-		srv.updateSpecificAudience = *updateSpecificAudience
+		var googleProvider *oidc.Provider
+		if len(oidcAudiences) > 0 {
+			srv.oidcAudiences = make(map[string]string, len(oidcAudiences))
+			srv.oidcVerifiers = make(map[string]tokenVerifier, len(oidcAudiences))
+			for n, a := range oidcAudiences {
+				switch n {
+				case "google":
+					provider, err := oidc.NewProvider(context.Background(), "https://accounts.google.com")
+					if err != nil {
+						log.Ctx(context.Background()).Error("failed to initialize Google OIDC provider", slog.Any("error", err))
+						os.Exit(1)
+					}
+					srv.oidcVerifiers[n] = provider.Verifier(&oidc.Config{ClientID: a}).Verify
+					srv.oidcAudiences[n] = a
+				case "apple":
+					provider, err := oidc.NewProvider(context.Background(), "https://appleid.apple.com")
+					if err != nil {
+						log.Ctx(context.Background()).Error("failed to initialize Apple OIDC provider", slog.Any("error", err))
+						os.Exit(1)
+					}
+					srv.oidcVerifiers[n] = provider.Verifier(&oidc.Config{ClientID: a}).Verify
+					srv.oidcAudiences[n] = a
+				default:
+					log.Ctx(context.Background()).Error("unsupported oidc audience client", slog.String("client", n))
+					os.Exit(1)
+				}
+			}
+		} else if *oidcAudience != "" {
+			var err error
+			googleProvider, err = oidc.NewProvider(context.Background(), "https://accounts.google.com")
+			if err != nil {
+				log.Ctx(context.Background()).Error("failed to initialize Google OIDC provider", slog.Any("error", err))
+				os.Exit(1)
+			}
+			srv.oidcVerifiers = map[string]tokenVerifier{
+				"google": googleProvider.Verifier(&oidc.Config{ClientID: *oidcAudience}).Verify,
+			}
+			srv.oidcAudiences = map[string]string{
+				"google": *oidcAudience,
+			}
+		}
+		if *updateSpecificAudience != "" {
+			if srv.oidcVerifiers == nil {
+				srv.oidcVerifiers = map[string]tokenVerifier{}
+			}
+			if googleProvider == nil {
+				var err error
+				googleProvider, err = oidc.NewProvider(context.Background(), "https://accounts.google.com")
+				if err != nil {
+					log.Ctx(context.Background()).Error("failed to initialize Google OIDC provider", slog.Any("error", err))
+					os.Exit(1)
+				}
+				srv.oidcVerifiers["google_update_specific"] = googleProvider.Verifier(&oidc.Config{ClientID: *updateSpecificAudience}).Verify
+			}
+		}
 		srv.singleSite = *singleSite
 		srv.showHidden = *showHidden
 		srv.release = *release
@@ -181,11 +235,18 @@ func (s *Server) getSiteID(r *http.Request) string {
 	panic("no siteID in context")
 }
 
-func (s *Server) getAllUserSiteIDs(r *http.Request) []string {
-	if sites, ok := r.Context().Value(allUserSiteIDsContextKey).([]string); ok {
+func (s *Server) getAllUserSites(r *http.Request) []types.UserSite {
+	if sites, ok := r.Context().Value(allUserSitesContextKey).([]types.UserSite); ok {
 		return sites
 	}
 	return nil
+}
+
+func (s *Server) getUser(r *http.Request) types.User {
+	if user, ok := r.Context().Value(userContextKey).(types.User); ok {
+		return user
+	}
+	return types.User{}
 }
 
 // Run starts the HTTP server and blocks until the context is canceled or an error occurs.
@@ -199,15 +260,14 @@ func (s *Server) Run(ctx context.Context) error {
 		IdleTimeout:  15 * time.Second,
 	}
 
-	// Use a channel to capturing server errors
+	// use a channel to capturing server errors
 	errChan := make(chan error, 1)
-
 	go func() {
+		defer close(errChan)
 		log.Ctx(ctx).InfoContext(ctx, "starting server", slog.String("addr", s.listenAddr))
 		if err := s.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errChan <- err
 		}
-		close(errChan)
 	}()
 
 	select {

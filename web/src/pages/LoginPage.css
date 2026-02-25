@@ -1,43 +1,47 @@
 /* ============================================
    Login Page
    ============================================ */
-
-.login-page {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 60vh;
-}
-
-.login-card {
-  background: var(--surface);
-  padding: 3rem;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-lg);
-  text-align: center;
-  width: 100%;
-  max-width: 400px;
-}
-
-.login-card h1 {
-  margin-bottom: 0.5rem;
-  color: var(--text-primary);
-  font-size: 1.75rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-}
-
-.login-card p {
-  color: var(--text-secondary);
-  margin-bottom: 2rem;
-  font-size: 0.95rem;
-}
-
 .google-btn-wrapper {
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  width: 100%;
+}
+
+/* Ensure Google button container takes full width if possible,
+   or at least centers properly with consistent width */
+.google-btn-wrapper>div {
+  width: 100%;
+  display: flex;
   justify-content: center;
-  margin-bottom: 1.5rem;
+}
+
+.apple-auth-btn {
+  width: 100% !important;
+  max-width: 250px !important;
+  /* Matches explicit width="250" of GoogleLogin */
+  height: 40px !important;
+  /* Matches Google button 'large' height */
+  padding: 0 1rem !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+  font-weight: 500 !important;
+  font-size: 14px !important;
+  border-radius: 20px !important;
+  /* Pill shape to match Google's 'pill' shape */
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+  border: none !important;
+  background-color: #000 !important;
+  color: #fff !important;
+}
+
+.apple-auth-btn:hover {
+  background-color: #333 !important;
 }
 
 .auth-disabled-message {

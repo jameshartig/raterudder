@@ -3,38 +3,7 @@
    Used by JoinPage and NewSitePage
    ============================================ */
 
-.join-page {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  min-height: 50vh;
-  gap: 1.25rem;
-}
 
-.join-card {
-  background: var(--surface);
-  padding: 2.5rem;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-lg);
-  text-align: center;
-  width: 100%;
-  max-width: 420px;
-}
-
-.join-card h1 {
-  margin-bottom: 0.5rem;
-  color: var(--text-primary);
-  font-size: 1.5rem;
-  font-weight: 700;
-}
-
-.join-card p {
-  color: var(--text-secondary);
-  margin-bottom: 1.5rem;
-  font-size: 0.9rem;
-}
 
 .join-form {
   display: flex;
@@ -129,21 +98,5 @@
 }
 
 .join-consent a:hover {
-  text-decoration: underline;
-}
-
-.join-alternate-link {
-  font-size: 0.82rem;
-  color: var(--text-muted);
-  margin: 0;
-}
-
-.join-alternate-link a {
-  color: var(--primary);
-  text-decoration: none;
-  font-weight: 500;
-}
-
-.join-alternate-link a:hover {
   text-decoration: underline;
 }

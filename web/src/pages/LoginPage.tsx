@@ -1,37 +1,72 @@
 import React from 'react';
-import { GoogleLogin } from '@react-oauth/google';
+import { GoogleLogin, GoogleOAuthProvider } from '@react-oauth/google';
+import AppleSignin from 'react-apple-signin-auth';
 import { Link } from 'wouter';
 import { Separator } from '@base-ui/react/separator';
 import './LoginPage.css';
 
 interface LoginPageProps {
-    onLoginSuccess: (credentialResponse: any) => void;
+    onLoginSuccess: (credentialResponse: any, client?: string) => void;
     onLoginError?: () => void;
     authEnabled: boolean;
-    clientID: string;
+    clientIDs: Record<string, string>;
 }
 
-const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onLoginError, authEnabled, clientID }) => {
+const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onLoginError, authEnabled, clientIDs }) => {
+    const handleAppleSuccess = (response: any) => {
+        if (response.authorization && response.authorization.id_token) {
+            onLoginSuccess({ credential: response.authorization.id_token }, 'apple');
+        } else {
+            console.error("Apple login failed: ", response);
+            if (onLoginError) onLoginError();
+        }
+    };
+
     return (
-        <div className="login-page">
-            <div className="login-card">
+        <div className="auth-page">
+            <div className="auth-card">
                 <h1>Raterudder</h1>
                 <p>Sign in to manage your home energy.</p>
                 <div className="google-btn-wrapper">
-                    {authEnabled && clientID ? (
-                        <GoogleLogin
-                            onSuccess={onLoginSuccess}
-                            onError={onLoginError}
-                            theme="filled_blue"
-                            size="large"
-                            text="signin_with"
-                            shape="pill"
-                            auto_select
-                            use_fedcm_for_prompt
-                        />
+                    {authEnabled && (clientIDs["google"] || clientIDs["apple"]) ? (
+                        <>
+                            {clientIDs["google"] && (
+                                <GoogleOAuthProvider clientId={clientIDs["google"]}>
+                                    <GoogleLogin
+                                        onSuccess={(res) => onLoginSuccess(res, 'google')}
+                                        onError={onLoginError}
+                                        theme="filled_blue"
+                                        size="large"
+                                        text="signin_with"
+                                        shape="pill"
+                                        width="250"
+                                        auto_select
+                                        use_fedcm_for_prompt
+                                    />
+                                </GoogleOAuthProvider>
+                            )}
+                            {clientIDs["apple"] && (
+                                    <AppleSignin
+                                        authOptions={{
+                                            clientId: clientIDs["apple"],
+                                            scope: 'email',
+                                            redirectURI: `${window.location.origin}/login`,
+                                            state: 'state',
+                                            nonce: 'nonce',
+                                            usePopup: true
+                                        }}
+                                        uiType="dark"
+                                        className="apple-auth-btn"
+                                        noDefaultStyle={false}
+                                        buttonExtraChildren="Sign in with Apple"
+                                        onSuccess={handleAppleSuccess}
+                                        onError={onLoginError || (() => {})}
+                                    />
+                            )}
+                        </>
                     ) : (
                         <div className="auth-disabled-message">
-                            {!authEnabled ? "Authentication is currently disabled." : "Google login is not configured correctly."}
+                            {!authEnabled ? "Authentication is currently disabled." : "No login providers are configured correctly."}
                         </div>
                     )}
                 </div>

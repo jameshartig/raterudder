@@ -14,7 +14,7 @@ describe('Header Component', () => {
             <Router hook={hook}>
                 <Header
                     loggedIn={loggedIn}
-                    siteIDs={['site1']}
+                    sites={[{ id: 'site1', name: 'Site 1' }]}
                     selectedSiteID="site1"
                     onSiteChange={mockOnSiteChange}
                     onLogout={mockOnLogout}

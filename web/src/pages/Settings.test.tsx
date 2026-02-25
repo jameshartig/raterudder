@@ -72,7 +72,7 @@ describe('App & Settings', () => {
         fireEvent.click(screen.getByText('Google Sign In'));
 
         await waitFor(() => {
-            expect(login).toHaveBeenCalledWith('test-token');
+            expect(login).toHaveBeenCalledWith('test-token', 'google');
         });
     });
 

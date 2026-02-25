@@ -2,16 +2,17 @@ import React from 'react';
 import { Link } from 'wouter';
 import { Select } from '@base-ui/react/select';
 import './Header.css';
+import type { UserSite } from '../api';
 
 interface HeaderProps {
     loggedIn: boolean;
-    siteIDs: string[];
+    sites: UserSite[];
     selectedSiteID: string;
     onSiteChange: (siteID: string) => void;
     onLogout: () => void;
 }
 
-const Header: React.FC<HeaderProps> = ({ loggedIn, siteIDs, selectedSiteID, onSiteChange, onLogout }) => {
+const Header: React.FC<HeaderProps> = ({ loggedIn, sites, selectedSiteID, onSiteChange, onLogout }) => {
     const [isMenuOpen, setIsMenuOpen] = React.useState(false);
 
     const toggleMenu = () => {
@@ -26,11 +27,11 @@ const Header: React.FC<HeaderProps> = ({ loggedIn, siteIDs, selectedSiteID, onSi
                         <img src="/logo.svg" alt="RateRudder Logo" className="header-logo-img" />
                         RateRudder
                     </Link>
-                    {loggedIn && siteIDs.length > 1 && (
+                    {loggedIn && sites.length > 1 && (
                         <Select.Root
                             value={selectedSiteID}
                             items={{
-                                ...Object.fromEntries(siteIDs.map(id => [id, id])),
+                                ...Object.fromEntries(sites.map(site => [site.id, site.name || site.id])),
                                 "ALL": "Overview"
                             }}
                             onValueChange={(value) => onSiteChange(value as string)}
@@ -44,9 +45,9 @@ const Header: React.FC<HeaderProps> = ({ loggedIn, siteIDs, selectedSiteID, onSi
                                         <Select.Item className="select-item" value="ALL">
                                             <Select.ItemText>Overview</Select.ItemText>
                                         </Select.Item>
-                                        {siteIDs.map(id => (
-                                            <Select.Item key={id} className="select-item" value={id}>
-                                                <Select.ItemText>{id}</Select.ItemText>
+                                        {sites.map(site => (
+                                            <Select.Item key={site.id} className="select-item" value={site.id}>
+                                                <Select.ItemText>{site.name}</Select.ItemText>
                                             </Select.Item>
                                         ))}
                                     </Select.Popup>

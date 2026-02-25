@@ -1,9 +1,9 @@
 export const defaultAuthStatus = {
     loggedIn: true,
     authRequired: true,
-    clientID: 'test-client-id',
+    clientIDs: { google: 'test-client-id' },
     email: 'user@example.com',
-    siteIDs: ['site1']
+    sites: [{ id: 'site1', name: 'Site 1' }]
 };
 
 export const defaultSavings = {

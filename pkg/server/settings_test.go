@@ -32,7 +32,7 @@ func TestSettings(t *testing.T) {
 	mockS.On("UpsertEnergyHistory", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	// Helper to create server with auth config
-	newAuthServer := func(audience string, emails []string, validator TokenValidator) (*Server, *mockESS) {
+	newAuthServer := func(audience string, emails []string, validator tokenVerifier) (*Server, *mockESS) {
 		mockES := &mockESS{}
 		mockP := ess.NewMap()
 		mockP.SetSystem(types.SiteIDNone, mockES)
@@ -43,14 +43,15 @@ func TestSettings(t *testing.T) {
 		mockUMap.SetProvider("test", mockU)
 
 		return &Server{
-			utilities:      mockUMap,
-			ess:            mockP,
-			storage:        mockS,
-			controller:     controller.NewController(),
-			adminEmails:    emails,
-			oidcAudience:   audience,
-			tokenValidator: validator,
-			encryptionKey:  "test-secret-key-1234567890123456",
+			utilities:   mockUMap,
+			ess:         mockP,
+			storage:     mockS,
+			controller:  controller.NewController(),
+			adminEmails: emails,
+			oidcVerifiers: map[string]tokenVerifier{
+				"google": validator,
+			},
+			encryptionKey: "test-secret-key-1234567890123456",
 		}, mockES
 	}
 

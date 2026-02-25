@@ -19,6 +19,7 @@ describe('JoinSitePage Component', () => {
 
         expect(screen.getByText('Join a Site')).toBeInTheDocument();
         expect(screen.getByLabelText('Site ID')).toBeInTheDocument();
+        expect(screen.getByLabelText('Site Name')).toBeInTheDocument();
         expect(screen.getByLabelText('Invite Code')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Join Site' })).toBeInTheDocument();
     });
@@ -30,10 +31,11 @@ describe('JoinSitePage Component', () => {
         expect(button).toBeDisabled();
     });
 
-    it('enables submit when both fields are filled', () => {
+    it('enables submit when all fields are filled', () => {
         render(<JoinSitePage onJoinSuccess={mockOnJoinSuccess} />);
 
         fireEvent.change(screen.getByLabelText('Site ID'), { target: { value: 'my-site' } });
+        fireEvent.change(screen.getByLabelText('Site Name'), { target: { value: 'My Home' } });
         fireEvent.change(screen.getByLabelText('Invite Code'), { target: { value: 'secret' } });
 
         const button = screen.getByRole('button', { name: 'Join Site' });
@@ -46,11 +48,12 @@ describe('JoinSitePage Component', () => {
         render(<JoinSitePage onJoinSuccess={mockOnJoinSuccess} />);
 
         fireEvent.change(screen.getByLabelText('Site ID'), { target: { value: 'my-site' } });
+        fireEvent.change(screen.getByLabelText('Site Name'), { target: { value: 'My Home' } });
         fireEvent.change(screen.getByLabelText('Invite Code'), { target: { value: 'secret' } });
         fireEvent.click(screen.getByRole('button', { name: 'Join Site' }));
 
         await waitFor(() => {
-            expect(api.joinSite).toHaveBeenCalledWith('my-site', 'secret');
+            expect(api.joinSite).toHaveBeenCalledWith('my-site', 'secret', 'My Home');
             expect(mockOnJoinSuccess).toHaveBeenCalled();
         });
     });
@@ -61,6 +64,7 @@ describe('JoinSitePage Component', () => {
         render(<JoinSitePage onJoinSuccess={mockOnJoinSuccess} />);
 
         fireEvent.change(screen.getByLabelText('Site ID'), { target: { value: 'my-site' } });
+        fireEvent.change(screen.getByLabelText('Site Name'), { target: { value: 'My Home' } });
         fireEvent.change(screen.getByLabelText('Invite Code'), { target: { value: 'wrong' } });
         fireEvent.click(screen.getByRole('button', { name: 'Join Site' }));
 
@@ -76,11 +80,12 @@ describe('JoinSitePage Component', () => {
         render(<JoinSitePage onJoinSuccess={mockOnJoinSuccess} />);
 
         fireEvent.change(screen.getByLabelText('Site ID'), { target: { value: '  my-site  ' } });
+        fireEvent.change(screen.getByLabelText('Site Name'), { target: { value: '  My Home  ' } });
         fireEvent.change(screen.getByLabelText('Invite Code'), { target: { value: '  secret  ' } });
         fireEvent.click(screen.getByRole('button', { name: 'Join Site' }));
 
         await waitFor(() => {
-            expect(api.joinSite).toHaveBeenCalledWith('my-site', 'secret');
+            expect(api.joinSite).toHaveBeenCalledWith('my-site', 'secret', 'My Home');
         });
     });
 });

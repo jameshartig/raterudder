@@ -117,7 +117,7 @@ function ForecastChart({ data, config, isMobile }: { data: ProcessedModelingHour
                         formatter={(value: number | string | undefined, name: string | number | undefined) => {
                             const v = Number(value ?? 0);
                             // Determine which config/line this is
-                            let lineUnit = config.unit;
+                            const lineUnit = config.unit;
                             // If it's the solar raw line, it uses the same unit
 
                             return [

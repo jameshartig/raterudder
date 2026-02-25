@@ -275,12 +275,17 @@ export const updateSettings = async (settings: Settings, siteID?: string, creden
     }
 };
 
+export interface UserSite {
+    id: string;
+    name: string;
+}
+
 export interface AuthStatus {
     loggedIn: boolean;
     email: string;
     authRequired: boolean;
-    clientID: string;
-    siteIDs?: string[];
+    clientIDs: Record<string, string>;
+    sites?: UserSite[];
 }
 
 export const fetchAuthStatus = async (): Promise<AuthStatus> => {
@@ -291,13 +296,13 @@ export const fetchAuthStatus = async (): Promise<AuthStatus> => {
     return response.json();
 };
 
-export const login = async (token: string): Promise<void> => {
+export const login = async (token: string, client?: string): Promise<void> => {
     const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token, client }),
     });
     if (!response.ok) {
         throw new Error(await extractError(response, 'Login failed'));
@@ -340,26 +345,26 @@ export const fetchModeling = async (siteID?: string): Promise<ModelingHour[]> =>
     return response.json();
 };
 
-export const joinSite = async (joinSiteID: string, inviteCode: string): Promise<void> => {
+export const joinSite = async (joinSiteID: string, inviteCode: string, name: string): Promise<void> => {
     const response = await fetch('/api/join', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ joinSiteID, inviteCode }),
+        body: JSON.stringify({ joinSiteID, inviteCode, name }),
     });
     if (!response.ok) {
         throw new Error(await extractError(response, 'Failed to join site'));
     }
 };
 
-export const createSite = async (createName: string): Promise<void> => {
+export const createSite = async (name: string): Promise<void> => {
     const response = await fetch('/api/join', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ create: true, createName }),
+        body: JSON.stringify({ create: true, name }),
     });
     if (!response.ok) {
         throw new Error(await extractError(response, 'Failed to create site'));

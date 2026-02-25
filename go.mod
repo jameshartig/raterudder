@@ -5,6 +5,7 @@ go 1.25.1
 require (
 	cloud.google.com/go/firestore v1.21.0
 	github.com/NYTimes/gziphandler v1.1.1
+	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/levenlabs/go-lflag v1.0.2
 	github.com/levenlabs/go-llog v1.0.0
 	github.com/stretchr/testify v1.11.1
@@ -21,6 +22,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect

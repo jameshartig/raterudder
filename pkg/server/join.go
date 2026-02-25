@@ -5,11 +5,14 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/raterudder/raterudder/pkg/log"
+	"github.com/raterudder/raterudder/pkg/storage"
 	"github.com/raterudder/raterudder/pkg/types"
 )
 
@@ -21,7 +24,7 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		InviteCode string `json:"inviteCode"`
 		JoinSiteID string `json:"joinSiteID"`
 		Create     bool   `json:"create"`
-		CreateName string `json:"createName"`
+		Name       string `json:"name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		// since we failed to read, don't return JSON error
@@ -34,11 +37,6 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Create && req.CreateName == "" {
-		writeJSONError(w, "createName is required when creating a site", http.StatusBadRequest)
-		return
-	}
-
 	if req.Create && s.singleSite {
 		writeJSONError(w, "cannot create a new site in single-site mode", http.StatusForbidden)
 		return
@@ -47,7 +45,7 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	// Get the authenticated user from context (either existing or new-to-register)
 	var userID, email string
 
-	if user, ok := ctx.Value(userContextKey).(types.User); ok {
+	if user := s.getUser(r); user.ID != "" {
 		userID = user.ID
 		email = user.Email
 	} else if userToRegister, ok := ctx.Value(userToRegisterContextKey).(types.User); ok {
@@ -70,9 +68,16 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 
 		usePrefix := false
 		if len(prefix) >= 8 {
-			if _, err := s.storage.GetSite(ctx, prefix); err != nil {
-				// doesn't exist, we can use it
-				usePrefix = true
+			for i := 0; i < 10; i++ {
+				try := prefix
+				if i > 0 {
+					try = fmt.Sprintf("%s_%d", prefix, i)
+				}
+				if _, err := s.storage.GetSite(ctx, try); errors.Is(err, storage.ErrSiteNotFound) {
+					prefix = try
+					usePrefix = true
+					break
+				}
 			}
 		}
 
@@ -88,10 +93,11 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		}
 
 		site = types.Site{
-			ID:          req.JoinSiteID,
-			Name:        req.CreateName,
-			InviteCode:  "",
-			Permissions: []types.SitePermissions{},
+			ID:         req.JoinSiteID,
+			InviteCode: "",
+			Permissions: []types.SitePermissions{
+				{UserID: userID},
+			},
 		}
 
 		if err := s.storage.CreateSite(ctx, req.JoinSiteID, site); err != nil {
@@ -132,12 +138,21 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		isNewUser = true
 	}
 
+	if req.Name == "" {
+		req.Name = req.JoinSiteID
+	}
+
 	if isNewUser {
 		// Create the user with this site
 		newUser := types.User{
-			ID:      userID,
-			Email:   email,
-			SiteIDs: []string{req.JoinSiteID},
+			ID:    userID,
+			Email: email,
+			Sites: []types.UserSite{
+				{
+					ID:   req.JoinSiteID,
+					Name: req.Name,
+				},
+			},
 		}
 		if err := s.storage.CreateUser(ctx, newUser); err != nil {
 			log.Ctx(ctx).ErrorContext(ctx, "join: failed to create user", slog.String("userID", userID), slog.Any("error", err))
@@ -154,15 +169,26 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		}
 
 		hasSite := false
-		for _, s := range existingUser.SiteIDs {
-			if s == req.JoinSiteID {
+		nameChanged := false
+		for i := range existingUser.Sites {
+			if existingUser.Sites[i].ID == req.JoinSiteID {
+				if existingUser.Sites[i].Name != req.Name {
+					existingUser.Sites[i].Name = req.Name
+					nameChanged = true
+				}
 				hasSite = true
 				break
 			}
 		}
 
 		if !hasSite {
-			existingUser.SiteIDs = append(existingUser.SiteIDs, req.JoinSiteID)
+			existingUser.Sites = append(existingUser.Sites, types.UserSite{
+				ID:   req.JoinSiteID,
+				Name: req.Name,
+			})
+		}
+
+		if !hasSite || nameChanged {
 			if err := s.storage.UpdateUser(ctx, existingUser); err != nil {
 				log.Ctx(ctx).ErrorContext(ctx, "join: failed to update user", slog.Any("error", err))
 				writeJSONError(w, "failed to join site", http.StatusInternalServerError)

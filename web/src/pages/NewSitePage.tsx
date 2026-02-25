@@ -9,7 +9,7 @@ export interface NewSitePageProps {
 }
 
 const NewSitePage = ({ onJoinSuccess }: NewSitePageProps) => {
-    const [createName, setCreateName] = useState('');
+    const [name, setName] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -17,14 +17,14 @@ const NewSitePage = ({ onJoinSuccess }: NewSitePageProps) => {
         e.preventDefault();
         setError(null);
 
-        if (!createName.trim()) {
+        if (!name.trim()) {
             setError('Site Name is required');
             return;
         }
 
         setIsSubmitting(true);
         try {
-            await createSite(createName.trim());
+            await createSite(name.trim());
             onJoinSuccess();
         } catch (err: any) {
             setError(err.message || 'Failed to create site');
@@ -33,13 +33,12 @@ const NewSitePage = ({ onJoinSuccess }: NewSitePageProps) => {
     };
 
     return (
-        <div className="join-page">
-            <div className="join-card">
-                <h1 className="join-title">Create a New Site</h1>
-                <p className="join-subtitle">
-                    A site represents a set of solar panels, batteries, and an
-                    energy storage system (ESS). Each site is monitored and
-                    optimized independently.
+        <div className="auth-page">
+            <div className="auth-card">
+                <h1>Create a New Site</h1>
+                <p>
+                    A site represents a set of solar panels and batteries.
+                    We'll monitor and optimize your energy independently for each site.
                 </p>
 
                 <form onSubmit={handleSubmit} className="join-form">
@@ -48,8 +47,8 @@ const NewSitePage = ({ onJoinSuccess }: NewSitePageProps) => {
                         <Field.Control
                             id="create-name"
                             className="join-input"
-                            value={createName}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCreateName(e.target.value)}
+                            value={name}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
                             disabled={isSubmitting}
                             required
                         />
@@ -65,7 +64,7 @@ const NewSitePage = ({ onJoinSuccess }: NewSitePageProps) => {
 
                     <button
                         type="submit"
-                        disabled={isSubmitting || !createName.trim()}
+                        disabled={isSubmitting || !name.trim()}
                         className="join-submit"
                     >
                         {isSubmitting ? 'Creating...' : 'Create Site'}
@@ -73,7 +72,7 @@ const NewSitePage = ({ onJoinSuccess }: NewSitePageProps) => {
                 </form>
             </div>
 
-            <p className="join-alternate-link">
+            <p className="auth-alternate-link">
                 <Link href="/join-site">Already have a site? Join it.</Link>
             </p>
         </div>

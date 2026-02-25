@@ -1,11 +1,11 @@
 
 import React, { useEffect, useState } from 'react';
 import { Route, Switch, Redirect, useLocation, Router } from 'wouter';
-import { GoogleOAuthProvider } from '@react-oauth/google';
+
 import Header from './components/Header';
 import Footer from './components/Footer';
 import './App.css';
-import { fetchAuthStatus, login, logout, type AuthStatus } from './api';
+import { fetchAuthStatus, login, logout, type AuthStatus, type UserSite } from './api';
 
 import LandingPage from './pages/LandingPage';
 import Dashboard from './pages/Dashboard';
@@ -19,6 +19,7 @@ import TermsOfService from './pages/TermsOfService';
 
 // Protected Route Wrapper
 const ProtectedRoute = ({ children, loggedIn, loading }: { children: React.ReactElement, loggedIn: boolean, loading: boolean }) => {
+    const [location] = useLocation();
 
     if (loading) {
         return <div className="loading-screen">Loading...</div>; // Could be a nicer spinner
@@ -26,7 +27,6 @@ const ProtectedRoute = ({ children, loggedIn, loading }: { children: React.React
 
     if (!loggedIn) {
          // Redirect them to the login page, but save the current location they were trying to go to
-        const [location] = useLocation();
         return <Redirect to={`/login?from=${encodeURIComponent(location)}`} replace />;
     }
 
@@ -36,35 +36,30 @@ const ProtectedRoute = ({ children, loggedIn, loading }: { children: React.React
 function AppContent() {
     const [authRequired, setAuthRequired] = useState(false);
     const [loggedIn, setLoggedIn] = useState(false);
-    const [clientID, setClientID] = useState("");
-    const [siteIDs, setSiteIDs] = useState<string[]>([]);
+    const [clientIDs, setClientIDs] = useState<Record<string, string>>({});
+    const [sites, setSites] = useState<UserSite[]>([]);
     const [selectedSiteID, setSelectedSiteID] = useState<string>("");
-    const [viewSiteOverride, setViewSiteOverride] = useState<string | null>(null);
+    const [viewSiteOverride, setViewSiteOverride] = useState<string | null>(() => {
+        const queryParams = new URLSearchParams(window.location.search);
+        return queryParams.get('viewSite');
+    });
     const [loading, setLoading] = useState(true);
     const [hasAttemptedFetch, setHasAttemptedFetch] = useState(false);
 
     const [location, navigate] = useLocation();
     const isHome = location === '/';
 
-    useEffect(() => {
-        const queryParams = new URLSearchParams(window.location.search);
-        const override = queryParams.get('viewSite');
-        if (override) {
-            setViewSiteOverride(override);
-        }
-    }, []);
-
-    const applyStatus = (status: AuthStatus, redirectOnLogin: boolean) => {
+    const applyStatus = React.useCallback((status: AuthStatus, redirectOnLogin: boolean) => {
         setAuthRequired(status.authRequired);
         setLoggedIn(status.loggedIn);
-        setClientID(status.clientID);
+        setClientIDs(status.clientIDs || {});
 
-        const sites = status.siteIDs || [];
-        setSiteIDs(sites);
+        const newSites = status.sites || [];
+        setSites(newSites);
 
         // Default select first site if not selected or invalid
-        if (sites.length > 0 && (!selectedSiteID || !sites.includes(selectedSiteID))) {
-            setSelectedSiteID(sites[0]);
+        if (newSites.length > 0 && (!selectedSiteID || !newSites.some(site => site.id === selectedSiteID))) {
+            setSelectedSiteID(newSites[0].id);
         }
 
         setHasAttemptedFetch(true);
@@ -72,7 +67,7 @@ function AppContent() {
         if (redirectOnLogin && status.loggedIn) {
             navigate('/dashboard');
         }
-    };
+    }, [navigate, selectedSiteID]);
 
     // Initial auth check — runs once on mount. Sets loading=true to gate
     // the first render until we know whether the user is authenticated.
@@ -95,8 +90,7 @@ function AppContent() {
             .finally(() => {
                 setLoading(false);
             });
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [applyStatus]);
 
     // Trigger auth check if user navigates to a non-home page and hasn't checked yet.
     useEffect(() => {
@@ -114,7 +108,7 @@ function AppContent() {
                     setLoading(false);
                 });
         }
-    }, [location, hasAttemptedFetch, loading]);
+    }, [location, hasAttemptedFetch, loading, isHome, applyStatus]);
 
     // Re-check auth after login/logout without toggling loading, so child
     // components stay mounted and don't re-fire their own data fetches.
@@ -128,10 +122,10 @@ function AppContent() {
             });
     };
 
-    const handleLoginSuccess = async (credentialResponse: any) => {
+    const handleLoginSuccess = async (credentialResponse: { credential?: string }, client?: string) => {
         try {
             if (credentialResponse.credential) {
-                await login(credentialResponse.credential);
+                await login(credentialResponse.credential, client);
                 checkStatus(true); // Redirect to dashboard on success
             }
         } catch (err) {
@@ -143,7 +137,7 @@ function AppContent() {
         try {
             await logout();
             checkStatus();
-            setSiteIDs([]);
+            setSites([]);
             setSelectedSiteID("");
             navigate('/'); // Go back to landing page on logout
         } catch (err) {
@@ -154,9 +148,9 @@ function AppContent() {
     const showLoading = (loading || (!isHome && !hasAttemptedFetch)) && !isHome;
 
     const effectiveSiteID = viewSiteOverride || selectedSiteID;
-    const effectiveSiteIDs = viewSiteOverride && !siteIDs.includes(viewSiteOverride)
-        ? [...siteIDs, viewSiteOverride]
-        : siteIDs;
+    const effectiveSites = viewSiteOverride && !sites.some(site => site.id === viewSiteOverride)
+        ? [...sites, { id: viewSiteOverride, name: "" }]
+        : sites;
 
     const handleSiteChange = (id: string) => {
         if (viewSiteOverride) setViewSiteOverride(null);
@@ -167,11 +161,11 @@ function AppContent() {
     };
 
     return (
-        <AuthWrapper clientID={clientID}>
+        <>
             <div className={isHome ? "app-container-home" : "app-container"}>
                 <Header
                     loggedIn={loggedIn}
-                    siteIDs={effectiveSiteIDs}
+                    sites={effectiveSites}
                     selectedSiteID={effectiveSiteID}
                     onSiteChange={handleSiteChange}
                     onLogout={handleLogout}
@@ -196,7 +190,7 @@ function AppContent() {
                                     onLoginSuccess={handleLoginSuccess}
                                     onLoginError={() => console.log('Login Failed')}
                                     authEnabled={authRequired}
-                                    clientID={clientID}
+                                    clientIDs={clientIDs}
                                 />}
                             </Route>
 
@@ -213,7 +207,7 @@ function AppContent() {
                             </Route>
                             <Route path="/dashboard">
                                 <ProtectedRoute loggedIn={loggedIn} loading={loading}>
-                                    {!effectiveSiteID && effectiveSiteIDs.length === 0 ? (
+                                    {!effectiveSiteID && effectiveSites.length === 0 ? (
                                         <NewSitePage onJoinSuccess={() => checkStatus(true)} />
                                     ) : (
                                         <Dashboard siteID={effectiveSiteID} />
@@ -222,7 +216,7 @@ function AppContent() {
                             </Route>
                             <Route path="/forecast">
                                 <ProtectedRoute loggedIn={loggedIn} loading={loading}>
-                                    {!effectiveSiteID && effectiveSiteIDs.length === 0 ? (
+                                    {!effectiveSiteID && effectiveSites.length === 0 ? (
                                         <NewSitePage onJoinSuccess={() => checkStatus(true)} />
                                     ) : (
                                         <Forecast siteID={effectiveSiteID} />
@@ -231,7 +225,7 @@ function AppContent() {
                             </Route>
                             <Route path="/settings">
                                 <ProtectedRoute loggedIn={loggedIn} loading={loading}>
-                                    {!effectiveSiteID && effectiveSiteIDs.length === 0 ? (
+                                    {!effectiveSiteID && effectiveSites.length === 0 ? (
                                         <NewSitePage onJoinSuccess={() => checkStatus(true)} />
                                     ) : (
                                         <Settings siteID={effectiveSiteID} />
@@ -249,21 +243,10 @@ function AppContent() {
 
                 <Footer />
             </div>
-        </AuthWrapper>
+        </>
     );
 }
 
-// Wrapper to provide GoogleOAuth context only when we have a ClientID
-const AuthWrapper = ({ children, clientID }: { children: React.ReactNode, clientID: string }) => {
-    if (clientID) {
-        return (
-            <GoogleOAuthProvider clientId={clientID}>
-                {children}
-            </GoogleOAuthProvider>
-        );
-    }
-    return <>{children}</>;
-};
 
 function App() {
   return (

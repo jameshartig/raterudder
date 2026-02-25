@@ -112,6 +112,78 @@ body {
   padding-bottom: var(--spacing-xl);
 }
 
+/* ============================================
+   Component: Auth Pages & Cards
+   Generic styles for Login, Join, and Create Site
+   ============================================ */
+.auth-page {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 70vh;
+  gap: 1.5rem;
+}
+
+.auth-card {
+  background: var(--surface);
+  padding: 3rem 2.5rem;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.08);
+  text-align: center;
+  width: 100%;
+  max-width: 440px;
+  animation: authSlideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes authSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.auth-card h1 {
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+  font-size: 2.25rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: var(--text-primary);
+  background: linear-gradient(135deg, var(--text-primary) 0%, #475569 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.auth-card p:first-of-type {
+  color: var(--text-secondary);
+  margin-bottom: 2.5rem;
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.auth-alternate-link {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.auth-alternate-link a {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.auth-alternate-link a:hover {
+  text-decoration: underline;
+}
+
 /* Center loading screen */
 .loading-screen {
   display: flex;

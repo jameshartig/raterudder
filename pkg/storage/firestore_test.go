@@ -226,7 +226,6 @@ func TestFirestoreProvider(t *testing.T) {
 		// First, manually create a site via SetSettings so it exists
 		site := types.Site{
 			ID:         "test-site-crud",
-			Name:       "Test Site",
 			InviteCode: "invite123",
 			Permissions: []types.SitePermissions{
 				{UserID: "owner@test.com"},
@@ -239,7 +238,6 @@ func TestFirestoreProvider(t *testing.T) {
 
 			got, err := f.GetSite(ctx, "test-site-crud")
 			require.NoError(t, err)
-			assert.Equal(t, "Test Site", got.Name)
 			assert.Equal(t, "invite123", got.InviteCode)
 			assert.Len(t, got.Permissions, 1)
 			assert.Equal(t, "owner@test.com", got.Permissions[0].UserID)
@@ -257,7 +255,7 @@ func TestFirestoreProvider(t *testing.T) {
 
 		t.Run("ListSites", func(t *testing.T) {
 			// Create another site to ensure we have at least 2
-			site2 := types.Site{ID: "site2", Name: "Site 2"}
+			site2 := types.Site{ID: "site2"}
 			require.NoError(t, f.UpdateSite(ctx, "site2", site2))
 
 			sites, err := f.ListSites(ctx)
@@ -282,9 +280,13 @@ func TestFirestoreProvider(t *testing.T) {
 	t.Run("Users", func(t *testing.T) {
 		t.Run("CreateUser", func(t *testing.T) {
 			user := types.User{
-				ID:      "newuser@test.com",
-				Email:   "newuser@test.com",
-				SiteIDs: []string{"site1"},
+				ID:    "newuser@test.com",
+				Email: "newuser@test.com",
+				Sites: []types.UserSite{
+					{
+						ID: "site1",
+					},
+				},
 			}
 			require.NoError(t, f.CreateUser(ctx, user))
 
@@ -292,14 +294,18 @@ func TestFirestoreProvider(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, "newuser@test.com", got.ID)
 			assert.Equal(t, "newuser@test.com", got.Email)
-			assert.Equal(t, []string{"site1"}, got.SiteIDs)
+			assert.Equal(t, []types.UserSite{{ID: "site1"}}, got.Sites)
 		})
 
 		t.Run("CreateUserDuplicate", func(t *testing.T) {
 			user := types.User{
-				ID:      "newuser@test.com",
-				Email:   "newuser@test.com",
-				SiteIDs: []string{"site1"},
+				ID:    "newuser@test.com",
+				Email: "newuser@test.com",
+				Sites: []types.UserSite{
+					{
+						ID: "site1",
+					},
+				},
 			}
 			// Create uses Firestore's Create which should fail on duplicates
 			err := f.CreateUser(ctx, user)
@@ -308,15 +314,22 @@ func TestFirestoreProvider(t *testing.T) {
 
 		t.Run("UpdateUser", func(t *testing.T) {
 			user := types.User{
-				ID:      "newuser@test.com",
-				Email:   "newuser@test.com",
-				SiteIDs: []string{"site1", "site2"},
+				ID:    "newuser@test.com",
+				Email: "newuser@test.com",
+				Sites: []types.UserSite{
+					{
+						ID: "site1",
+					},
+					{
+						ID: "site2",
+					},
+				},
 			}
 			require.NoError(t, f.UpdateUser(ctx, user))
 
 			got, err := f.GetUser(ctx, "newuser@test.com")
 			require.NoError(t, err)
-			assert.Equal(t, []string{"site1", "site2"}, got.SiteIDs)
+			assert.Equal(t, []types.UserSite{{ID: "site1"}, {ID: "site2"}}, got.Sites)
 		})
 
 		t.Run("GetUserNotFound", func(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -75,9 +76,9 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		// handle authentication
 		if s.bypassAuth {
 			user = types.User{
-				ID:      "",
-				SiteIDs: []string{types.SiteIDNone},
-				Admin:   true,
+				ID:    "",
+				Sites: []types.UserSite{{ID: types.SiteIDNone}},
+				Admin: true,
 			}
 			if siteID == "" {
 				siteID = types.SiteIDNone
@@ -96,17 +97,16 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 						return
 					}
 					token := strings.TrimPrefix(authHeader, "Bearer ")
-					// audience check
-					aud := s.updateSpecificAudience
-					if aud == "" {
-						aud = s.oidcAudience
+					specificClient := ""
+					if _, ok := s.oidcAudiences["google_update_specific"]; ok {
+						specificClient = "google_update_specific"
 					}
-					payload, err := s.tokenValidator(ctx, token, aud)
+					emailRet, subjectRet, _, err := s.defaultTokenValidator(ctx, token, specificClient)
 					if err != nil {
 						log.Ctx(ctx).WarnContext(ctx, "update token validation failed", slog.Any("error", err))
 					} else {
-						email = payload.Claims["email"].(string)
-						userID = payload.Subject
+						email = emailRet
+						userID = subjectRet
 						if s.updateSpecificEmail != "" && subtle.ConstantTimeCompare([]byte(email), []byte(s.updateSpecificEmail)) == 1 {
 							authSuccess = true
 							authViaUpdateSpecific = true
@@ -128,14 +128,14 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 					return
 				}
 				if authCookie != nil {
-					payload, err := s.tokenValidator(ctx, authCookie.Value, s.oidcAudience)
+					emailRet, subjectRet, _, err := s.defaultTokenValidator(ctx, authCookie.Value, "")
 					if err != nil {
 						log.Ctx(ctx).ErrorContext(ctx, "auth token validation failed", slog.Any("error", err))
 						writeJSONError(w, "invalid auth token", http.StatusBadRequest)
 						return
 					} else {
-						email = payload.Claims["email"].(string)
-						userID = payload.Subject
+						email = emailRet
+						userID = subjectRet
 						authSuccess = true
 					}
 				} else if !allowNoLogin {
@@ -149,9 +149,9 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				// fetch user
 				if s.singleSite {
 					user = types.User{
-						ID:      userID,
-						Email:   email,
-						SiteIDs: []string{types.SiteIDNone},
+						ID:    userID,
+						Email: email,
+						Sites: []types.UserSite{{ID: types.SiteIDNone}},
 					}
 					for _, admin := range s.adminEmails {
 						if user.Email == admin {
@@ -159,6 +159,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 							break
 						}
 					}
+					ctx = context.WithValue(ctx, userContextKey, user)
 				} else if authViaUpdateSpecific {
 					// We don't need to fetch the user for update-specific auth
 					// The handler doesn't use the user object, and we've already validated the token
@@ -180,10 +181,18 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 						}
 					} else {
 						userFound = true
-						// fill in default siteID if
-						if siteID == "" && len(user.SiteIDs) == 1 {
-							siteID = user.SiteIDs[0]
+						// TODO: remove this after migration is done
+						if len(user.Sites) == 0 && len(user.SiteIDs) > 0 {
+							user.Sites = make([]types.UserSite, len(user.SiteIDs))
+							for i, siteID := range user.SiteIDs {
+								user.Sites[i] = types.UserSite{ID: siteID}
+							}
 						}
+						// fill in default siteID if the user only has 1 site
+						if siteID == "" && len(user.Sites) == 1 {
+							siteID = user.Sites[0].ID
+						}
+						ctx = context.WithValue(ctx, userContextKey, user)
 					}
 				}
 
@@ -217,10 +226,6 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 						return
 					}
 				}
-
-				if userFound {
-					ctx = context.WithValue(ctx, userContextKey, user)
-				}
 			} else if !allowNoLogin {
 				log.Ctx(ctx).WarnContext(ctx, "unauthenticated request")
 				s.clearCookie(w)
@@ -253,9 +258,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			slog.Bool("userFound", userFound),
 		)
 
-		if siteID == SiteIDAll {
-			ctx = context.WithValue(ctx, allUserSiteIDsContextKey, user.SiteIDs)
-		}
+		ctx = context.WithValue(ctx, allUserSitesContextKey, user.Sites)
 		ctx = context.WithValue(ctx, siteIDContextKey, siteID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -264,7 +267,8 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// Parse Parse Form to get the token, expecting JSON body
 	var req struct {
-		Token string `json:"token"`
+		Token  string `json:"token"`
+		Client string `json:"client"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		// since we failed to read, don't return JSON error
@@ -272,27 +276,26 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload, err := s.tokenValidator(r.Context(), req.Token, s.oidcAudience)
+	email, subject, expires, err := s.defaultTokenValidator(r.Context(), req.Token, req.Client)
 	if err != nil {
 		log.Ctx(r.Context()).WarnContext(r.Context(), "failed to validate id token", slog.Any("error", err))
 		writeJSONError(w, "invalid id token", http.StatusUnauthorized)
 		return
 	}
 
-	email, ok := payload.Claims["email"].(string)
-	if !ok {
+	if email == "" {
 		log.Ctx(r.Context()).WarnContext(r.Context(), "invalid email in id token")
 		writeJSONError(w, "invalid oidc claims", http.StatusUnauthorized)
 		return
 	}
 
-	log.Ctx(r.Context()).InfoContext(r.Context(), "login token validated successfully", slog.String("email", email), slog.String("subject", payload.Subject))
+	log.Ctx(r.Context()).InfoContext(r.Context(), "login token validated successfully", slog.String("email", email), slog.String("subject", subject))
 
 	// Set the cookie
 	http.SetCookie(w, &http.Cookie{
 		Name:     authTokenCookie,
 		Value:    req.Token,
-		Expires:  time.Unix(payload.Expires, 0),
+		Expires:  expires,
 		HttpOnly: true,
 		Secure:   true,
 		Path:     "/",
@@ -321,30 +324,61 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 type authStatusResponse struct {
-	LoggedIn     bool     `json:"loggedIn"`
-	Email        string   `json:"email"`
-	AuthRequired bool     `json:"authRequired"`
-	ClientID     string   `json:"clientID"`
-	SiteIDs      []string `json:"siteIDs"`
+	LoggedIn     bool              `json:"loggedIn"`
+	Email        string            `json:"email"`
+	AuthRequired bool              `json:"authRequired"`
+	ClientIDs    map[string]string `json:"clientIDs"`
+	Sites        []types.UserSite  `json:"sites"`
 }
 
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
-	user, loggedIn := r.Context().Value(userContextKey).(types.User)
-	if !loggedIn {
-		if userToRegister, ok := r.Context().Value(userToRegisterContextKey).(types.User); ok {
-			user = userToRegister
-			loggedIn = true
-		}
+	var loggedIn bool
+	user := s.getUser(r)
+	if user.ID != "" {
+		loggedIn = true
+	} else if userToRegister, ok := r.Context().Value(userToRegisterContextKey).(types.User); ok {
+		user = userToRegister
+		loggedIn = false
 	}
+	sites := s.getAllUserSites(r)
 
 	err := json.NewEncoder(w).Encode(authStatusResponse{
 		LoggedIn:     loggedIn,
 		Email:        user.Email,
-		AuthRequired: s.oidcAudience != "",
-		ClientID:     s.oidcAudience,
-		SiteIDs:      user.SiteIDs,
+		AuthRequired: len(s.oidcAudiences) > 0,
+		ClientIDs:    s.oidcAudiences,
+		Sites:        sites,
 	})
 	if err != nil {
 		panic(http.ErrAbortHandler)
 	}
+}
+
+func (s *Server) defaultTokenValidator(ctx context.Context, token string, specificClient string) (string, string, time.Time, error) {
+	var errs []error
+
+	for providerName, verifier := range s.oidcVerifiers {
+		if specificClient != "" && providerName != specificClient {
+			continue
+		}
+		idToken, err := verifier(ctx, token)
+		if err == nil {
+			var claims struct {
+				Email string `json:"email"`
+			}
+			err = idToken.Claims(&claims)
+			if err == nil {
+				return claims.Email, idToken.Subject, idToken.Expiry, nil
+			}
+		}
+		errs = append(errs, fmt.Errorf("%s verifier failed: %v", providerName, err))
+	}
+
+	if len(errs) > 1 {
+		return "", "", time.Time{}, errors.Join(errs...)
+	}
+	if len(errs) == 1 {
+		return "", "", time.Time{}, errs[0]
+	}
+	return "", "", time.Time{}, errors.New("no valid audiences configured or token invalid")
 }

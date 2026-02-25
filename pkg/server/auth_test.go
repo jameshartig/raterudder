@@ -3,42 +3,77 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/coreos/go-oidc/v3/oidc/oidctest"
 	"github.com/raterudder/raterudder/pkg/storage"
 	"github.com/raterudder/raterudder/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/api/idtoken"
 )
+
+func generateTestToken(t *testing.T, srvURL string, priv crypto.PrivateKey, email, subject string) string {
+	rawClaims := fmt.Sprintf(`{
+		"iss": "%s",
+		"aud": "test-audience",
+		"sub": "%s",
+		"email": "%s",
+		"exp": %d
+	}`, srvURL, subject, email, time.Now().Add(1*time.Hour).Unix())
+	return oidctest.SignIDToken(priv, "my-key-id", "RS256", rawClaims)
+}
+
+func setupOIDCTest(t *testing.T) (*httptest.Server, *rsa.PrivateKey) {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	opts := &oidctest.Server{
+		PublicKeys: []oidctest.PublicKey{
+			{
+				PublicKey: priv.Public(),
+				KeyID:     "my-key-id",
+				Algorithm: "RS256",
+			},
+		},
+	}
+	srv := httptest.NewServer(opts)
+	opts.SetIssuer(srv.URL)
+	return srv, priv
+}
 
 func TestAuthMiddleware(t *testing.T) {
 	// Setup Mocks
 	mockStorage := new(mockStorage)
 
+	srv, priv := setupOIDCTest(t)
+	defer srv.Close()
+	provider, err := oidc.NewProvider(context.Background(), srv.URL)
+	require.NoError(t, err)
+
+	validToken := generateTestToken(t, srv.URL, priv, "user@example.com", "user@example.com")
+	updaterToken := generateTestToken(t, srv.URL, priv, "updater@example.com", "updater@example.com")
+
 	server := &Server{
-		storage:      mockStorage,
-		oidcAudience: "test-audience",
-		singleSite:   false, // Multi-site mode by default for testing
-		tokenValidator: func(ctx context.Context, token, audience string) (*idtoken.Payload, error) {
-			if token == "valid-token" || token == "updater-token" {
-				email := "user@example.com"
-				if token == "updater-token" {
-					email = "updater@example.com"
-				}
-				return &idtoken.Payload{
-					Claims:  map[string]interface{}{"email": email},
-					Subject: email,
-					Expires: time.Now().Add(1 * time.Hour).Unix(),
-				}, nil
-			}
-			return nil, assert.AnError
+		storage:    mockStorage,
+		singleSite: false, // Multi-site mode by default for testing
+		oidcAudiences: map[string]string{
+			"google":                 "test-audience",
+			"google_update_specific": "test-audience",
+		},
+		oidcVerifiers: map[string]tokenVerifier{
+			"google":                 provider.Verifier(&oidc.Config{ClientID: "test-audience"}).Verify,
+			"google_update_specific": provider.Verifier(&oidc.Config{ClientID: "test-audience"}).Verify,
 		},
 	}
 
@@ -64,8 +99,8 @@ func TestAuthMiddleware(t *testing.T) {
 		if ok {
 			w.Header().Set("X-Site-ID", siteID)
 		}
-		user, ok := r.Context().Value(userContextKey).(types.User)
-		if ok {
+		user := server.getUser(r)
+		if user.ID != "" {
 			w.Header().Set("X-Email", user.Email)
 			if user.Admin {
 				w.Header().Set("X-Admin", "true")
@@ -77,9 +112,13 @@ func TestAuthMiddleware(t *testing.T) {
 		if ok {
 			w.Header().Set("X-Register-Email", userReg.Email)
 		}
-		sites, ok := r.Context().Value(allUserSiteIDsContextKey).([]string)
-		if ok {
-			w.Header().Set("X-All-Site-IDs", strings.Join(sites, ","))
+		sites := server.getAllUserSites(r)
+		if sites != nil {
+			siteIDs := make([]string, len(sites))
+			for i, site := range sites {
+				siteIDs[i] = site.ID
+			}
+			w.Header().Set("X-All-Site-IDs", strings.Join(siteIDs, ","))
 		}
 		w.WriteHeader(http.StatusOK)
 	})
@@ -101,7 +140,7 @@ func TestAuthMiddleware(t *testing.T) {
 		server.singleSite = true
 		w := httptest.NewRecorder()
 		// Single site mode now requires auth, so provide a valid cookie
-		cookie := &http.Cookie{Name: authTokenCookie, Value: "valid-token"}
+		cookie := &http.Cookie{Name: authTokenCookie, Value: validToken}
 		req := createReq("GET", "/api/test", nil, cookie)
 
 		server.authMiddleware(testHandler).ServeHTTP(w, req)
@@ -123,14 +162,14 @@ func TestAuthMiddleware(t *testing.T) {
 	t.Run("Multi Site Mode - Auth but No SiteID", func(t *testing.T) {
 		server.singleSite = false
 		w := httptest.NewRecorder()
-		cookie := &http.Cookie{Name: authTokenCookie, Value: "valid-token"}
+		cookie := &http.Cookie{Name: authTokenCookie, Value: validToken}
 		req := createReq("GET", "/api/test", nil, cookie)
 
 		// Mock GetUser
 		mockStorage.On("GetUser", mock.Anything, "user@example.com").Return(types.User{
-			ID:      "user@example.com",
-			Email:   "user@example.com",
-			SiteIDs: []string{"site1", "site2"},
+			ID:    "user@example.com",
+			Email: "user@example.com",
+			Sites: []types.UserSite{{ID: "site1"}, {ID: "site2"}},
 		}, nil).Once()
 
 		server.authMiddleware(testHandler).ServeHTTP(w, req)
@@ -141,14 +180,14 @@ func TestAuthMiddleware(t *testing.T) {
 	t.Run("Multi Site Mode - Auth and Valid SiteID (Query Param)", func(t *testing.T) {
 		server.singleSite = false
 		w := httptest.NewRecorder()
-		cookie := &http.Cookie{Name: authTokenCookie, Value: "valid-token"}
+		cookie := &http.Cookie{Name: authTokenCookie, Value: validToken}
 		req := createReq("GET", "/api/test?siteID=site1", nil, cookie)
 
 		mockStorage.On("GetUser", mock.Anything, "user@example.com").Return(types.User{
-			ID:      "user@example.com",
-			Email:   "user@example.com",
-			SiteIDs: []string{"site1", "site2"},
-			Admin:   false,
+			ID:    "user@example.com",
+			Email: "user@example.com",
+			Sites: []types.UserSite{{ID: "site1"}, {ID: "site2"}},
+			Admin: false,
 		}, nil).Once()
 
 		mockStorage.On("GetSite", mock.Anything, "site1").Return(types.Site{
@@ -168,13 +207,13 @@ func TestAuthMiddleware(t *testing.T) {
 	t.Run("Multi Site Mode - Auth and Invalid SiteID", func(t *testing.T) {
 		server.singleSite = false
 		w := httptest.NewRecorder()
-		cookie := &http.Cookie{Name: authTokenCookie, Value: "valid-token"}
+		cookie := &http.Cookie{Name: authTokenCookie, Value: validToken}
 		req := createReq("GET", "/api/test?siteID=site3", nil, cookie)
 
 		mockStorage.On("GetUser", mock.Anything, "user@example.com").Return(types.User{
-			ID:      "user@example.com",
-			Email:   "user@example.com",
-			SiteIDs: []string{"site1", "site2"},
+			ID:    "user@example.com",
+			Email: "user@example.com",
+			Sites: []types.UserSite{{ID: "site1"}, {ID: "site2"}},
 		}, nil).Once()
 
 		// Permission check fails
@@ -194,14 +233,14 @@ func TestAuthMiddleware(t *testing.T) {
 		defer func() { server.adminEmails = nil }() // reset
 
 		w := httptest.NewRecorder()
-		cookie := &http.Cookie{Name: authTokenCookie, Value: "valid-token"}
+		cookie := &http.Cookie{Name: authTokenCookie, Value: validToken}
 		req := createReq("GET", "/api/test?siteID=site3", nil, cookie)
 
 		mockStorage.On("GetUser", mock.Anything, "user@example.com").Return(types.User{
-			ID:      "user@example.com",
-			Email:   "user@example.com",
-			SiteIDs: []string{"site1", "site2"},
-			Admin:   false,
+			ID:    "user@example.com",
+			Email: "user@example.com",
+			Sites: []types.UserSite{{ID: "site1"}, {ID: "site2"}},
+			Admin: false,
 		}, nil).Once()
 
 		// Permission check typically fails because they aren't explicit here
@@ -220,13 +259,13 @@ func TestAuthMiddleware(t *testing.T) {
 	t.Run("Multi Site Mode - Auth and POST Body SiteID", func(t *testing.T) {
 		server.singleSite = false
 		w := httptest.NewRecorder()
-		cookie := &http.Cookie{Name: authTokenCookie, Value: "valid-token"}
+		cookie := &http.Cookie{Name: authTokenCookie, Value: validToken}
 		req := createReq("POST", "/api/test", map[string]string{"siteID": "site2"}, cookie)
 
 		mockStorage.On("GetUser", mock.Anything, "user@example.com").Return(types.User{
-			ID:      "user@example.com",
-			Email:   "user@example.com",
-			SiteIDs: []string{"site1", "site2"},
+			ID:    "user@example.com",
+			Email: "user@example.com",
+			Sites: []types.UserSite{{ID: "site1"}, {ID: "site2"}},
 		}, nil).Once()
 
 		mockStorage.On("GetSite", mock.Anything, "site2").Return(types.Site{
@@ -245,13 +284,13 @@ func TestAuthMiddleware(t *testing.T) {
 	t.Run("Multi Site Mode - Default SiteID if One", func(t *testing.T) {
 		server.singleSite = false
 		w := httptest.NewRecorder()
-		cookie := &http.Cookie{Name: authTokenCookie, Value: "valid-token"}
+		cookie := &http.Cookie{Name: authTokenCookie, Value: validToken}
 		req := createReq("GET", "/api/test", nil, cookie)
 
 		mockStorage.On("GetUser", mock.Anything, "user@example.com").Return(types.User{
-			ID:      "user@example.com",
-			Email:   "user@example.com",
-			SiteIDs: []string{"site1"},
+			ID:    "user@example.com",
+			Email: "user@example.com",
+			Sites: []types.UserSite{{ID: "site1"}},
 		}, nil).Once()
 
 		mockStorage.On("GetSite", mock.Anything, "site1").Return(types.Site{
@@ -270,13 +309,13 @@ func TestAuthMiddleware(t *testing.T) {
 	t.Run("Multi Site Mode - Logout No SiteID", func(t *testing.T) {
 		server.singleSite = false
 		w := httptest.NewRecorder()
-		cookie := &http.Cookie{Name: authTokenCookie, Value: "valid-token"}
+		cookie := &http.Cookie{Name: authTokenCookie, Value: validToken}
 		req := createReq("POST", "/api/auth/logout", nil, cookie)
 
 		mockStorage.On("GetUser", mock.Anything, "user@example.com").Return(types.User{
-			ID:      "user@example.com",
-			Email:   "user@example.com",
-			SiteIDs: []string{"site1", "site2"},
+			ID:    "user@example.com",
+			Email: "user@example.com",
+			Sites: []types.UserSite{{ID: "site1"}, {ID: "site2"}},
 		}, nil).Once()
 
 		server.authMiddleware(testHandler).ServeHTTP(w, req)
@@ -289,23 +328,14 @@ func TestAuthMiddleware(t *testing.T) {
 		server.singleSite = false
 		server.updateSpecificEmail = "updater@example.com"
 
-		// Mock token validator for updater
-		originalValidator := server.tokenValidator
-		server.tokenValidator = func(ctx context.Context, token, audience string) (*idtoken.Payload, error) {
-			if token == "updater-token" {
-				return &idtoken.Payload{
-					Claims:  map[string]interface{}{"email": "updater@example.com"},
-					Subject: "updater@example.com",
-					Expires: time.Now().Add(1 * time.Hour).Unix(),
-				}, nil
-			}
-			return originalValidator(ctx, token, audience)
-		}
-		defer func() { server.tokenValidator = originalValidator }()
+		// Mock the oidcVerifier behavior for updater by changing the validToken to updaterToken logic
+		// Or rather, the existing update-specific logic in auth.go validates "google" issuer.
+		// Our updaterToken is already signed by the test server, so it will be validated correctly
+		// as long as oidcVerifiers["google"] expects it (which it does, since they share the same provider)
 
 		w := httptest.NewRecorder()
 		req := createReq("POST", "/api/update", map[string]string{"siteID": "site1"}, nil)
-		req.Header.Set("Authorization", "Bearer updater-token")
+		req.Header.Set("Authorization", "Bearer "+updaterToken)
 
 		// Update specific should NOT call GetUser even if user doesn't exist in DB logic (bypassed)
 		// but we still need GetSite to verify site exists
@@ -325,7 +355,7 @@ func TestAuthMiddleware(t *testing.T) {
 	t.Run("Multi Site Mode - Join with New User", func(t *testing.T) {
 		server.singleSite = false
 		w := httptest.NewRecorder()
-		cookie := &http.Cookie{Name: authTokenCookie, Value: "valid-token"}
+		cookie := &http.Cookie{Name: authTokenCookie, Value: validToken}
 		req := createReq("POST", "/api/join", map[string]string{"inviteCode": "abc", "joinSiteID": "site1"}, cookie)
 
 		// Mock GetUser returning ErrUserNotFound
@@ -343,7 +373,7 @@ func TestAuthMiddleware(t *testing.T) {
 	t.Run("Multi Site Mode - Auth Status with Unregistered User", func(t *testing.T) {
 		server.singleSite = false
 		w := httptest.NewRecorder()
-		cookie := &http.Cookie{Name: authTokenCookie, Value: "valid-token"}
+		cookie := &http.Cookie{Name: authTokenCookie, Value: validToken}
 		req := createReq("GET", "/api/auth/status", nil, cookie)
 
 		// Mock GetUser returning ErrUserNotFound
@@ -361,13 +391,13 @@ func TestAuthMiddleware(t *testing.T) {
 	t.Run("Multi Site Mode - Auth and SiteID ALL (Regular User)", func(t *testing.T) {
 		server.singleSite = false
 		w := httptest.NewRecorder()
-		cookie := &http.Cookie{Name: authTokenCookie, Value: "valid-token"}
+		cookie := &http.Cookie{Name: authTokenCookie, Value: validToken}
 		req := createReq("GET", "/api/test?siteID=ALL", nil, cookie)
 
 		mockStorage.On("GetUser", mock.Anything, "user@example.com").Return(types.User{
-			ID:      "user@example.com",
-			Email:   "user@example.com",
-			SiteIDs: []string{"site1", "site2"},
+			ID:    "user@example.com",
+			Email: "user@example.com",
+			Sites: []types.UserSite{{ID: "site1"}, {ID: "site2"}},
 		}, nil).Once()
 
 		server.authMiddleware(testHandler).ServeHTTP(w, req)
@@ -383,13 +413,13 @@ func TestAuthMiddleware(t *testing.T) {
 		defer func() { server.adminEmails = nil }()
 
 		w := httptest.NewRecorder()
-		cookie := &http.Cookie{Name: authTokenCookie, Value: "valid-token"}
+		cookie := &http.Cookie{Name: authTokenCookie, Value: validToken}
 		req := createReq("GET", "/api/test?siteID=ALL", nil, cookie)
 
 		mockStorage.On("GetUser", mock.Anything, "user@example.com").Return(types.User{
-			ID:      "user@example.com",
-			Email:   "user@example.com",
-			SiteIDs: []string{"site1"},
+			ID:    "user@example.com",
+			Email: "user@example.com",
+			Sites: []types.UserSite{{ID: "site1"}},
 		}, nil).Once()
 
 		mockStorage.On("ListSites", mock.Anything).Return([]types.Site{
@@ -406,7 +436,7 @@ func TestAuthMiddleware(t *testing.T) {
 
 func TestHandleAuthStatus(t *testing.T) {
 	server := &Server{
-		oidcAudience: "test-audience",
+		oidcAudiences: map[string]string{"google": "test-audience"},
 	}
 
 	t.Run("Unregistered User", func(t *testing.T) {
@@ -423,15 +453,16 @@ func TestHandleAuthStatus(t *testing.T) {
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
 
-		assert.True(t, resp.LoggedIn)
+		assert.False(t, resp.LoggedIn)
 		assert.Equal(t, "new@example.com", resp.Email)
-		assert.Empty(t, resp.SiteIDs)
+		assert.Empty(t, resp.Sites)
 	})
 
 	t.Run("Registered User", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/api/auth/status", nil)
-		user := types.User{Email: "existing@example.com", ID: "456", SiteIDs: []string{"site1"}}
+		user := types.User{Email: "existing@example.com", ID: "456", Sites: []types.UserSite{{ID: "site1"}}}
 		ctx := context.WithValue(req.Context(), userContextKey, user)
+		ctx = context.WithValue(ctx, allUserSitesContextKey, user.Sites)
 		req = req.WithContext(ctx)
 
 		w := httptest.NewRecorder()
@@ -444,7 +475,7 @@ func TestHandleAuthStatus(t *testing.T) {
 
 		assert.True(t, resp.LoggedIn)
 		assert.Equal(t, "existing@example.com", resp.Email)
-		assert.Equal(t, []string{"site1"}, resp.SiteIDs)
+		assert.Equal(t, []types.UserSite{{ID: "site1"}}, resp.Sites)
 	})
 }
 
@@ -452,25 +483,25 @@ func TestHandleLogin(t *testing.T) {
 	// Setup Mocks
 	mockStorage := new(mockStorage)
 
+	srv, priv := setupOIDCTest(t)
+	defer srv.Close()
+	provider, err := oidc.NewProvider(context.Background(), srv.URL)
+	require.NoError(t, err)
+
+	validToken := generateTestToken(t, srv.URL, priv, "user@example.com", "user@example.com")
+	invalidToken := "invalid-token"
+	noEmailToken := generateTestToken(t, srv.URL, priv, "", "user-subject")
+
 	server := &Server{
-		storage:      mockStorage,
-		oidcAudience: "test-audience",
-		singleSite:   false,
-		tokenValidator: func(ctx context.Context, token, audience string) (*idtoken.Payload, error) {
-			if token == "valid-token" {
-				return &idtoken.Payload{
-					Claims:  map[string]interface{}{"email": "user@example.com"},
-					Subject: "user-subject",
-					Expires: time.Now().Add(1 * time.Hour).Unix(),
-				}, nil
-			} else if token == "no-email-token" {
-				return &idtoken.Payload{
-					Claims:  map[string]interface{}{},
-					Subject: "user-subject",
-					Expires: time.Now().Add(1 * time.Hour).Unix(),
-				}, nil
-			}
-			return nil, assert.AnError
+		storage:    mockStorage,
+		singleSite: false,
+		oidcAudiences: map[string]string{
+			"google":                 "test-audience",
+			"google_update_specific": "test-audience",
+		},
+		oidcVerifiers: map[string]tokenVerifier{
+			"google":                 provider.Verifier(&oidc.Config{ClientID: "test-audience"}).Verify,
+			"google_update_specific": provider.Verifier(&oidc.Config{ClientID: "test-audience"}).Verify,
 		},
 	}
 
@@ -483,7 +514,7 @@ func TestHandleLogin(t *testing.T) {
 
 	t.Run("Valid Login", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req := createReq("valid-token")
+		req := createReq(validToken)
 
 		server.handleLogin(w, req)
 
@@ -495,7 +526,7 @@ func TestHandleLogin(t *testing.T) {
 		for _, c := range cookies {
 			if c.Name == authTokenCookie {
 				found = true
-				assert.Equal(t, "valid-token", c.Value)
+				assert.Equal(t, validToken, c.Value)
 				assert.True(t, c.HttpOnly)
 				assert.True(t, c.Secure)
 				assert.Equal(t, http.SameSiteStrictMode, c.SameSite)
@@ -510,7 +541,7 @@ func TestHandleLogin(t *testing.T) {
 
 	t.Run("Invalid Token", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req := createReq("invalid-token")
+		req := createReq(invalidToken)
 
 		server.handleLogin(w, req)
 
@@ -519,7 +550,7 @@ func TestHandleLogin(t *testing.T) {
 
 	t.Run("Token Missing Email", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req := createReq("no-email-token")
+		req := createReq(noEmailToken)
 
 		server.handleLogin(w, req)
 

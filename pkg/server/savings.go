@@ -24,7 +24,11 @@ func (s *Server) handleHistorySavings(w http.ResponseWriter, r *http.Request) {
 
 	var siteIDs []string
 	if siteID == SiteIDAll {
-		siteIDs = s.getAllUserSiteIDs(r)
+		sites := s.getAllUserSites(r)
+		siteIDs = make([]string, len(sites))
+		for i, site := range sites {
+			siteIDs[i] = site.ID
+		}
 	} else {
 		siteIDs = []string{siteID}
 	}

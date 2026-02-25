@@ -121,8 +121,8 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	siteID := s.getSiteID(r)
 
 	// Validate Authentication from Context (set by authMiddleware)
-	user, ok := ctx.Value(userContextKey).(types.User)
-	if !ok {
+	user := s.getUser(r)
+	if user.ID == "" {
 		writeJSONError(w, "missing authentication", http.StatusUnauthorized)
 		return
 	}

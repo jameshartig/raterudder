@@ -12,7 +12,6 @@ const (
 // Site represents a household or location that has a battery and solar panels.
 type Site struct {
 	ID          string            `json:"id"`
-	Name        string            `json:"name"`
 	InviteCode  string            `json:"inviteCode"`
 	Permissions []SitePermissions `json:"permissions"`
 }
@@ -22,12 +21,19 @@ type SitePermissions struct {
 	UserID string `json:"userID"`
 }
 
+// UserSite represents a site on a user
+type UserSite struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // User represents a user of the system.
 type User struct {
-	ID      string   `json:"id"`
-	Email   string   `json:"email"`
-	SiteIDs []string `json:"siteIDs"`
-	Admin   bool     `json:"-"`
+	ID      string     `json:"id"`
+	Email   string     `json:"email"`
+	SiteIDs []string   `json:"siteIDs"`
+	Sites   []UserSite `json:"sites"`
+	Admin   bool       `json:"-"`
 	// TODO: add global admin field?
 }
 

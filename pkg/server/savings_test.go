@@ -168,7 +168,7 @@ func TestHandleHistorySavingsAll(t *testing.T) {
 	// Mock authMiddleware effects
 	ctx := req.Context()
 	ctx = context.WithValue(ctx, siteIDContextKey, SiteIDAll)
-	ctx = context.WithValue(ctx, allUserSiteIDsContextKey, []string{"site1", "site2"})
+	ctx = context.WithValue(ctx, allUserSitesContextKey, []types.UserSite{{ID: "site1"}, {ID: "site2"}})
 	req = req.WithContext(ctx)
 
 	rr := httptest.NewRecorder()

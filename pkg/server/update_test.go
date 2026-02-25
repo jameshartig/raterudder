@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/raterudder/raterudder/pkg/controller"
 	"github.com/raterudder/raterudder/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/api/idtoken"
 
 	"github.com/raterudder/raterudder/pkg/ess"
 	"github.com/raterudder/raterudder/pkg/utility"
@@ -97,7 +97,7 @@ func TestHandleUpdate(t *testing.T) {
 		mockS.On("GetUser", mock.Anything, "notadmin@example.com").Return(types.User{}, fmt.Errorf("user not found"))
 
 		// Helper to create server with auth config
-		newAuthServer := func(audience, email string, adminEmails []string, validator TokenValidator) *Server {
+		newAuthServer := func(audience, email string, adminEmails []string, srvURL string) *Server {
 			mockES := &mockESS{}
 			mockES.On("ApplySettings", mock.Anything, mock.Anything).Return(nil)
 			mockES.On("Authenticate", mock.Anything, mock.Anything).Return(types.Credentials{}, false, nil)
@@ -111,22 +111,27 @@ func TestHandleUpdate(t *testing.T) {
 			mockUMap := utility.NewMap()
 			mockUMap.SetProvider("test", mockU)
 
+			provider, err := oidc.NewProvider(context.Background(), srvURL)
+			require.NoError(t, err)
+
 			return &Server{
-				utilities:              mockUMap,
-				ess:                    mockP,
-				storage:                mockS,
-				controller:             controller.NewController(),
-				updateSpecificAudience: audience,
-				oidcAudience:           audience,
-				updateSpecificEmail:    email,
-				adminEmails:            adminEmails,
-				tokenValidator:         validator,
-				singleSite:             true,
+				utilities:           mockUMap,
+				ess:                 mockP,
+				storage:             mockS,
+				controller:          controller.NewController(),
+				updateSpecificEmail: email,
+				adminEmails:         adminEmails,
+				oidcVerifiers: map[string]tokenVerifier{
+					"google": provider.Verifier(&oidc.Config{ClientID: audience}).Verify,
+				},
+				singleSite: true,
 			}
 		}
 
 		t.Run("Missing Authorization Header - Specific Email", func(t *testing.T) {
-			srv := newAuthServer("my-audience", "check@example.com", nil, nil)
+			oidcSrv, _ := setupOIDCTest(t)
+			defer oidcSrv.Close()
+			srv := newAuthServer("my-audience", "check@example.com", nil, oidcSrv.URL)
 			req := httptest.NewRequest("GET", "/api/update", nil)
 			w := httptest.NewRecorder()
 
@@ -136,7 +141,9 @@ func TestHandleUpdate(t *testing.T) {
 		})
 
 		t.Run("Invalid Authorization Header Format", func(t *testing.T) {
-			srv := newAuthServer("my-audience", "check@example.com", nil, nil)
+			oidcSrv, _ := setupOIDCTest(t)
+			defer oidcSrv.Close()
+			srv := newAuthServer("my-audience", "check@example.com", nil, oidcSrv.URL)
 			req := httptest.NewRequest("GET", "/api/update", nil)
 			req.Header.Set("Authorization", "Basic user:pass")
 			w := httptest.NewRecorder()
@@ -147,10 +154,9 @@ func TestHandleUpdate(t *testing.T) {
 		})
 
 		t.Run("Invalid Token", func(t *testing.T) {
-			validator := func(ctx context.Context, idToken string, audience string) (*idtoken.Payload, error) {
-				return nil, fmt.Errorf("invalid token")
-			}
-			srv := newAuthServer("my-audience", "check@example.com", nil, validator)
+			oidcSrv, _ := setupOIDCTest(t)
+			defer oidcSrv.Close()
+			srv := newAuthServer("my-audience", "check@example.com", nil, oidcSrv.URL)
 			req := httptest.NewRequest("GET", "/api/update", nil)
 			req.Header.Set("Authorization", "Bearer bad-token")
 			w := httptest.NewRecorder()
@@ -161,14 +167,12 @@ func TestHandleUpdate(t *testing.T) {
 		})
 
 		t.Run("Admin Email Fallback - Valid", func(t *testing.T) {
-			validator := func(ctx context.Context, idToken string, audience string) (*idtoken.Payload, error) {
-				assert.Equal(t, "valid-token", idToken)
-				assert.Equal(t, "my-audience", audience)
-				return &idtoken.Payload{Claims: map[string]interface{}{"email": "admin@example.com"}}, nil
-			}
-			srv := newAuthServer("my-audience", "", []string{"admin@example.com"}, validator)
+			oidcSrv, priv := setupOIDCTest(t)
+			defer oidcSrv.Close()
+			srv := newAuthServer("my-audience", "", []string{"admin@example.com"}, oidcSrv.URL)
 			req := httptest.NewRequest("GET", "/api/update", nil)
-			req.Header.Set("Authorization", "Bearer valid-token")
+			validToken := generateTestToken(t, oidcSrv.URL, priv, "admin@example.com", "admin")
+			req.Header.Set("Authorization", "Bearer "+validToken)
 			req = req.WithContext(context.WithValue(req.Context(), siteIDContextKey, types.SiteIDNone))
 			w := httptest.NewRecorder()
 
@@ -177,12 +181,12 @@ func TestHandleUpdate(t *testing.T) {
 		})
 
 		t.Run("Valid Token, Specific Email Wrong", func(t *testing.T) {
-			validator := func(ctx context.Context, idToken string, audience string) (*idtoken.Payload, error) {
-				return &idtoken.Payload{Claims: map[string]interface{}{"email": "wrong@example.com"}}, nil
-			}
-			srv := newAuthServer("my-audience", "right@example.com", nil, validator)
+			oidcSrv, priv := setupOIDCTest(t)
+			defer oidcSrv.Close()
+			srv := newAuthServer("my-audience", "right@example.com", nil, oidcSrv.URL)
 			req := httptest.NewRequest("GET", "/api/update", nil)
-			req.Header.Set("Authorization", "Bearer valid-token")
+			validToken := generateTestToken(t, oidcSrv.URL, priv, "wrong@example.com", "wrong")
+			req.Header.Set("Authorization", "Bearer "+validToken)
 			w := httptest.NewRecorder()
 
 			handler := srv.authMiddleware(http.HandlerFunc(srv.handleUpdate))
@@ -191,25 +195,27 @@ func TestHandleUpdate(t *testing.T) {
 		})
 
 		t.Run("Valid Token, Correct Specific Email", func(t *testing.T) {
-			validator := func(ctx context.Context, idToken string, audience string) (*idtoken.Payload, error) {
-				return &idtoken.Payload{Claims: map[string]interface{}{"email": "right@example.com"}}, nil
-			}
-			srv := newAuthServer("my-audience", "right@example.com", nil, validator)
+			oidcSrv, priv := setupOIDCTest(t)
+			defer oidcSrv.Close()
+			srv := newAuthServer("my-audience", "right@example.com", nil, oidcSrv.URL)
 			req := httptest.NewRequest("GET", "/api/update", nil)
-			req.Header.Set("Authorization", "Bearer valid-token")
+			validToken := generateTestToken(t, oidcSrv.URL, priv, "right@example.com", "right")
+			req.Header.Set("Authorization", "Bearer "+validToken)
 			req = req.WithContext(context.WithValue(req.Context(), siteIDContextKey, types.SiteIDNone))
 			w := httptest.NewRecorder()
 
 			srv.handleUpdate(w, req)
 			assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 		})
+
 		t.Run("Admin Email Fallback - Invalid", func(t *testing.T) {
-			validator := func(ctx context.Context, idToken string, audience string) (*idtoken.Payload, error) {
-				return &idtoken.Payload{Claims: map[string]interface{}{"email": "notadmin@example.com"}}, nil
-			}
-			srv := newAuthServer("my-audience", "", []string{"admin@example.com"}, validator)
+			oidcSrv, priv := setupOIDCTest(t)
+			defer oidcSrv.Close()
+			srv := newAuthServer("my-audience", "", []string{"admin@example.com"}, oidcSrv.URL)
 			req := httptest.NewRequest("GET", "/api/update", nil)
-			req.Header.Set("Authorization", "Bearer valid-token")
+			// Token for a different user
+			validToken := generateTestToken(t, oidcSrv.URL, priv, "notadmin@example.com", "notadmin")
+			req.Header.Set("Authorization", "Bearer "+validToken)
 			w := httptest.NewRecorder()
 
 			handler := srv.authMiddleware(http.HandlerFunc(srv.handleUpdate))
@@ -218,7 +224,15 @@ func TestHandleUpdate(t *testing.T) {
 		})
 
 		t.Run("No Auth Configured - Blocked", func(t *testing.T) {
-			srv := newAuthServer("my-audience", "", nil, nil)
+			// In the new model, we always have oidcVerifiers if we use newAuthServer
+			// so we just test with a bad token or missing header (already tested)
+			// But for completeness, we can create a server with empty verifiers
+			srv := &Server{
+				storage:    mockS,
+				utilities:  utility.NewMap(),
+				ess:        ess.NewMap(),
+				singleSite: true,
+			}
 			req := httptest.NewRequest("GET", "/api/update", nil)
 			w := httptest.NewRecorder()
 

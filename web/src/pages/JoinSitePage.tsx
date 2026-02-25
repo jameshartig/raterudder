@@ -12,6 +12,7 @@ interface JoinPageProps {
 const JoinPage: React.FC<JoinPageProps> = ({ onJoinSuccess }) => {
     const [siteID, setSiteID] = useState('');
     const [inviteCode, setInviteCode] = useState('');
+    const [name, setName] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
 
@@ -19,14 +20,14 @@ const JoinPage: React.FC<JoinPageProps> = ({ onJoinSuccess }) => {
         e.preventDefault();
         setError('');
 
-        if (!siteID.trim() || !inviteCode.trim()) {
-            setError('Both fields are required.');
+        if (!siteID.trim() || !inviteCode.trim() || !name.trim()) {
+            setError('All fields are required.');
             return;
         }
 
         setLoading(true);
         try {
-            await joinSite(siteID.trim(), inviteCode.trim());
+            await joinSite(siteID.trim(), inviteCode.trim(), name.trim());
             onJoinSuccess();
         } catch (err: any) {
             setError(err.message || 'Failed to join site');
@@ -36,8 +37,8 @@ const JoinPage: React.FC<JoinPageProps> = ({ onJoinSuccess }) => {
     };
 
     return (
-        <div className="join-page">
-            <div className="join-card">
+        <div className="auth-page">
+            <div className="auth-card">
                 <h1>Join a Site</h1>
                 <p>Enter the Site ID and Invite Code provided by the site owner.</p>
 
@@ -52,6 +53,20 @@ const JoinPage: React.FC<JoinPageProps> = ({ onJoinSuccess }) => {
                             placeholder="e.g. my-home"
                             autoComplete="off"
                             disabled={loading}
+                        />
+                    </Field.Root>
+
+                    <Field.Root className="join-field">
+                        <Field.Label htmlFor="join-name">Site Name</Field.Label>
+                        <Input
+                            id="join-name"
+                            type="text"
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            placeholder="e.g. My Home"
+                            autoComplete="off"
+                            disabled={loading}
+                            required
                         />
                     </Field.Root>
 
@@ -79,14 +94,14 @@ const JoinPage: React.FC<JoinPageProps> = ({ onJoinSuccess }) => {
                     <button
                         type="submit"
                         className="join-submit"
-                        disabled={loading || !siteID.trim() || !inviteCode.trim()}
+                        disabled={loading || !siteID.trim() || !inviteCode.trim() || !name.trim()}
                     >
                         {loading ? 'Joining…' : 'Join Site'}
                     </button>
                 </form>
             </div>
 
-            <p className="join-alternate-link">
+            <p className="auth-alternate-link">
                 <Link href="/new-site">Don't have a site yet? Create one.</Link>
             </p>
         </div>

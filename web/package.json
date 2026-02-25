@@ -15,6 +15,7 @@
     "@base-ui/react": "^1.2.0",
     "@react-oauth/google": "^0.13.4",
     "react": "^19.2.0",
+    "react-apple-signin-auth": "^1.1.2",
     "react-dom": "^19.2.0",
     "recharts": "^3.7.0",
     "wouter": "^3.9.0"

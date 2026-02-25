@@ -5,23 +5,23 @@ import './LandingPage.css';
 
 const LandingPage: React.FC = () => {
     // Fake data for charts
-    const solarData = Array.from({ length: 24 }, (_, i) => ({
+    const solarData = React.useMemo(() => Array.from({ length: 24 }, (_, i) => ({
         name: `${i}:00`,
         uv: i >= 6 && i <= 18 ? Math.sin((i - 6) * Math.PI / 12) * 7 : 0,
-    }));
+    })), []);
 
-    const usageData = Array.from({ length: 24 }, (_, i) => ({
+    const usageData = React.useMemo(() => Array.from({ length: 24 }, (_, i) => ({
         name: `${i}:00`,
         usage: .5 + Math.random() + (i > 17 ? 1 : 0),
-    }));
+    })), []);
 
-    const batteryData = Array.from({ length: 24 }, (_, i) => {
+    const batteryData = React.useMemo(() => Array.from({ length: 24 }, (_, i) => {
         let level = 20;
         if (i > 8 && i < 16) level = 80 + Math.random() * 10;
         else if (i >= 16) level = 90 - (i - 16) * 5;
         else level = 40 - i * 2;
         return { name: `${i}:00`, level: Math.max(0, level) };
-    });
+    }), []);
 
     const [isMobile, setIsMobile] = React.useState(window.innerWidth < 768);
 
