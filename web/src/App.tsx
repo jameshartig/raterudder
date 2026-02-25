@@ -12,7 +12,8 @@ import Dashboard from './pages/Dashboard';
 import Settings from './pages/Settings';
 import Forecast from './pages/Forecast';
 import LoginPage from './pages/LoginPage';
-import JoinPage from './pages/JoinPage';
+import JoinSitePage from './pages/JoinSitePage';
+import NewSitePage from './pages/NewSitePage';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
 
@@ -200,10 +201,20 @@ function AppContent() {
                             </Route>
 
                             {/* Protected Routes */}
+                            <Route path="/new-site">
+                                <ProtectedRoute loggedIn={loggedIn} loading={loading}>
+                                    <NewSitePage onJoinSuccess={() => checkStatus(true)} />
+                                </ProtectedRoute>
+                            </Route>
+                            <Route path="/join-site">
+                                <ProtectedRoute loggedIn={loggedIn} loading={loading}>
+                                    <JoinSitePage onJoinSuccess={() => checkStatus(true)} />
+                                </ProtectedRoute>
+                            </Route>
                             <Route path="/dashboard">
                                 <ProtectedRoute loggedIn={loggedIn} loading={loading}>
                                     {!effectiveSiteID && effectiveSiteIDs.length === 0 ? (
-                                        <JoinPage onJoinSuccess={() => checkStatus(true)} />
+                                        <NewSitePage onJoinSuccess={() => checkStatus(true)} />
                                     ) : (
                                         <Dashboard siteID={effectiveSiteID} />
                                     )}
@@ -212,7 +223,7 @@ function AppContent() {
                             <Route path="/forecast">
                                 <ProtectedRoute loggedIn={loggedIn} loading={loading}>
                                     {!effectiveSiteID && effectiveSiteIDs.length === 0 ? (
-                                        <JoinPage onJoinSuccess={() => checkStatus(true)} />
+                                        <NewSitePage onJoinSuccess={() => checkStatus(true)} />
                                     ) : (
                                         <Forecast siteID={effectiveSiteID} />
                                     )}
@@ -221,7 +232,7 @@ function AppContent() {
                             <Route path="/settings">
                                 <ProtectedRoute loggedIn={loggedIn} loading={loading}>
                                     {!effectiveSiteID && effectiveSiteIDs.length === 0 ? (
-                                        <JoinPage onJoinSuccess={() => checkStatus(true)} />
+                                        <NewSitePage onJoinSuccess={() => checkStatus(true)} />
                                     ) : (
                                         <Settings siteID={effectiveSiteID} />
                                     )}

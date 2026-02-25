@@ -12,6 +12,7 @@ import (
 
 var (
 	ErrUserNotFound = errors.New("user not found")
+	ErrSiteNotFound = errors.New("site not found")
 )
 
 // Database defines the interface for persisting data and retrieving settings.
@@ -38,6 +39,7 @@ type Database interface {
 	// Sites & Users
 	GetSite(ctx context.Context, siteID string) (types.Site, error)
 	ListSites(ctx context.Context) ([]types.Site, error)
+	CreateSite(ctx context.Context, siteID string, site types.Site) error
 	UpdateSite(ctx context.Context, siteID string, site types.Site) error
 	GetUser(ctx context.Context, userID string) (types.User, error)
 	CreateUser(ctx context.Context, user types.User) error

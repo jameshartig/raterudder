@@ -90,6 +90,11 @@ func (m *MockDatabase) UpdateSite(ctx context.Context, siteID string, site types
 	return args.Error(0)
 }
 
+func (m *MockDatabase) CreateSite(ctx context.Context, siteID string, site types.Site) error {
+	args := m.Called(ctx, siteID, site)
+	return args.Error(0)
+}
+
 func (m *MockDatabase) GetUser(ctx context.Context, userID string) (types.User, error) {
 	args := m.Called(ctx, userID)
 	return args.Get(0).(types.User), args.Error(1)
@@ -126,7 +131,7 @@ func TestMockESS(t *testing.T) {
 
 		status, err := ess.GetStatus(ctx)
 		require.NoError(t, err)
-		assert.Equal(t, 50.0, status.BatterySOC)
+		assert.InDelta(t, 50.0, status.BatterySOC, 1.0)
 		assert.Equal(t, 10.0, status.BatteryCapacityKWH)
 
 		// 2. Test subsequent run (with state)

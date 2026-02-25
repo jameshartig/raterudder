@@ -1,10 +1,13 @@
 package server
 
 import (
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/raterudder/raterudder/pkg/log"
 	"github.com/raterudder/raterudder/pkg/types"
@@ -17,6 +20,8 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		InviteCode string `json:"inviteCode"`
 		JoinSiteID string `json:"joinSiteID"`
+		Create     bool   `json:"create"`
+		CreateName string `json:"createName"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		// since we failed to read, don't return JSON error
@@ -24,8 +29,18 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.InviteCode == "" || req.JoinSiteID == "" {
+	if !req.Create && (req.InviteCode == "" || req.JoinSiteID == "") {
 		writeJSONError(w, "inviteCode and joinSiteID are required", http.StatusBadRequest)
+		return
+	}
+
+	if req.Create && req.CreateName == "" {
+		writeJSONError(w, "createName is required when creating a site", http.StatusBadRequest)
+		return
+	}
+
+	if req.Create && s.singleSite {
+		writeJSONError(w, "cannot create a new site in single-site mode", http.StatusForbidden)
 		return
 	}
 
@@ -45,19 +60,61 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up the site
-	site, err := s.storage.GetSite(ctx, req.JoinSiteID)
-	if err != nil {
-		log.Ctx(ctx).WarnContext(ctx, "join: site not found", slog.String("siteID", req.JoinSiteID), slog.Any("error", err))
-		writeJSONError(w, "site not found", http.StatusNotFound)
-		return
-	}
+	var site types.Site
+	if req.Create {
+		// Generate Site ID
+		prefix := ""
+		if idx := strings.Index(email, "@"); idx != -1 {
+			prefix = email[:idx]
+		}
 
-	// Validate invite code using constant-time comparison
-	if site.InviteCode == "" || subtle.ConstantTimeCompare([]byte(req.InviteCode), []byte(site.InviteCode)) != 1 {
-		log.Ctx(ctx).WarnContext(ctx, "join: invalid invite code", slog.String("siteID", req.JoinSiteID), slog.String("userID", userID))
-		writeJSONError(w, "invalid invite code", http.StatusForbidden)
-		return
+		usePrefix := false
+		if len(prefix) >= 8 {
+			if _, err := s.storage.GetSite(ctx, prefix); err != nil {
+				// doesn't exist, we can use it
+				usePrefix = true
+			}
+		}
+
+		if usePrefix {
+			req.JoinSiteID = prefix
+		} else {
+			b := make([]byte, 8)
+			if _, err := rand.Read(b); err != nil {
+				writeJSONError(w, "failed to generate site id", http.StatusInternalServerError)
+				return
+			}
+			req.JoinSiteID = hex.EncodeToString(b)
+		}
+
+		site = types.Site{
+			ID:          req.JoinSiteID,
+			Name:        req.CreateName,
+			InviteCode:  "",
+			Permissions: []types.SitePermissions{},
+		}
+
+		if err := s.storage.CreateSite(ctx, req.JoinSiteID, site); err != nil {
+			log.Ctx(ctx).ErrorContext(ctx, "join: failed to create site", slog.String("siteID", req.JoinSiteID), slog.Any("error", err))
+			writeJSONError(w, "failed to create site", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// Look up the site
+		var err error
+		site, err = s.storage.GetSite(ctx, req.JoinSiteID)
+		if err != nil {
+			log.Ctx(ctx).WarnContext(ctx, "join: site not found", slog.String("siteID", req.JoinSiteID), slog.Any("error", err))
+			writeJSONError(w, "site not found", http.StatusNotFound)
+			return
+		}
+
+		// Validate invite code using constant-time comparison
+		if site.InviteCode == "" || subtle.ConstantTimeCompare([]byte(req.InviteCode), []byte(site.InviteCode)) != 1 {
+			log.Ctx(ctx).WarnContext(ctx, "join: invalid invite code", slog.String("siteID", req.JoinSiteID), slog.String("userID", userID))
+			writeJSONError(w, "invalid invite code", http.StatusForbidden)
+			return
+		}
 	}
 
 	// Check if user already has permission on this site

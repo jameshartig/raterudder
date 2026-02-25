@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import JoinPage from './JoinPage';
+import JoinSitePage from './JoinSitePage';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as api from '../api';
 
@@ -7,7 +7,7 @@ vi.mock('../api', () => ({
     joinSite: vi.fn(),
 }));
 
-describe('JoinPage Component', () => {
+describe('JoinSitePage Component', () => {
     const mockOnJoinSuccess = vi.fn();
 
     beforeEach(() => {
@@ -15,7 +15,7 @@ describe('JoinPage Component', () => {
     });
 
     it('renders the form', () => {
-        render(<JoinPage onJoinSuccess={mockOnJoinSuccess} />);
+        render(<JoinSitePage onJoinSuccess={mockOnJoinSuccess} />);
 
         expect(screen.getByText('Join a Site')).toBeInTheDocument();
         expect(screen.getByLabelText('Site ID')).toBeInTheDocument();
@@ -24,14 +24,14 @@ describe('JoinPage Component', () => {
     });
 
     it('disables submit when fields are empty', () => {
-        render(<JoinPage onJoinSuccess={mockOnJoinSuccess} />);
+        render(<JoinSitePage onJoinSuccess={mockOnJoinSuccess} />);
 
         const button = screen.getByRole('button', { name: 'Join Site' });
         expect(button).toBeDisabled();
     });
 
     it('enables submit when both fields are filled', () => {
-        render(<JoinPage onJoinSuccess={mockOnJoinSuccess} />);
+        render(<JoinSitePage onJoinSuccess={mockOnJoinSuccess} />);
 
         fireEvent.change(screen.getByLabelText('Site ID'), { target: { value: 'my-site' } });
         fireEvent.change(screen.getByLabelText('Invite Code'), { target: { value: 'secret' } });
@@ -43,7 +43,7 @@ describe('JoinPage Component', () => {
     it('calls joinSite and onJoinSuccess on successful submit', async () => {
         (api.joinSite as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 
-        render(<JoinPage onJoinSuccess={mockOnJoinSuccess} />);
+        render(<JoinSitePage onJoinSuccess={mockOnJoinSuccess} />);
 
         fireEvent.change(screen.getByLabelText('Site ID'), { target: { value: 'my-site' } });
         fireEvent.change(screen.getByLabelText('Invite Code'), { target: { value: 'secret' } });
@@ -58,7 +58,7 @@ describe('JoinPage Component', () => {
     it('displays error on failed submit', async () => {
         (api.joinSite as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('invalid invite code'));
 
-        render(<JoinPage onJoinSuccess={mockOnJoinSuccess} />);
+        render(<JoinSitePage onJoinSuccess={mockOnJoinSuccess} />);
 
         fireEvent.change(screen.getByLabelText('Site ID'), { target: { value: 'my-site' } });
         fireEvent.change(screen.getByLabelText('Invite Code'), { target: { value: 'wrong' } });
@@ -73,7 +73,7 @@ describe('JoinPage Component', () => {
     it('trims whitespace from inputs', async () => {
         (api.joinSite as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 
-        render(<JoinPage onJoinSuccess={mockOnJoinSuccess} />);
+        render(<JoinSitePage onJoinSuccess={mockOnJoinSuccess} />);
 
         fireEvent.change(screen.getByLabelText('Site ID'), { target: { value: '  my-site  ' } });
         fireEvent.change(screen.getByLabelText('Invite Code'), { target: { value: '  secret  ' } });

@@ -341,7 +341,7 @@ func (f *FirestoreProvider) GetSite(ctx context.Context, siteID string) (types.S
 	doc, err := f.client.Collection("sites").Doc(siteID).Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
-			return types.Site{}, fmt.Errorf("site not found: %s", siteID)
+			return types.Site{}, fmt.Errorf("%w: %s", ErrSiteNotFound, siteID)
 		}
 		return types.Site{}, fmt.Errorf("failed to get site %s: %w", siteID, err)
 	}
@@ -542,6 +542,23 @@ func (f *FirestoreProvider) GetLatestPriceHistoryTime(ctx context.Context, siteI
 	}
 
 	return ts, version, nil
+}
+
+// CreateSite creates a new site document in the "sites" collection.
+// It fails atomically if a document with the same siteID already exists,
+// preventing race conditions.
+func (f *FirestoreProvider) CreateSite(ctx context.Context, siteID string, site types.Site) error {
+	siteJSON, err := json.Marshal(site)
+	if err != nil {
+		return fmt.Errorf("failed to marshal site %s: %w", siteID, err)
+	}
+	_, err = f.client.Collection("sites").Doc(siteID).Create(ctx, map[string]interface{}{
+		"json": string(siteJSON),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create site %s: %w", siteID, err)
+	}
+	return nil
 }
 
 // UpdateSite updates a site document in the "sites" collection.

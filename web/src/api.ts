@@ -353,6 +353,19 @@ export const joinSite = async (joinSiteID: string, inviteCode: string): Promise<
     }
 };
 
+export const createSite = async (createName: string): Promise<void> => {
+    const response = await fetch('/api/join', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ create: true, createName }),
+    });
+    if (!response.ok) {
+        throw new Error(await extractError(response, 'Failed to create site'));
+    }
+};
+
 export const fetchUtilities = async (siteID?: string): Promise<UtilityProviderInfo[]> => {
     const query = new URLSearchParams();
     if (siteID) {

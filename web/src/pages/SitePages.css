@@ -1,12 +1,15 @@
 /* ============================================
-   Join Page
+   Shared Site Page Styles
+   Used by JoinPage and NewSitePage
    ============================================ */
 
 .join-page {
   display: flex;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
   min-height: 50vh;
+  gap: 1.25rem;
 }
 
 .join-card {
@@ -126,5 +129,21 @@
 }
 
 .join-consent a:hover {
+  text-decoration: underline;
+}
+
+.join-alternate-link {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.join-alternate-link a {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.join-alternate-link a:hover {
   text-decoration: underline;
 }

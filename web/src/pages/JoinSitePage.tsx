@@ -3,7 +3,7 @@ import { Link } from 'wouter';
 import { joinSite } from '../api';
 import { Field } from '@base-ui/react/field';
 import { Input } from '@base-ui/react/input';
-import './JoinPage.css';
+import './SitePages.css';
 
 interface JoinPageProps {
     onJoinSuccess: () => void;
@@ -85,6 +85,10 @@ const JoinPage: React.FC<JoinPageProps> = ({ onJoinSuccess }) => {
                     </button>
                 </form>
             </div>
+
+            <p className="join-alternate-link">
+                <Link href="/new-site">Don't have a site yet? Create one.</Link>
+            </p>
         </div>
     );
 };

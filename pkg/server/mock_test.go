@@ -118,6 +118,11 @@ func (m *mockStorage) UpdateSite(ctx context.Context, siteID string, site types.
 	return args.Error(0)
 }
 
+func (m *mockStorage) CreateSite(ctx context.Context, siteID string, site types.Site) error {
+	args := m.Called(ctx, siteID, site)
+	return args.Error(0)
+}
+
 func (m *mockStorage) CreateUser(ctx context.Context, user types.User) error {
 	args := m.Called(ctx, user)
 	return args.Error(0)
