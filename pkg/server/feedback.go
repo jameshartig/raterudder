@@ -13,12 +13,12 @@ import (
 type feedbackRequest struct {
 	Sentiment string `json:"sentiment"`
 	Comment   string `json:"comment"`
-	SiteID    string `json:"siteID"`
 }
 
 func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := s.getUser(r)
+	siteID := s.getSiteID(r)
 
 	var req feedbackRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -31,31 +31,11 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, "sentiment is required", http.StatusBadRequest)
 		return
 	}
-	if req.SiteID == "" {
-		writeJSONError(w, "siteID is required", http.StatusBadRequest)
-		return
-	}
-
-	// Make sure user actually belongs to this site
-	if !s.bypassAuth {
-		belongs := false
-		for _, site := range s.getAllUserSites(r) {
-			if site.ID == req.SiteID {
-				belongs = true
-				break
-			}
-		}
-		if !belongs && !s.isAdmin(user) {
-			log.Ctx(ctx).WarnContext(ctx, "unauthorized access to site for feedback", slog.String("email", user.Email), slog.String("siteID", req.SiteID))
-			writeJSONError(w, "forbidden", http.StatusForbidden)
-			return
-		}
-	}
 
 	feedback := types.Feedback{
 		Sentiment: req.Sentiment,
 		Comment:   req.Comment,
-		SiteID:    req.SiteID,
+		SiteID:    siteID,
 		UserID:    user.ID,
 		Time:      time.Now().UTC(),
 	}

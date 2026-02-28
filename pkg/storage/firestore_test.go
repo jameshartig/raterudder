@@ -14,7 +14,10 @@ import (
 
 func TestFirestoreProvider(t *testing.T) {
 	// Check if emulator is running or configured
-	os.Setenv("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8080")
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		// We assume it is running on localhost:8087 as per task
+		os.Setenv("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8087")
+	}
 
 	// Use a test project ID
 	projectID := "test-project-id"
