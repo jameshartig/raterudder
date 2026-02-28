@@ -7,19 +7,6 @@ import (
 	"github.com/raterudder/raterudder/pkg/types"
 )
 
-func touUtilityInfo() types.UtilityProviderInfo {
-	return types.UtilityProviderInfo{
-		ID:   "tou",
-		Name: "Time of Use",
-		Rates: []types.UtilityRateInfo{
-			{
-				ID:   "tou_custom",
-				Name: "Custom TOU",
-			},
-		},
-	}
-}
-
 // BaseTOU is a generic TOU utility provider that relies on the
 // AdditionalFeesPeriods from Settings to calculate the current and future
 // prices. Base prices are 0.

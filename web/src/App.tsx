@@ -15,7 +15,6 @@ import LoginPage from './pages/LoginPage';
 import JoinSitePage from './pages/JoinSitePage';
 import NewSitePage from './pages/NewSitePage';
 import BetaInterstitialPage from './pages/BetaInterstitialPage';
-import AdminPage from './pages/AdminPage';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
 
@@ -246,11 +245,6 @@ function AppContent() {
                                     ) : (
                                         <Settings siteID={effectiveSiteID} />
                                     )}
-                                </ProtectedRoute>
-                            </Route>
-                            <Route path="/admin">
-                                <ProtectedRoute loggedIn={loggedIn} loading={loading}>
-                                    <AdminPage />
                                 </ProtectedRoute>
                             </Route>
 

@@ -44,11 +44,6 @@ func (s *SiteFees) ApplySettings(ctx context.Context, settings types.Settings) e
 				return err
 			}
 			s.periods = fees
-		case "tou":
-			if settings.UtilityRate != "tou_custom" {
-				return fmt.Errorf("invalid utility rate for TOU: %s", settings.UtilityRate)
-			}
-			s.periods = nil
 		default:
 			return fmt.Errorf("invalid utility provider: %s", settings.UtilityProvider)
 		}

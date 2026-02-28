@@ -12,11 +12,10 @@ import (
 
 func TestTOUUtility(t *testing.T) {
 	ctx := context.Background()
-	m := Configured()
 
 	settings := types.Settings{
-		UtilityProvider: "tou",
-		UtilityRate:     "tou_custom",
+		UtilityProvider: "any",
+		UtilityRate:     "any",
 		AdditionalFeesPeriods: []types.UtilityAdditionalFeesPeriod{
 			{
 				UtilityPeriod: types.UtilityPeriod{
@@ -37,7 +36,12 @@ func TestTOUUtility(t *testing.T) {
 		},
 	}
 
-	u, err := m.Site(ctx, "site1", settings)
+	base := &BaseTOU{}
+	u := &SiteFees{
+		base:   base,
+		siteID: "site1",
+	}
+	err := u.ApplySettings(ctx, settings)
 	require.NoError(t, err)
 
 	// Test GetCurrentPrice

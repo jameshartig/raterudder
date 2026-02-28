@@ -102,19 +102,6 @@ func (m *Map) Site(ctx context.Context, siteID string, settings types.Settings) 
 		}
 		m.utilities[settings.UtilityProvider] = u
 		return u, nil
-	case "tou":
-		if settings.UtilityRate != "tou_custom" {
-			return nil, fmt.Errorf("unsupported tou rate: %s", settings.UtilityRate)
-		}
-		u := &SiteFees{
-			base:   m.baseTOU,
-			siteID: siteID,
-		}
-		if err := u.ApplySettings(ctx, settings); err != nil {
-			return nil, err
-		}
-		m.utilities[settings.UtilityProvider] = u
-		return u, nil
 	default:
 		return nil, fmt.Errorf("unknown utility provider: %s", settings.UtilityProvider)
 	}
@@ -132,7 +119,6 @@ func (m *Map) ListUtilities() []types.UtilityProviderInfo {
 	return []types.UtilityProviderInfo{
 		comEdUtilityInfo(),
 		amerenUtilityInfo(),
-		touUtilityInfo(),
 	}
 }
 

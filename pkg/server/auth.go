@@ -26,7 +26,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		allowNoLogin := r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/join"
 		ignoreUserNotFound := r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/join" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/logout"
 		isUpdatePath := r.URL.Path == "/api/update" || r.URL.Path == "/api/updateSites"
-		ignoreSiteID := r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/logout" || r.URL.Path == "/api/list/sites"
+		ignoreSiteID := r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/logout"
 
 		// extract SiteID
 		var siteID string
@@ -169,6 +169,13 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 						}
 					} else {
 						userFound = true
+						// TODO: remove this after migration is done
+						if len(user.Sites) == 0 && len(user.SiteIDs) > 0 {
+							user.Sites = make([]types.UserSite, len(user.SiteIDs))
+							for i, siteID := range user.SiteIDs {
+								user.Sites[i] = types.UserSite{ID: siteID}
+							}
+						}
 						// fill in default siteID if the user only has 1 site
 						if siteID == "" && len(user.Sites) == 1 {
 							siteID = user.Sites[0].ID
