@@ -185,6 +185,21 @@ export interface UtilityRateInfo {
   options: UtilityRateOption[];
 }
 
+export interface UtilityPeriod {
+    start: string;
+    end: string;
+    hourStart: number;
+    hourEnd: number;
+    daysOfTheWeek?: number[];
+    location: string;
+}
+
+export interface UtilityAdditionalFeesPeriod extends UtilityPeriod {
+    dollarsPerKWH: number;
+    gridAdditional: boolean;
+    description: string;
+}
+
 export interface ESSCredential {
   field: string;
   name: string;
@@ -207,6 +222,7 @@ export interface Settings {
     alwaysChargeUnderDollarsPerKWH: number;
     minArbitrageDifferenceDollarsPerKWH: number;
     minDeficitPriceDifferenceDollarsPerKWH: number;
+    additionalFeesPeriods?: UtilityAdditionalFeesPeriod[];
     minBatterySOC: number;
     ignoreHourUsageOverMultiple: number;
     gridChargeBatteries: boolean;
