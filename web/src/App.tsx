@@ -18,6 +18,7 @@ import BetaInterstitialPage from './pages/BetaInterstitialPage';
 import AdminPage from './pages/AdminPage';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
+import FeedbackButton from './components/FeedbackButton';
 
 // Protected Route Wrapper
 const ProtectedRoute = ({ children, loggedIn, loading }: { children: React.ReactElement, loggedIn: boolean, loading: boolean }) => {
@@ -261,6 +262,8 @@ function AppContent() {
                         </Switch>
                     )}
                 </main>
+
+                {loggedIn && <FeedbackButton siteID={effectiveSiteID} />}
 
                 <Footer />
             </div>

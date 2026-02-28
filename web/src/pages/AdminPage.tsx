@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { listSites } from '../api';
-import type { AdminSite } from '../api';
+import { listSites, listFeedback } from '../api';
+import type { AdminSite, Feedback } from '../api';
 import { Link } from 'wouter';
 import { Separator } from '@base-ui/react/separator';
 import './AdminPage.css';
 
 const AdminPage: React.FC = () => {
     const [sites, setSites] = useState<AdminSite[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [feedbacks, setFeedbacks] = useState<Feedback[]>([]);
+    const [loadingSites, setLoadingSites] = useState(true);
+    const [loadingFeedback, setLoadingFeedback] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [feedbackError, setFeedbackError] = useState<string | null>(null);
 
     useEffect(() => {
         listSites()
@@ -21,12 +24,25 @@ const AdminPage: React.FC = () => {
                 setError(err.message || 'Failed to list sites. Ensure you have admin access.');
             })
             .finally(() => {
-                setLoading(false);
+                setLoadingSites(false);
+            });
+
+        listFeedback()
+            .then((data) => {
+                setFeedbacks(data || []);
+                setFeedbackError(null);
+            })
+            .catch((err) => {
+                console.error("Failed to list feedback:", err);
+                setFeedbackError(err.message || 'Failed to list feedback.');
+            })
+            .finally(() => {
+                setLoadingFeedback(false);
             });
     }, []);
 
-    if (loading) {
-        return <div className="loading-screen">Loading Sites...</div>;
+    if (loadingSites || loadingFeedback) {
+        return <div className="loading-screen">Loading Admin Data...</div>;
     }
 
     if (error) {
@@ -63,6 +79,35 @@ const AdminPage: React.FC = () => {
                     </div>
                 ))}
             </div>
+
+            <div className="admin-header" style={{ marginTop: '2rem' }}>
+                <h1>Feedback</h1>
+            </div>
+
+            <Separator className="admin-separator" />
+
+            {feedbackError ? (
+                <div className="admin-error">{feedbackError}</div>
+            ) : (
+                <div className="admin-list">
+                    {feedbacks.map((fb, idx) => (
+                        <div key={idx} className="card admin-site-card">
+                            <div className="admin-site-info">
+                                <h3 className="admin-site-id">
+                                    {fb.sentiment === 'happy' ? '😀' : fb.sentiment === 'sad' ? '😞' : '😐'} {fb.siteID}
+                                </h3>
+                                <div className="admin-site-action">
+                                    User: {fb.userID}<br/>
+                                    Time: {new Date(fb.time).toLocaleString()}<br/>
+                                    Comment: {fb.comment}
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                    {feedbacks.length === 0 && <div>No feedback yet.</div>}
+                </div>
+            )}
+
         </div>
     );
 };

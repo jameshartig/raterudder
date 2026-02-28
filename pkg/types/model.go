@@ -163,3 +163,12 @@ const (
 	SolarModeAny      SolarMode = 2
 	// TODO: SolarModeExportOnly SolarMode = 2
 )
+
+// Feedback represents a user feedback submission.
+type Feedback struct {
+	Sentiment string    `json:"sentiment"`
+	Comment   string    `json:"comment"`
+	SiteID    string    `json:"siteID"`
+	UserID    string    `json:"userID"`
+	Time      time.Time `json:"time"`
+}

@@ -645,6 +645,63 @@ func (f *FirestoreProvider) UpdateUser(ctx context.Context, user types.User) err
 	return nil
 }
 
+// InsertFeedback inserts a new feedback document into the "feedback" collection.
+func (f *FirestoreProvider) InsertFeedback(ctx context.Context, feedback types.Feedback) error {
+	feedbackJSON, err := json.Marshal(feedback)
+	if err != nil {
+		return fmt.Errorf("failed to marshal feedback: %w", err)
+	}
+
+	docID := fmt.Sprintf("%s_%s", feedback.Time.UTC().Format(time.RFC3339), feedback.SiteID)
+	_, err = f.client.Collection("feedback").Doc(docID).Set(ctx, map[string]interface{}{
+		"json":      string(feedbackJSON),
+		"timestamp": feedback.Time,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to insert feedback: %w", err)
+	}
+	return nil
+}
+
+// ListFeedback retrieves feedback from the "feedback" collection.
+func (f *FirestoreProvider) ListFeedback(ctx context.Context) ([]types.Feedback, error) {
+	iter := f.client.Collection("feedback").
+		OrderBy("timestamp", firestore.Desc).
+		Limit(50).
+		Documents(ctx)
+	defer iter.Stop()
+
+	var feedbacks []types.Feedback
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("error iterating feedback: %w", err)
+		}
+
+		val, err := doc.DataAt("json")
+		if err != nil {
+			log.Ctx(ctx).WarnContext(ctx, "feedback doc missing json", slog.String("docID", doc.Ref.ID))
+			continue
+		}
+		jsonStr, ok := val.(string)
+		if !ok {
+			log.Ctx(ctx).WarnContext(ctx, "feedback doc json not string", slog.String("docID", doc.Ref.ID))
+			continue
+		}
+
+		var feedback types.Feedback
+		if err := json.Unmarshal([]byte(jsonStr), &feedback); err != nil {
+			log.Ctx(ctx).WarnContext(ctx, "failed to unmarshal feedback", slog.String("docID", doc.Ref.ID), slog.Any("err", err))
+			continue
+		}
+		feedbacks = append(feedbacks, feedback)
+	}
+	return feedbacks, nil
+}
+
 // UpdateESSMockState saves the internal state of a mock ESS provider.
 
 func (f *FirestoreProvider) UpdateESSMockState(ctx context.Context, siteID string, state types.ESSMockState) error {

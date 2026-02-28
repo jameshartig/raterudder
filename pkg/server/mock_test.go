@@ -82,6 +82,7 @@ func (m *mockESS) GetEnergyHistory(ctx context.Context, start, end time.Time) ([
 	}
 	return nil, nil
 }
+
 func (m *mockESS) Validate() error {
 	args := m.Called()
 	return args.Error(0)

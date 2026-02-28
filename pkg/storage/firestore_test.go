@@ -14,8 +14,7 @@ import (
 
 func TestFirestoreProvider(t *testing.T) {
 	// Check if emulator is running or configured
-	// We assume it is running on localhost:8087 as per task
-	os.Setenv("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8087")
+	os.Setenv("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8080")
 
 	// Use a test project ID
 	projectID := "test-project-id"
@@ -362,5 +361,48 @@ func TestFirestoreProvider(t *testing.T) {
 			_, err := f.GetUser(ctx, "nonexistent@test.com")
 			assert.ErrorContains(t, err, "user not found")
 		})
+	})
+
+	t.Run("Feedback", func(t *testing.T) {
+		now := time.Now().Truncate(time.Second).UTC()
+		f1 := types.Feedback{
+			Sentiment: "happy",
+			Comment:   "Works great!",
+			SiteID:    "site1",
+			UserID:    "user1",
+			Time:      now,
+		}
+		f2 := types.Feedback{
+			Sentiment: "sad",
+			Comment:   "Broke today.",
+			SiteID:    "site2",
+			UserID:    "user2",
+			Time:      now.Add(1 * time.Minute),
+		}
+
+		require.NoError(t, f.InsertFeedback(ctx, f1))
+		require.NoError(t, f.InsertFeedback(ctx, f2))
+
+		feedbacks, err := f.ListFeedback(ctx)
+		require.NoError(t, err)
+
+		// Feedbacks should be ordered by timestamp descending, so f2 then f1
+		var foundF1, foundF2 bool
+		for _, fb := range feedbacks {
+			if fb.SiteID == "site1" && fb.Sentiment == "happy" && fb.Comment == "Works great!" {
+				foundF1 = true
+			}
+			if fb.SiteID == "site2" && fb.Sentiment == "sad" && fb.Comment == "Broke today." {
+				foundF2 = true
+			}
+		}
+
+		assert.True(t, foundF1, "did not find f1 in feedback list")
+		assert.True(t, foundF2, "did not find f2 in feedback list")
+
+		if len(feedbacks) >= 2 {
+			// Ensure ordered by descending timestamp
+			assert.True(t, feedbacks[0].Time.After(feedbacks[1].Time) || feedbacks[0].Time.Equal(feedbacks[1].Time))
+		}
 	})
 }

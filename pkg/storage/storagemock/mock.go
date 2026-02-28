@@ -150,6 +150,19 @@ func (m *MockDatabase) GetLatestAction(ctx context.Context, siteID string) (*typ
 	return val.(*types.Action), args.Error(1)
 }
 
+func (m *MockDatabase) InsertFeedback(ctx context.Context, feedback types.Feedback) error {
+	args := m.Called(ctx, feedback)
+	return args.Error(0)
+}
+
+func (m *MockDatabase) ListFeedback(ctx context.Context) ([]types.Feedback, error) {
+	args := m.Called(ctx)
+	if len(args) > 0 {
+		return args.Get(0).([]types.Feedback), args.Error(1)
+	}
+	return nil, nil
+}
+
 func (m *MockDatabase) Close() error {
 	args := m.Called()
 	return args.Error(0)

@@ -1,11 +1,12 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import AdminPage from './AdminPage';
-import { listSites } from '../api';
+import { listSites, listFeedback } from '../api';
 import { Router } from 'wouter';
 
 vi.mock('../api', () => ({
     listSites: vi.fn(),
+    listFeedback: vi.fn(),
 }));
 
 describe('AdminPage', () => {
@@ -15,12 +16,14 @@ describe('AdminPage', () => {
 
     it('renders loading state initially', () => {
         vi.mocked(listSites).mockReturnValue(new Promise(() => {}));
+        vi.mocked(listFeedback).mockReturnValue(new Promise(() => {}));
         render(<AdminPage />);
-        expect(screen.getByText('Loading Sites...')).toBeInTheDocument();
+        expect(screen.getByText('Loading Admin Data...')).toBeInTheDocument();
     });
 
     it('renders error state on API failure', async () => {
         vi.mocked(listSites).mockRejectedValue(new Error('Forbidden Access'));
+        vi.mocked(listFeedback).mockResolvedValue([]);
         render(<AdminPage />);
 
         await waitFor(() => {
@@ -41,6 +44,11 @@ describe('AdminPage', () => {
             { id: 'site2' }
         ];
         vi.mocked(listSites).mockResolvedValue(mockSites);
+
+        const mockFeedback: any = [
+            { siteID: 'site1', sentiment: 'happy', comment: 'good job', time: '2025-01-01T12:00:00Z', userID: 'u1' }
+        ];
+        vi.mocked(listFeedback).mockResolvedValue(mockFeedback);
 
         render(<Router><AdminPage /></Router>);
 

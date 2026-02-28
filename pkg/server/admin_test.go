@@ -100,3 +100,78 @@ func TestAdminListSites(t *testing.T) {
 	})
 
 }
+
+func TestAdminListFeedback(t *testing.T) {
+	mockStorage := &mockStorage{}
+	feedbacks := []types.Feedback{
+		{SiteID: "site1", Sentiment: "happy", Comment: "test"},
+		{SiteID: "site2", Sentiment: "sad", Comment: "test2"},
+	}
+	mockStorage.On("ListFeedback", mock.Anything).Return(feedbacks, nil)
+
+	// Setup OIDC for tests
+	srvUrl, priv := setupOIDCTest(t)
+	defer srvUrl.Close()
+	provider, err := oidc.NewProvider(context.Background(), srvUrl.URL)
+	require.NoError(t, err)
+
+	validAdminToken := generateTestToken(t, srvUrl.URL, priv, "admin@example.com", "admin1")
+	validUserToken := generateTestToken(t, srvUrl.URL, priv, "user@example.com", "user1")
+
+	srv := &Server{
+		storage:     mockStorage,
+		adminEmails: []string{"admin@example.com"},
+		oidcAudiences: map[string]string{
+			"google": "test-audience",
+		},
+		oidcVerifiers: map[string]tokenVerifier{
+			"google": provider.Verifier(&oidc.Config{ClientID: "test-audience"}).Verify,
+		},
+	}
+	handler := srv.setupHandler()
+
+	t.Run("Unauthorized - Not Admin", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/list/feedback", nil)
+		req.AddCookie(&http.Cookie{Name: authTokenCookie, Value: validUserToken})
+
+		mockStorage.On("GetUser", mock.Anything, "user1").Return(types.User{
+			ID:    "user1",
+			Email: "user@example.com",
+		}, nil).Once()
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusForbidden, rr.Code)
+
+		var resp map[string]string
+		err := json.NewDecoder(rr.Body).Decode(&resp)
+		require.NoError(t, err)
+		assert.Equal(t, "forbidden", resp["error"])
+	})
+
+	t.Run("Authorized - Admin", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/list/feedback", nil)
+		req.AddCookie(&http.Cookie{Name: authTokenCookie, Value: validAdminToken})
+
+		mockStorage.On("GetUser", mock.Anything, "admin1").Return(types.User{
+			ID:    "admin1",
+			Email: "admin@example.com",
+		}, nil).Once()
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code)
+
+		var fb []types.Feedback
+		err := json.NewDecoder(rr.Body).Decode(&fb)
+		require.NoError(t, err)
+
+		if assert.Len(t, fb, 2) {
+			assert.Equal(t, "site1", fb[0].SiteID)
+			assert.Equal(t, "site2", fb[1].SiteID)
+		}
+	})
+
+}

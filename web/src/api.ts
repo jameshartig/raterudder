@@ -120,6 +120,37 @@ export const fetchActions = async (start: Date, end: Date, siteID?: string): Pro
     return response.json();
 };
 
+export interface Feedback {
+    sentiment: string;
+    comment: string;
+    siteID: string;
+    userID: string;
+    time: string;
+}
+
+export const submitFeedback = async (sentiment: string, comment: string, siteID: string): Promise<void> => {
+    const response = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ sentiment, comment, siteID }),
+    });
+    if (!response.ok) {
+        throw new Error(await extractError(response, 'Failed to submit feedback'));
+    }
+};
+
+export const listFeedback = async (): Promise<Feedback[]> => {
+    const response = await fetch('/api/list/feedback', {
+        method: 'GET',
+    });
+    if (!response.ok) {
+        throw new Error(await extractError(response, 'Failed to list feedback'));
+    }
+    return response.json();
+};
+
 export interface SavingsStats {
     timestamp: string;
     cost: number;
