@@ -436,6 +436,11 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                             onChange={(e) => handleChange('alwaysChargeUnderDollarsPerKWH', parseFloat(e.target.value))}
                         />
                         <Field.Description>Charge battery whenever the price is less than this threshold.</Field.Description>
+                        {settings.alwaysChargeUnderDollarsPerKWH > 0 && (
+                            <div className="warning-notice">
+                                You should never really be forcing charging from the grid when you have to pay money.
+                            </div>
+                        )}
                     </Field.Root>
 
                     <Field.Root className="form-group compact">
