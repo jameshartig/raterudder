@@ -247,6 +247,9 @@ describe('App & Settings', () => {
         await navigateToSettings();
 
         // Check fields are accessible
+        const advancedTrigger = screen.getByText('Advanced Tuning Settings');
+        fireEvent.click(advancedTrigger);
+
         const priceInput = await screen.findByLabelText(/Always Charge Below/i);
         fireEvent.change(priceInput, { target: { value: '0.10' } });
 
