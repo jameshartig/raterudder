@@ -254,6 +254,10 @@ export interface Settings {
     hasCredentials: {
         [key: string]: boolean;
     };
+    essAuthStatus?: {
+        consecutiveFailures: number;
+        lastAttempt: string;
+    };
 }
 
 export interface FranklinCredentials {
