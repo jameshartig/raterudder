@@ -427,18 +427,6 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                     </Field.Root>
 
                     <Field.Root className="form-group compact">
-                        <Field.Label htmlFor="alwaysChargeUnder">Always Charge Below ($/kWh)</Field.Label>
-                        <Input
-                            id="alwaysChargeUnder"
-                            type="number"
-                            step="0.01"
-                            value={settings.alwaysChargeUnderDollarsPerKWH}
-                            onChange={(e) => handleChange('alwaysChargeUnderDollarsPerKWH', parseFloat(e.target.value))}
-                        />
-                        <Field.Description>Charge battery whenever the price is less than this threshold.</Field.Description>
-                    </Field.Root>
-
-                    <Field.Root className="form-group compact">
                         <Field.Label htmlFor="minArbitrage">Min Arbitrage Profit ($/kWh)</Field.Label>
                         <Input
                             id="minArbitrage"
@@ -531,6 +519,23 @@ const Settings = ({ siteID }: { siteID?: string }) => {
                         </Field.Root>
 
 
+
+                        <Field.Root className="form-group">
+                            <Field.Label htmlFor="alwaysChargeUnder">Always Charge Below ($/kWh)</Field.Label>
+                            <Input
+                                id="alwaysChargeUnder"
+                                type="number"
+                                step="0.01"
+                                value={settings.alwaysChargeUnderDollarsPerKWH}
+                                onChange={(e) => handleChange('alwaysChargeUnderDollarsPerKWH', parseFloat(e.target.value))}
+                            />
+                            <Field.Description>Charge battery whenever the price is less than this threshold.</Field.Description>
+                            {settings.alwaysChargeUnderDollarsPerKWH > 0.05 && (
+                                <div className="warning-notice">
+                                    Make sure you want to always charge below this price.
+                                </div>
+                            )}
+                        </Field.Root>
 
                         <div className="section-header">
                             <h3>Solar Settings</h3>
