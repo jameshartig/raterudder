@@ -755,16 +755,49 @@ func TestHandleLogout(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest("POST", "/api/auth/logout", nil)
-		// Set a cookie to be cleared. We don't care if it's invalid since we just want to test logout flow
+		// Set a cookie to be cleared.
 		req.AddCookie(&http.Cookie{
 			Name:  authTokenCookie,
 			Value: "some-token",
 		})
 
-		// The logout path should just clear it even if invalid, but authMiddleware fails if a token is present and invalid unless it's on the allowNoLogin list... Wait, `/api/auth/logout` is NOT on `allowNoLogin`? Let's look at `auth.go`
-		// It's on ignoreUserNotFound, ignoreSiteID.
 		// Let's use bypassAuth to skip token validation or provide a valid token.
 		serverWithMocks.bypassAuth = true
+
+		handler := serverWithMocks.authMiddleware(http.HandlerFunc(serverWithMocks.handleLogout))
+		handler.ServeHTTP(w, req)
+
+		result := w.Result()
+		assert.Equal(t, http.StatusOK, result.StatusCode)
+
+		cookies := result.Cookies()
+		found := false
+		for _, c := range cookies {
+			if c.Name == authTokenCookie {
+				found = true
+				assert.Equal(t, "", c.Value)
+			}
+		}
+		assert.True(t, found, "auth cookie should be cleared")
+		assert.True(t, mocks.AssertExpectations(t))
+	})
+
+	t.Run("Through Auth Middleware - Invalid Token", func(t *testing.T) {
+		mocks := new(mockStorage)
+		serverWithMocks := &Server{
+			storage: mocks,
+		}
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/api/auth/logout", nil)
+		// Set a cookie to be cleared with an invalid token.
+		req.AddCookie(&http.Cookie{
+			Name:  authTokenCookie,
+			Value: "invalid-token",
+		})
+
+		// DO NOT use bypassAuth here, we want to ensure the allowNoLogin list correctly lets it through
+		serverWithMocks.bypassAuth = false
 
 		handler := serverWithMocks.authMiddleware(http.HandlerFunc(serverWithMocks.handleLogout))
 		handler.ServeHTTP(w, req)
