@@ -70,7 +70,7 @@ func configuredAmerenSmart() *BaseAmerenSmart {
 func (c *BaseAmerenSmart) GetCurrentPrice(ctx context.Context) (types.Price, error) {
 	log.Ctx(ctx).DebugContext(ctx, "getting current ameren price")
 
-	now := time.Now().In(etLocation)
+	now := time.Now()
 
 	// Ameren PSP uses day-ahead prices for real-time without true-ups
 	prices, err := c.getPricesForDate(ctx, now)
