@@ -26,7 +26,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		allowNoLogin := r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/join"
 		ignoreUserNotFound := r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/join" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/logout"
 		isUpdatePath := r.URL.Path == "/api/update" || r.URL.Path == "/api/updateSites"
-		ignoreSiteID := r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/logout" || r.URL.Path == "/api/list/sites"
+		ignoreSiteID := r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/logout" || r.URL.Path == "/api/list/sites" || r.URL.Path == "/api/list/feedback"
 
 		// extract SiteID
 		var siteID string
